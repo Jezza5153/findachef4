@@ -1,14 +1,17 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { ShieldAlert, ListChecks, UserCog, FileWarning, UserCheck, FileSearch2, BadgeCheck, MessageCircleWarning, Gavel, Award } from 'lucide-react';
+import { ShieldAlert, ListChecks, UserCog, FileWarning, UserCheck, FileSearch2, BadgeCheck, MessageCircleWarning, Gavel, Award, MessageSquare, LockKeyhole, CalendarX2, UsersRound } from 'lucide-react';
 
 export default function AdminPage() {
   const adminFeatures = [
-    { name: "View All Chefs & Customers", icon: <UserCog className="mr-2 h-5 w-5 text-primary" /> },
+    { name: "View All Chefs & Customers", icon: <UsersRound className="mr-2 h-5 w-5 text-primary" /> },
     { name: "Manually approve new chef accounts", description: "Check resume quality, no contact info, professionalism.", icon: <UserCheck className="mr-2 h-5 w-5 text-blue-600" /> },
     { name: "Approve Menus", icon: <ListChecks className="mr-2 h-5 w-5 text-green-600" /> },
     { name: "Review GPT resume parse accuracy", description: "Fix any resume to tag mismatches.", icon: <FileSearch2 className="mr-2 h-5 w-5 text-indigo-600" /> },
     { name: "Check for fake tags or exaggerated bios", description: "Ensure chef tags match their real experience.", icon: <BadgeCheck className="mr-2 h-5 w-5 text-teal-600" /> },
+    { name: "Monitor active chat threads", description: "Look for off-platform contact attempts or spam.", icon: <MessageSquare className="mr-2 h-5 w-5 text-sky-600" /> },
+    { name: "Oversee Automated Chat Locking", description: "Review and manage locks on conversation threads after bookings.", icon: <LockKeyhole className="mr-2 h-5 w-5 text-slate-600" /> },
+    { name: "Manage Expired Requests Queue", description: "Handle stale or unresolved customer posts from The Wall.", icon: <CalendarX2 className="mr-2 h-5 w-5 text-orange-600" /> },
     { name: "Review Flagged Messages (Contact Info, Unsafe Content)", icon: <MessageCircleWarning className="mr-2 h-5 w-5 text-destructive" /> },
     { name: "Manage Violations (Warnings, Penalties, Bans)", icon: <Gavel className="mr-2 h-5 w-5 text-red-700" /> },
     { name: "Moderate Reports (Chef Misconduct, Customer Fraud)", icon: <FileWarning className="mr-2 h-5 w-5 text-destructive" /> },
@@ -38,7 +41,7 @@ export default function AdminPage() {
           <div>
             <h3 className="text-xl font-semibold mb-3">Intended Features & Responsibilities:</h3>
             <ul className="space-y-3">
-              {adminFeatures.map((feature) => (
+              {adminFeatures.sort((a, b) => a.name.localeCompare(b.name)).map((feature) => (
                 <li key={feature.name} className="flex items-start text-foreground/90 p-3 bg-muted/30 rounded-md shadow-sm">
                   <div className="flex-shrink-0">{feature.icon}</div>
                   <div>
