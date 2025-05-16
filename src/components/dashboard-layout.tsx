@@ -16,11 +16,23 @@ import {
 } from '@/components/ui/sidebar';
 import { Logo } from '@/components/shared/logo';
 import { Button } from './ui/button';
-import { LogOut, User, Bell } from 'lucide-react';
+import { LogOut, User, Bell, LifeBuoy } from 'lucide-react';
 import Link from 'next/link';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
 import { usePathname, useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+
 
 export interface NavItem {
   href: string;
@@ -65,6 +77,9 @@ export function DashboardLayout({
       localStorage.removeItem('isLoggedIn');
       localStorage.removeItem('userName');
       localStorage.removeItem('userRole');
+      // Clear chef-specific flags on any logout for safety
+      localStorage.removeItem('isChefApproved');
+      localStorage.removeItem('isChefSubscribed');
     }
     toast({
       title: 'Logged Out',
@@ -127,17 +142,46 @@ export function DashboardLayout({
           <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b bg-background/80 backdrop-blur px-6">
             <div className="flex items-center">
               <SidebarTrigger className="md:hidden mr-2" />
-              {/* Breadcrumbs or Page Title can go here */}
               <h1 className="text-xl font-semibold text-foreground">
                 {navItems.find(item => item.matchExact ? pathname === item.href : pathname.startsWith(item.href))?.label || 'Dashboard'}
               </h1>
             </div>
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="ghost" size="icon" aria-label="Emergency Help">
+                    <LifeBuoy className="h-5 w-5 text-destructive" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Emergency Assistance</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      For immediate, life-threatening emergencies, please contact your local emergency services (e.g., 000, 911, 112).
+                      <br /><br />
+                      For urgent platform issues regarding an ongoing or imminent event, please:
+                      <ul className="list-disc list-inside mt-2">
+                        <li>Email: <a href="mailto:support@findachef.com" className="underline">support@findachef.com</a></li>
+                        <li>Call: (XXX) XXX-XXXX (Replace with actual number)</li>
+                      </ul>
+                      Please have your Event ID and relevant details ready.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogAction>Understood</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+
               <Button variant="ghost" size="icon" aria-label="Notifications">
                 <Bell className="h-5 w-5" />
               </Button>
-              <Button variant="ghost" size="icon" aria-label="Profile">
-                <User className="h-5 w-5" /> {/* This could link to the specific profile page */}
+
+              {/* Determine profile link based on role */}
+              <Button variant="ghost" size="icon" aria-label="Profile" asChild>
+                <Link href={currentUserRole?.toLowerCase() === 'chef' ? '/chef/dashboard/profile' : '/customer/dashboard/profile'}>
+                    <User className="h-5 w-5" />
+                </Link>
               </Button>
               <Button variant="ghost" size="icon" aria-label="Logout" onClick={handleLogout}>
                 <LogOut className="h-5 w-5" />
@@ -152,3 +196,5 @@ export function DashboardLayout({
     </SidebarProvider>
   );
 }
+
+    

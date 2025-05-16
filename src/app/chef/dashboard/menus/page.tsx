@@ -24,7 +24,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { MenuCard } from '@/components/menu-card';
 import type { Menu, Option } from '@/types';
 import { useToast } from '@/hooks/use-toast';
-import { PlusCircle, Edit, Trash2, NotebookText, Eye, EyeOff, ShoppingCart, AlertCircle } from 'lucide-react';
+import { PlusCircle, Edit, Trash2, NotebookText, Eye, EyeOff, ShoppingCart, AlertCircle, Sparkles } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 
@@ -122,8 +122,8 @@ export default function MenuManagementPage() {
         id: String(Date.now()),
         ...data,
         dietaryInfo: data.dietaryInfo || [],
-        chefId: 'chef123', 
-        chefName: 'Chef Julia' 
+        chefId: 'chef123',
+        chefName: 'Chef Julia'
       };
       setMenus([...menus, newMenu]);
       toast({ title: 'Menu Created', description: `"${data.title}" has been successfully created.` });
@@ -139,7 +139,7 @@ export default function MenuManagementPage() {
       setEditingMenu(menuToEdit);
       form.reset({
         ...menuToEdit,
-        pricePerHead: menuToEdit.pricePerHead || 0, 
+        pricePerHead: menuToEdit.pricePerHead || 0,
         pax: menuToEdit.pax || undefined,
         costPrice: menuToEdit.costPrice || undefined,
         imageUrl: menuToEdit.imageUrl || '',
@@ -163,7 +163,7 @@ export default function MenuManagementPage() {
       description: `Items for "${menu?.title}" have been notionally added to your shopping list.`,
     });
   };
-  
+
   const openNewMenuDialog = () => {
     form.reset({
       title: '',
@@ -178,6 +178,16 @@ export default function MenuManagementPage() {
     });
     setEditingMenu(null);
     setIsDialogOpen(true);
+  };
+
+  const handleAiAssist = () => {
+    const currentDescription = form.getValues("description");
+    toast({
+      title: "AI Menu Assist (Coming Soon!)",
+      description: "This feature will help you generate or enhance your menu descriptions, suggest dietary swaps, and provide cost insights. Current description: " + (currentDescription || "empty"),
+      duration: 7000,
+    });
+    // Future: Open a dialog, call a Genkit flow, update form.setValue("description", aiResponse)
   };
 
 
@@ -219,6 +229,10 @@ export default function MenuManagementPage() {
                   </FormItem>
                 )}
               />
+               <Button type="button" variant="outline" onClick={handleAiAssist} size="sm" className="w-full">
+                <Sparkles className="mr-2 h-4 w-4" /> Get AI Suggestions for Description
+              </Button>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <FormField
                   control={form.control}
@@ -320,7 +334,7 @@ export default function MenuManagementPage() {
                     <div className="space-y-0.5">
                       <FormLabel className="text-base">Publish Menu</FormLabel>
                       <FormDescription>
-                        Make this menu visible to customers. 
+                        Make this menu visible to customers.
                         {!isChefSubscribed && " Publishing public menus requires an active subscription."}
                       </FormDescription>
                     </div>
@@ -330,8 +344,14 @@ export default function MenuManagementPage() {
                           <FormControl>
                             <Switch
                               checked={field.value}
-                              onCheckedChange={field.onChange}
-                              disabled={!isChefSubscribed && field.value}
+                              onCheckedChange={(checked) => {
+                                if (checked && !isChefSubscribed) {
+                                    toast({ title: "Subscription Required", description: "You need an active subscription to publish menus publicly.", variant: "destructive"});
+                                    return;
+                                }
+                                field.onChange(checked);
+                              }}
+                              disabled={!isChefSubscribed && field.value} //This makes it hard to unpublish if subscription lapses
                               aria-readonly={!isChefSubscribed && field.value}
                             />
                           </FormControl>
@@ -367,7 +387,7 @@ export default function MenuManagementPage() {
               onDelete={handleDelete}
               onAddToShoppingList={handleAddToShoppingList}
               isChefOwner={true}
-              showChefDetails={false} 
+              showChefDetails={false}
             />
           ))}
         </div>
@@ -387,3 +407,5 @@ export default function MenuManagementPage() {
     </div>
   );
 }
+
+    

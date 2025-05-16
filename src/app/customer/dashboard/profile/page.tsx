@@ -17,13 +17,24 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useState, useEffect } from 'react';
 import type { CustomerProfile as CustomerProfileType } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
-import { UserCircle, Save, UploadCloud, MapPin, Utensils, ChefHat, CookingPot, Blender, Microwave, Grill, ShoppingBasket, AlertCircle } from 'lucide-react'; // Added more icons
-import { Home, Thermometer, Coffee, Box } from 'lucide-react'; // Oven can be Home or Thermometer, Mixer can be Coffee(blender like) or Box for stand mixer
+import { UserCircle, Save, UploadCloud, MapPin, Utensils, ChefHat, CookingPot, Blender, Microwave, Grill, ShoppingBasket, AlertCircle, Trash2 } from 'lucide-react';
+import { Home, Thermometer, Coffee, Box } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 
 // Mock current customer data
@@ -101,7 +112,7 @@ export default function CustomerProfilePage() {
       defaultExtraComments: customerData.defaultExtraComments || '',
     },
   });
-  
+
   useEffect(() => {
     form.reset({
       name: customerData.name,
@@ -132,7 +143,7 @@ export default function CustomerProfilePage() {
       reader.readAsDataURL(file);
     } else {
       form.setValue('profilePicture', undefined);
-      setProfilePicturePreview(customerData.profilePictureUrl || null); 
+      setProfilePicturePreview(customerData.profilePictureUrl || null);
     }
   };
 
@@ -156,12 +167,23 @@ export default function CustomerProfilePage() {
       defaultDietaryNotes: data.defaultDietaryNotes,
       defaultExtraComments: data.defaultExtraComments,
     }));
-    
+
     toast({
       title: 'Profile Updated Successfully',
       description: 'Your customer profile has been saved.',
     });
   };
+
+  const handleDeleteAccount = () => {
+    // Simulate account deletion request
+    toast({
+      title: 'Account Deletion Request Submitted',
+      description: 'Your request to delete your account has been received and will be processed according to our data retention policy.',
+      duration: 7000,
+    });
+     // In a real app, this would trigger backend processes and likely log the user out.
+  };
+
 
   return (
     <div className="space-y-8">
@@ -175,31 +197,31 @@ export default function CustomerProfilePage() {
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
-              
+
               {/* Basic Information Section */}
               <section>
                 <h3 className="text-xl font-semibold mb-4 border-b pb-2">Basic Information</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
                   <div className="md:col-span-1 flex flex-col items-center">
-                    <Image 
-                      src={profilePicturePreview || "https://placehold.co/150x150.png"} 
-                      alt={customerData.name} 
-                      width={150} 
-                      height={150} 
+                    <Image
+                      src={profilePicturePreview || "https://placehold.co/150x150.png"}
+                      alt={customerData.name}
+                      width={150}
+                      height={150}
                       className="rounded-full object-cover shadow-md mb-4"
                       data-ai-hint="person avatar"
                     />
                     <FormField
                         control={form.control}
                         name="profilePicture"
-                        render={({ field }) => ( 
+                        render={({ field }) => (
                           <FormItem className="w-full">
                             <FormControl>
                               <>
-                                <Input 
-                                  type="file" 
+                                <Input
+                                  type="file"
                                   accept="image/jpeg,image/png,image/webp"
-                                  onChange={handleProfilePictureChange} 
+                                  onChange={handleProfilePictureChange}
                                   className="hidden"
                                   id="customerProfilePictureUpdate"
                                 />
@@ -424,10 +446,33 @@ export default function CustomerProfilePage() {
                 </div>
               </section>
 
-              <div className="pt-6 border-t">
+              <div className="pt-6 border-t flex justify-between items-center">
                 <Button type="submit" size="lg" className="w-full sm:w-auto">
                   <Save className="mr-2 h-5 w-5" /> Save Profile
                 </Button>
+
+                 <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive" size="lg" className="w-full sm:w-auto mt-4 sm:mt-0">
+                      <Trash2 className="mr-2 h-4 w-4" /> Delete My Account
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This action cannot be undone. This will permanently delete your account and remove your data from our servers.
+                        You will receive an email confirmation once the process is complete, as per our data retention policy.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={handleDeleteAccount}>
+                        Yes, delete my account
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
             </form>
           </Form>

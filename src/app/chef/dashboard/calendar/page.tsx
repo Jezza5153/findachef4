@@ -6,10 +6,20 @@ import { Calendar } from '@/components/ui/calendar';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import type { CalendarEvent } from '@/types';
-import { format, parseISO, isSameDay } from 'date-fns';
-import { CalendarDays, Users, DollarSign, MapPin, Utensils, Info, Sun, ChefHat, AlertTriangle, CheckCircle, Clock, QrCode } from 'lucide-react';
+import { format, parseISO, isSameDay, startOfDay } from 'date-fns';
+import { CalendarDays, Users, DollarSign, MapPin, Utensils, Info, Sun, ChefHat, AlertTriangle, CheckCircle, Clock, QrCode, Ban } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 // Mock initial events
 const MOCK_EVENTS: CalendarEvent[] = [
@@ -53,7 +63,7 @@ const MOCK_EVENTS: CalendarEvent[] = [
     location: 'Community Park Pavilion',
     notes: 'Nut-free. Include a small birthday cake.',
     status: 'Pending',
-    coChefs: [], 
+    coChefs: [],
   },
    {
     id: 'event4',
@@ -71,7 +81,7 @@ const MOCK_EVENTS: CalendarEvent[] = [
   },
   {
     id: 'event5',
-    date: new Date(new Date().setDate(new Date().getDate() + 12)).toISOString().split('T')[0], 
+    date: new Date(new Date().setDate(new Date().getDate() + 12)).toISOString().split('T')[0],
     title: 'Cancelled Event Example',
     customerName: 'Old Booking',
     pax: 10,
@@ -87,12 +97,18 @@ const MOCK_EVENTS: CalendarEvent[] = [
 export default function ChefCalendarPage() {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
   const [allEvents, setAllEvents] = useState<CalendarEvent[]>(MOCK_EVENTS); // In a real app, fetch this
+  const [blockedDates, setBlockedDates] = useState<Date[]>([]);
   const { toast } = useToast();
 
   const eventsForSelectedDate = useMemo(() => {
     if (!selectedDate) return [];
     return allEvents.filter(event => isSameDay(parseISO(event.date), selectedDate));
   }, [selectedDate, allEvents]);
+
+  const isDateBlocked = useMemo(() => {
+    if (!selectedDate) return false;
+    return blockedDates.some(blockedDate => isSameDay(blockedDate, selectedDate));
+  }, [selectedDate, blockedDates]);
 
   const getStatusBadgeVariant = (status: CalendarEvent['status']) => {
     switch (status) {
@@ -111,7 +127,7 @@ export default function ChefCalendarPage() {
       default: return <Info className="h-4 w-4 mr-1.5" />;
     }
   };
-  
+
   const handleGoogleCalendarSync = () => {
     toast({
         title: "Google Calendar Sync",
@@ -127,6 +143,22 @@ export default function ChefCalendarPage() {
     });
   };
 
+  const handleToggleBlockDate = () => {
+    if (!selectedDate) {
+      toast({ title: "No Date Selected", description: "Please select a date to block or unblock.", variant: "destructive" });
+      return;
+    }
+    const dateToToggle = startOfDay(selectedDate);
+    const alreadyBlocked = blockedDates.some(d => isSameDay(d, dateToToggle));
+
+    if (alreadyBlocked) {
+      setBlockedDates(prev => prev.filter(d => !isSameDay(d, dateToToggle)));
+      toast({ title: "Date Unblocked", description: `${format(dateToToggle, 'PPP')} is now available.` });
+    } else {
+      setBlockedDates(prev => [...prev, dateToToggle]);
+      toast({ title: "Date Blocked", description: `${format(dateToToggle, 'PPP')} is now marked as unavailable.` });
+    }
+  };
 
   return (
     <div className="space-y-8">
@@ -134,7 +166,7 @@ export default function ChefCalendarPage() {
         <h1 className="text-3xl font-bold flex items-center">
           <CalendarDays className="mr-3 h-8 w-8 text-primary" /> My Calendar & Events
         </h1>
-        <Button 
+        <Button
             onClick={handleGoogleCalendarSync}
             variant="outline"
             className="text-sm"
@@ -149,21 +181,39 @@ export default function ChefCalendarPage() {
           <CardHeader>
             <CardTitle>Select a Date</CardTitle>
           </CardHeader>
-          <CardContent className="flex justify-center">
+          <CardContent className="flex flex-col items-center">
             <Calendar
               mode="single"
               selected={selectedDate}
               onSelect={setSelectedDate}
               className="rounded-md border"
               disabled={(date) => date < new Date(new Date().setDate(new Date().getDate() - 365)) || date > new Date(new Date().setDate(new Date().getDate() + 365*2))} // Example: 1 year past, 2 years future
+              modifiers={{ blocked: blockedDates }}
+              modifiersStyles={{ blocked: { textDecoration: 'line-through', color: 'hsl(var(--destructive))', opacity: 0.6 } }}
             />
+            <Button onClick={handleToggleBlockDate} variant="outline" className="mt-4 w-full">
+              <Ban className="mr-2 h-4 w-4"/>
+              {isDateBlocked ? "Unblock Selected Date" : "Block Selected Date"}
+            </Button>
           </CardContent>
         </Card>
 
         <div className="lg:col-span-2 space-y-6">
           <h2 className="text-2xl font-semibold">
             Events for: {selectedDate ? format(selectedDate, 'PPP') : 'No date selected'}
+            {isDateBlocked && <Badge variant="destructive" className="ml-2">Date Blocked</Badge>}
           </h2>
+
+          {isDateBlocked && eventsForSelectedDate.length === 0 && (
+            <Card className="text-center py-12 border-dashed border-destructive/50">
+              <CardContent>
+                <Ban className="mx-auto h-12 w-12 text-destructive mb-3" data-ai-hint="blocked warning" />
+                <p className="text-destructive font-semibold">This date is marked as unavailable.</p>
+                <p className="text-xs text-muted-foreground mt-1">You will not receive new requests for this date.</p>
+              </CardContent>
+            </Card>
+          )}
+
           {eventsForSelectedDate.length > 0 ? (
             eventsForSelectedDate.map(event => (
               <Card key={event.id} className={`shadow-lg border-l-4 ${
@@ -202,7 +252,7 @@ export default function ChefCalendarPage() {
                       </div>
                     )}
                   </div>
-                  
+
                   {event.notes && (
                     <div>
                       <h4 className="text-xs font-semibold text-muted-foreground mb-0.5 flex items-center"><Info className="h-3 w-3 mr-1"/>Notes:</h4>
@@ -218,7 +268,7 @@ export default function ChefCalendarPage() {
                       </div>
                     </div>
                   )}
-                  
+
                   {event.weather && (
                      <div className="text-xs text-muted-foreground flex items-center"><Sun className="h-3 w-3 mr-1 text-yellow-500" data-ai-hint="sun weather" />Weather: {event.weather}</div>
                   )}
@@ -248,16 +298,20 @@ export default function ChefCalendarPage() {
               </Card>
             ))
           ) : (
-            <Card className="text-center py-12 border-dashed">
-              <CardContent>
-                <CalendarDays className="mx-auto h-12 w-12 text-muted-foreground mb-3" data-ai-hint="calendar empty" />
-                <p className="text-muted-foreground">No events scheduled for this day.</p>
-                <p className="text-xs text-muted-foreground mt-1">Select another date to view events.</p>
-              </CardContent>
-            </Card>
+            !isDateBlocked && (
+                <Card className="text-center py-12 border-dashed">
+                <CardContent>
+                    <CalendarDays className="mx-auto h-12 w-12 text-muted-foreground mb-3" data-ai-hint="calendar empty" />
+                    <p className="text-muted-foreground">No events scheduled for this day.</p>
+                    <p className="text-xs text-muted-foreground mt-1">Select another date to view events.</p>
+                </CardContent>
+                </Card>
+            )
           )}
         </div>
       </div>
     </div>
   );
 }
+
+    

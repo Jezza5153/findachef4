@@ -21,7 +21,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import { format } from 'date-fns';
+import { format, addDays, startOfDay } from 'date-fns';
 import { CalendarIcon, FileText, Send, DollarSign, Users, Utensils, Info } from 'lucide-react';
 import type { CustomerRequest } from '@/types';
 import Link from 'next/link';
@@ -31,7 +31,10 @@ const requestFormSchema = z.object({
   budget: z.coerce.number().min(0, { message: 'Budget must be a positive number.' }),
   cuisinePreference: z.string().min(2, { message: 'Cuisine preference is required.' }),
   pax: z.coerce.number().min(1, { message: 'Number of guests must be at least 1.' }),
-  eventDate: z.date({ required_error: 'Event date is required.' }),
+  eventDate: z.date({ required_error: 'Event date is required.' })
+    .refine(date => date >= addDays(startOfDay(new Date()), 2), {
+      message: 'Event date must be at least 48 hours from now.'
+    }),
   notes: z.string().optional(),
 });
 
@@ -137,7 +140,7 @@ export default function NewRequestPage() {
                   </FormItem>
                 )}
               />
-            
+
               <FormField
                 control={form.control}
                 name="eventDate"
@@ -169,14 +172,14 @@ export default function NewRequestPage() {
                           selected={field.value}
                           onSelect={field.onChange}
                           disabled={(date) =>
-                            date < new Date(new Date().setDate(new Date().getDate() -1)) // Disable past dates
+                            date < addDays(startOfDay(new Date()), 2) // Disable dates less than 48 hours from now
                           }
                           initialFocus
                         />
                       </PopoverContent>
                     </Popover>
                     <FormDescription className="text-xs">
-                        Please note that cancellation policies apply. Review our <Link href="/terms#cancellation" className="underline hover:text-primary">Terms of Service</Link> for details.
+                        Minimum 48 hours notice required. Please note that cancellation policies apply. Review our <Link href="/terms#cancellation" className="underline hover:text-primary">Terms of Service</Link> for details.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -210,3 +213,5 @@ export default function NewRequestPage() {
     </div>
   );
 }
+
+    

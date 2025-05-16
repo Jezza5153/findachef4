@@ -16,13 +16,24 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { ResumeUploadForm } from '@/components/resume-upload-form';
 import { useState, useEffect } from 'react';
 import type { ParseResumeOutput, ChefProfile as ChefProfileType } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
-import { UserCircle, Save, Edit3, Briefcase, Lightbulb, UploadCloud, GraduationCap, Images, Download } from 'lucide-react';
+import { UserCircle, Save, Edit3, Briefcase, Lightbulb, UploadCloud, GraduationCap, Images, Download, Trash2 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 // Mock current chef data
 const currentChefData: ChefProfileType = {
@@ -85,7 +96,7 @@ export default function ChefProfilePage() {
       portfolioItem2Caption: chefData.portfolioItem2Caption || '',
     },
   });
-  
+
   useEffect(() => {
     form.reset({
       name: chefData.name,
@@ -134,7 +145,7 @@ export default function ChefProfilePage() {
       reader.readAsDataURL(file);
     } else {
       form.setValue('profilePicture', undefined);
-      setProfilePicturePreview(chefData.profilePictureUrl || null); 
+      setProfilePicturePreview(chefData.profilePictureUrl || null);
     }
   };
 
@@ -151,17 +162,27 @@ export default function ChefProfilePage() {
       experienceSummary: data.experienceSummary,
       education: data.education,
       skills: data.skills?.split(',').map(s => s.trim()),
-      profilePictureUrl: profilePicturePreview || prev.profilePictureUrl, 
+      profilePictureUrl: profilePicturePreview || prev.profilePictureUrl,
       portfolioItem1Url: data.portfolioItem1Url,
       portfolioItem1Caption: data.portfolioItem1Caption,
       portfolioItem2Url: data.portfolioItem2Url,
       portfolioItem2Caption: data.portfolioItem2Caption,
     }));
-    
+
     toast({
       title: 'Profile Updated Successfully',
       description: 'Your chef profile has been saved.',
     });
+  };
+
+  const handleDeleteAccount = () => {
+    // Simulate account deletion request
+    toast({
+      title: 'Account Deletion Request Submitted',
+      description: 'Your request to delete your account has been received and will be processed according to our data retention policy.',
+      duration: 7000,
+    });
+    // In a real app, this would trigger backend processes and likely log the user out.
   };
 
   return (
@@ -176,25 +197,25 @@ export default function ChefProfilePage() {
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
                 <div className="md:col-span-1 flex flex-col items-center">
-                  <Image 
-                    src={profilePicturePreview || "https://placehold.co/150x150.png"} 
-                    alt={chefData.name} 
-                    width={150} 
-                    height={150} 
+                  <Image
+                    src={profilePicturePreview || "https://placehold.co/150x150.png"}
+                    alt={chefData.name}
+                    width={150}
+                    height={150}
                     className="rounded-full object-cover shadow-md mb-4"
                     data-ai-hint="chef portrait"
                   />
                    <FormField
                       control={form.control}
                       name="profilePicture"
-                      render={({ field }) => ( 
+                      render={({ field }) => (
                         <FormItem className="w-full">
                           <FormControl>
                             <>
-                              <Input 
-                                type="file" 
+                              <Input
+                                type="file"
                                 accept="image/jpeg,image/png,image/webp"
-                                onChange={handleProfilePictureChange} 
+                                onChange={handleProfilePictureChange}
                                 className="hidden"
                                 id="profilePictureUpdate"
                               />
@@ -254,7 +275,7 @@ export default function ChefProfilePage() {
                   />
                 </div>
               </div>
-              
+
               <FormField
                 control={form.control}
                 name="bio"
@@ -308,7 +329,7 @@ export default function ChefProfilePage() {
                     )}
                   />
               </div>
-              
+
               <div className="pt-4 border-t">
                 <h3 className="text-lg font-semibold mb-3 flex items-center"><Briefcase className="mr-2 h-5 w-5 text-primary" /> Experience Summary (from Resume)</h3>
                  <FormField
@@ -338,10 +359,10 @@ export default function ChefProfilePage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormControl>
-                           <Input 
-                            placeholder="Your skills will appear here, comma-separated..." 
+                           <Input
+                            placeholder="Your skills will appear here, comma-separated..."
                             className="bg-muted/30"
-                            {...field} 
+                            {...field}
                            />
                         </FormControl>
                         <FormDescription>This field can be auto-filled by resume parsing or edited manually. Comma-separated.</FormDescription>
@@ -369,8 +390,8 @@ export default function ChefProfilePage() {
                         )}
                       />
                       {form.watch(`portfolioItem${itemNum}Url` as 'portfolioItem1Url' | 'portfolioItem2Url') && (
-                        <Image 
-                            src={form.watch(`portfolioItem${itemNum}Url` as 'portfolioItem1Url' | 'portfolioItem2Url') || "https://placehold.co/300x200.png?text=Preview"} 
+                        <Image
+                            src={form.watch(`portfolioItem${itemNum}Url` as 'portfolioItem1Url' | 'portfolioItem2Url') || "https://placehold.co/300x200.png?text=Preview"}
                             alt={`Portfolio Item ${itemNum} Preview`}
                             width={300}
                             height={200}
@@ -399,10 +420,10 @@ export default function ChefProfilePage() {
                 <Button type="submit" size="lg" className="w-full sm:w-auto">
                   <Save className="mr-2 h-5 w-5" /> Save Profile Changes
                 </Button>
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  size="lg" 
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="lg"
                   className="w-full sm:w-auto"
                   onClick={() => {
                     if (chefData.resumeFileUrl && chefData.resumeFileUrl !== '#') {
@@ -419,16 +440,42 @@ export default function ChefProfilePage() {
             </form>
           </Form>
         </CardContent>
+         <CardFooter className="border-t pt-6">
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive" className="w-full sm:w-auto">
+                <Trash2 className="mr-2 h-4 w-4" /> Delete My Account
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This action cannot be undone. This will permanently delete your account and remove your data from our servers.
+                  You will receive an email confirmation once the process is complete, as per our data retention policy.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={handleDeleteAccount}>
+                  Yes, delete my account
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </CardFooter>
       </Card>
 
-      <ResumeUploadForm 
-        onResumeParsed={handleResumeParsed} 
+      <ResumeUploadForm
+        onResumeParsed={handleResumeParsed}
         initialData={{
-          experience: chefData.experienceSummary || "", 
+          experience: chefData.experienceSummary || "",
           skills: chefData.skills || [],
           education: chefData.education || ""
-        }} 
+        }}
       />
     </div>
   );
 }
+
+    
