@@ -1,6 +1,6 @@
 'use server';
 /**
- * @fileOverview Parses a chef's resume to extract experience and skills.
+ * @fileOverview Parses a chef's resume to extract experience, skills, and education.
  *
  * - parseResume - A function that handles the resume parsing process.
  * - ParseResumeInput - The input type for the parseResume function.
@@ -24,6 +24,7 @@ const ParseResumeOutputSchema = z.object({
     .string()
     .describe('A summary of the chef’s professional experience.'),
   skills: z.array(z.string()).describe('A list of the chef’s skills.'),
+  education: z.string().optional().describe('A summary of the chef’s education history.'), // Added education
 });
 export type ParseResumeOutput = z.infer<typeof ParseResumeOutputSchema>;
 
@@ -37,11 +38,11 @@ const prompt = ai.definePrompt({
   output: {schema: ParseResumeOutputSchema},
   prompt: `You are an expert chef resume parser.
 
-You will extract the experience and skills from the resume.
+You will extract the experience, skills, and education from the resume.
 
 Resume: {{media url=resumeDataUri}}
 
-Extract the chef's professional experience and a list of skills.
+Extract the chef's professional experience, a list of skills, and a summary of their education.
 `,
 });
 

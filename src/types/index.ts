@@ -14,6 +14,12 @@ export interface Menu {
   imageUrl?: string; // Optional image for the menu
 }
 
+export interface ParseResumeOutput {
+  experience: string;
+  skills: string[];
+  education?: string; // Added education
+}
+
 export interface ChefProfile {
   id: string;
   name: string;
@@ -23,8 +29,14 @@ export interface ChefProfile {
   profilePictureUrl?: string;
   experienceSummary?: string; // Parsed from resume
   skills?: string[]; // Parsed from resume
-  education?: string; // Could be part of experienceSummary or separate
-  portfolioLinks?: string[];
+  education?: string; // Parsed from resume or manual input - Added
+  portfolioLinks?: string[]; // This was pre-existing, might remove if using new portfolio structure below
+  tagline?: string; // Added
+  portfolioItem1Url?: string; // Added for portfolio
+  portfolioItem1Caption?: string; // Added for portfolio
+  portfolioItem2Url?: string; // Added for portfolio
+  portfolioItem2Caption?: string; // Added for portfolio
+  resumeFileUrl?: string; // Added for resume download link
 }
 
 export interface CustomerRequest {
