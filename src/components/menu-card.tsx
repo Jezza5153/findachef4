@@ -1,3 +1,4 @@
+
 'use client';
 
 import Image from 'next/image';
@@ -5,7 +6,7 @@ import type { Menu } from '@/types';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ChefHat, DollarSign, Eye, EyeOff, Leaf, Users, WheatOff, Vegan as VeganIcon } from 'lucide-react';
+import { ChefHat, DollarSign, Eye, EyeOff, Leaf, Users, WheatOff, Vegan as VeganIcon, ShoppingCart } from 'lucide-react';
 
 interface MenuCardProps {
   menu: Menu;
@@ -13,10 +14,19 @@ interface MenuCardProps {
   onEdit?: (menuId: string) => void;
   onDelete?: (menuId: string) => void;
   onRequest?: (menuId: string) => void; // For customer requesting a menu
+  onAddToShoppingList?: (menuId: string) => void; // New prop
   isChefOwner?: boolean; // If the current user is the chef who owns this menu
 }
 
-export function MenuCard({ menu, showChefDetails = false, onEdit, onDelete, onRequest, isChefOwner = false }: MenuCardProps) {
+export function MenuCard({ 
+  menu, 
+  showChefDetails = false, 
+  onEdit, 
+  onDelete, 
+  onRequest, 
+  onAddToShoppingList,
+  isChefOwner = false 
+}: MenuCardProps) {
   
   const getDietaryIcon = (dietaryItem: string) => {
     if (dietaryItem.toLowerCase().includes('vegetarian')) return <Leaf className="h-4 w-4 text-green-600" />;
@@ -70,8 +80,14 @@ export function MenuCard({ menu, showChefDetails = false, onEdit, onDelete, onRe
         <div className="space-y-2 text-sm">
           <div className="flex items-center text-muted-foreground">
             <DollarSign className="h-4 w-4 mr-1.5 text-green-600" />
-            Price: <span className="font-semibold text-foreground ml-1">${menu.pricePerHead.toFixed(2)} per head</span>
+            Sale Price: <span className="font-semibold text-foreground ml-1">${menu.pricePerHead.toFixed(2)} per head</span>
           </div>
+           {isChefOwner && menu.costPrice !== undefined && (
+             <div className="flex items-center text-sm text-muted-foreground">
+                <DollarSign className="h-4 w-4 mr-1.5 text-orange-500" />
+                Cost Price: <span className="font-semibold text-foreground ml-1">${menu.costPrice.toFixed(2)} per head</span>
+             </div>
+           )}
           {menu.pax && (
             <div className="flex items-center text-muted-foreground">
               <Users className="h-4 w-4 mr-1.5" />
@@ -96,9 +112,16 @@ export function MenuCard({ menu, showChefDetails = false, onEdit, onDelete, onRe
       </CardContent>
       <CardFooter className="p-6 bg-muted/30 mt-auto">
         {isChefOwner && onEdit && onDelete && (
-          <div className="flex space-x-2 w-full">
-            <Button variant="outline" size="sm" onClick={() => onEdit(menu.id)} className="flex-1">Edit</Button>
-            <Button variant="destructive" size="sm" onClick={() => onDelete(menu.id)} className="flex-1">Delete</Button>
+          <div className="flex flex-col space-y-2 w-full">
+            <div className="flex space-x-2 w-full">
+              <Button variant="outline" size="sm" onClick={() => onEdit(menu.id)} className="flex-1">Edit</Button>
+              <Button variant="destructive" size="sm" onClick={() => onDelete(menu.id)} className="flex-1">Delete</Button>
+            </div>
+            {onAddToShoppingList && (
+              <Button variant="secondary" size="sm" onClick={() => onAddToShoppingList(menu.id)} className="w-full">
+                <ShoppingCart className="mr-2 h-4 w-4" /> Add to Shopping List
+              </Button>
+            )}
           </div>
         )}
         {!isChefOwner && onRequest && (

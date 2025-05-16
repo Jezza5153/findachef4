@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState } from 'react';
@@ -23,7 +24,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { MenuCard } from '@/components/menu-card';
 import type { Menu, Option } from '@/types';
 import { useToast } from '@/hooks/use-toast';
-import { PlusCircle, Edit, Trash2, NotebookText, Eye, EyeOff } from 'lucide-react';
+import { PlusCircle, Edit, Trash2, NotebookText, Eye, EyeOff, ShoppingCart } from 'lucide-react';
 
 const dietaryOptions: Option[] = [
   { value: 'Vegetarian', label: 'Vegetarian' },
@@ -37,7 +38,7 @@ const menuFormSchema = z.object({
   title: z.string().min(3, { message: 'Title must be at least 3 characters.' }),
   description: z.string().min(10, { message: 'Description must be at least 10 characters.' }),
   cuisine: z.string().min(2, { message: 'Cuisine type is required.' }),
-  pricePerHead: z.coerce.number().min(0, { message: 'Price must be a positive number.' }),
+  pricePerHead: z.coerce.number().min(0, { message: 'Sale price must be a positive number.' }),
   pax: z.coerce.number().min(1, { message: 'PAX must be at least 1.' }).optional(),
   costPrice: z.coerce.number().min(0, { message: 'Cost price must be positive.'}).optional(),
   dietaryInfo: z.array(z.string()).optional(),
@@ -95,6 +96,8 @@ export default function MenuManagementPage() {
       dietaryInfo: [],
       isPublic: false,
       imageUrl: '',
+      pax: undefined,
+      costPrice: undefined,
     },
   });
 
@@ -126,7 +129,7 @@ export default function MenuManagementPage() {
       setEditingMenu(menuToEdit);
       form.reset({
         ...menuToEdit,
-        pricePerHead: menuToEdit.pricePerHead || 0, // ensure number
+        pricePerHead: menuToEdit.pricePerHead || 0, 
         pax: menuToEdit.pax || undefined,
         costPrice: menuToEdit.costPrice || undefined,
         imageUrl: menuToEdit.imageUrl || '',
@@ -137,11 +140,19 @@ export default function MenuManagementPage() {
 
   const handleDelete = (menuId: string) => {
     const menuToDelete = menus.find(m => m.id === menuId);
-    // Basic confirmation, ideally use an AlertDialog for better UX
     if (window.confirm(`Are you sure you want to delete the menu "${menuToDelete?.title}"?`)) {
       setMenus(menus.filter(menu => menu.id !== menuId));
       toast({ title: 'Menu Deleted', description: `"${menuToDelete?.title}" has been deleted.`, variant: 'destructive' });
     }
+  };
+
+  const handleAddToShoppingList = (menuId: string) => {
+    const menu = menus.find(m => m.id === menuId);
+    toast({
+      title: 'Added to Shopping List (Simulated)',
+      description: `Items for "${menu?.title}" have been notionally added to your shopping list.`,
+    });
+    // In a real app, this would update shopping list state/data
   };
   
   const openNewMenuDialog = () => {
@@ -262,7 +273,7 @@ export default function MenuManagementPage() {
                 )}
               />
               <FormItem>
-                <FormLabel>Dietary Information</FormLabel>
+                <FormLabel>Dietary Information (Flags)</FormLabel>
                 <Controller
                     name="dietaryInfo"
                     control={form.control}
@@ -300,7 +311,7 @@ export default function MenuManagementPage() {
                     <div className="space-y-0.5">
                       <FormLabel className="text-base">Publish Menu</FormLabel>
                       <FormDescription>
-                        Make this menu visible to customers on the platform.
+                        Make this menu visible to customers on the platform (effectively publishing it).
                       </FormDescription>
                     </div>
                     <FormControl>
@@ -331,6 +342,7 @@ export default function MenuManagementPage() {
               menu={menu}
               onEdit={handleEdit}
               onDelete={handleDelete}
+              onAddToShoppingList={handleAddToShoppingList}
               isChefOwner={true}
               showChefDetails={false} // Chef doesn't need to see their own name on their dashboard cards
             />
