@@ -1,5 +1,6 @@
 
 
+
 export interface Menu {
   id: string;
   title: string;
@@ -41,6 +42,11 @@ export interface ChefProfile {
   portfolioItem2Url?: string; 
   portfolioItem2Caption?: string; 
   resumeFileUrl?: string; 
+  // Fields below could be added for more detailed directory filtering/display
+  // experienceLevel?: 'Entry' | 'Junior' | 'Mid-Level' | 'Senior' | 'Executive'; 
+  // starRating?: number; // e.g. 1-5 based on internal metrics or customer reviews
+  // city?: string;
+  // country?: string;
 }
 
 export interface CustomerRequest {
