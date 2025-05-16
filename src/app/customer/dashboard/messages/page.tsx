@@ -1,7 +1,8 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { MessageSquare, Send, CalendarDays, UserCircle, Search, Inbox } from 'lucide-react';
+import { MessageSquare, Send, CalendarDays, UserCircle, Search, Inbox, AlertTriangle } from 'lucide-react';
 import Image from 'next/image';
 
 // Mock data for messages - similar to chef's request page for consistency
@@ -81,7 +82,11 @@ export default function CustomerMessagesPage() {
             </div>
           ))}
         </CardContent>
-        <CardFooter className="p-4 border-t">
+        <CardFooter className="p-4 border-t flex flex-col space-y-3">
+           <div className="flex items-center text-xs text-muted-foreground p-2 rounded-md bg-muted/50 border border-dashed w-full">
+              <AlertTriangle className="h-4 w-4 mr-2 text-yellow-600 flex-shrink-0" />
+              <span>Remember: Keep all communication and payment on FindAChef until a booking is confirmed. Do not share personal contact details.</span>
+            </div>
           <div className="flex w-full items-center space-x-2">
             <Input type="text" placeholder="Type your message to the chef..." className="flex-1" />
             <Button type="submit" size="icon">

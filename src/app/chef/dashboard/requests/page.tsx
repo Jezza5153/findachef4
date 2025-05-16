@@ -2,15 +2,15 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { MessageSquare, Send, CalendarDays, UserCircle, Search, CheckCircle, XCircle, FilePlus2 } from 'lucide-react';
+import { MessageSquare, Send, CalendarDays, UserCircle, Search, CheckCircle, XCircle, FilePlus2, AlertTriangle } from 'lucide-react';
 import Image from 'next/image';
 
 // Mock data for messages/requests
 const mockRequests = [
-  { id: 'req1', userName: 'Alice Smith', eventTitle: 'Birthday Party', lastMessage: 'Hi Chef, I loved your Italian Feast menu! Are you available on Nov 15th?', timestamp: '2h ago', unread: true, avatarUrl: 'https://placehold.co/80x80.png', status: 'New Request' },
-  { id: 'req2', userName: 'Bob Johnson', eventTitle: 'Corporate Lunch', lastMessage: 'Can you customize the Modern French Dinner for a gluten-free guest?', timestamp: '1d ago', unread: false, avatarUrl: 'https://placehold.co/80x80.png', status: 'Pending Response' },
-  { id: 'req3', userName: 'Carol White', eventTitle: 'Anniversary Dinner', lastMessage: 'Interested in a quote for a small party of 8 people.', timestamp: '3d ago', unread: false, avatarUrl: 'https://placehold.co/80x80.png', status: 'Quoted' },
-  { id: 'req4', userName: 'David Lee', eventTitle: 'Wedding Catering', lastMessage: 'Booking confirmed for June 5th!', timestamp: '5d ago', unread: false, avatarUrl: 'https://placehold.co/80x80.png', status: 'Confirmed' },
+  { id: 'req1', userName: 'Alice Smith', eventTitle: 'Birthday Party', eventDetails: 'Birthday Party - Nov 15th, 12 guests', lastMessage: 'Hi Chef, I loved your Italian Feast menu! Are you available on Nov 15th?', timestamp: '2h ago', unread: true, avatarUrl: 'https://placehold.co/80x80.png', status: 'New Request' },
+  { id: 'req2', userName: 'Bob Johnson', eventTitle: 'Corporate Lunch', eventDetails: 'Corporate Lunch - Dec 5th, 50 guests', lastMessage: 'Can you customize the Modern French Dinner for a gluten-free guest?', timestamp: '1d ago', unread: false, avatarUrl: 'https://placehold.co/80x80.png', status: 'Pending Response' },
+  { id: 'req3', userName: 'Carol White', eventTitle: 'Anniversary Dinner', eventDetails: 'Anniversary Dinner - Nov 20th, 2 guests', lastMessage: 'Interested in a quote for a small party of 8 people.', timestamp: '3d ago', unread: false, avatarUrl: 'https://placehold.co/80x80.png', status: 'Quoted' },
+  { id: 'req4', userName: 'David Lee', eventTitle: 'Wedding Catering', eventDetails: 'Wedding Catering - June 5th, 150 guests', lastMessage: 'Booking confirmed for June 5th!', timestamp: '5d ago', unread: false, avatarUrl: 'https://placehold.co/80x80.png', status: 'Confirmed' },
 ];
 
 const mockSelectedChat = {
@@ -100,7 +100,11 @@ export default function ChefRequestsPage() {
               </div>
             ))}
           </CardContent>
-          <CardFooter className="p-4 border-t space-y-3">
+          <CardFooter className="p-4 border-t flex flex-col space-y-3">
+            <div className="flex items-center text-xs text-muted-foreground p-2 rounded-md bg-muted/50 border border-dashed">
+              <AlertTriangle className="h-4 w-4 mr-2 text-yellow-600 flex-shrink-0" />
+              <span>Remember: Keep all communication and payment on FindAChef until a booking is confirmed. Do not share personal contact details.</span>
+            </div>
             <div className="flex w-full items-center space-x-2">
               <Input type="text" placeholder="Type your message..." className="flex-1" />
               <Button type="submit" size="icon">
