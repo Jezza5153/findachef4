@@ -23,7 +23,7 @@ const MOCK_EVENTS: CalendarEvent[] = [
     pricePerHead: 35,
     location: '123 Business Park, Suite 100',
     notes: 'Ensure vegetarian options are clearly marked. 2 gluten-free meals needed.',
-    coChefs: ['Chef John Doe'],
+    coChefs: ['Chef John Doe', 'Chef Assistant Jane'],
     status: 'Confirmed',
     weather: 'Sunny, 22°C (Placeholder)',
     toolsNeeded: ['Serving platters', 'Chafing dishes', 'Cooler boxes (Placeholder)'],
@@ -52,6 +52,7 @@ const MOCK_EVENTS: CalendarEvent[] = [
     location: 'Community Park Pavilion',
     notes: 'Nut-free. Include a small birthday cake.',
     status: 'Pending',
+    coChefs: [], // No co-chefs for this one
   },
    {
     id: 'event4',

@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -106,7 +106,7 @@ export default function ChefDirectoryPage() {
   const handleInviteCollaborate = (chefName: string) => {
     toast({
       title: 'Collaboration Invite Sent (Simulated)',
-      description: `Your invitation to collaborate has been sent to ${chefName}.`,
+      description: `Your invitation to collaborate has been sent to ${chefName}. They will receive it in their Requests inbox.`,
     });
   };
 

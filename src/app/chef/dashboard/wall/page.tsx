@@ -24,8 +24,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import type { ChefWallEvent } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
-import { PlusCircle, Edit3, Trash2, LayoutGrid, Users, CalendarClock, DollarSign, MapPin, Tag, Globe, Lock, AlertCircle } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, LayoutGrid, Users, CalendarClock, DollarSign, MapPin, Tag, Globe, Lock, AlertCircle, ChefHat } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Badge } from '@/components/ui/badge';
 
 const wallEventFormSchema = z.object({
   title: z.string().min(5, { message: 'Event title must be at least 5 characters.' }),
@@ -409,7 +410,13 @@ export default function ChefWallPage() {
                 <div className="flex items-center"><DollarSign className="mr-2 h-4 w-4 text-green-600" /> ${event.pricePerPerson}/person</div>
                 <div className="flex items-center"><Users className="mr-2 h-4 w-4 text-primary" /> Max {event.maxPax} guests</div>
                 {event.chefsInvolved && event.chefsInvolved.length > 0 && (
-                  <div className="text-xs"><strong>Chefs:</strong> {event.chefsInvolved.join(', ')}</div>
+                  <div className="flex items-center text-xs">
+                    <ChefHat className="mr-1.5 h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="font-medium mr-1">Chefs:</span> 
+                    {event.chefsInvolved.map((chef, index) => (
+                       <Badge key={chef} variant="outline" className="mr-1 text-xs">{chef}</Badge>
+                    ))}
+                  </div>
                 )}
                 {event.tags && event.tags.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-2">
