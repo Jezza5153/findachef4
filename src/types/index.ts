@@ -1,4 +1,5 @@
 
+
 export interface Menu {
   id: string;
   title: string;
@@ -13,6 +14,7 @@ export interface Menu {
   pax?: number; // Number of people the menu serves
   costPrice?: number; // For chef's internal calculation
   imageUrl?: string; // Optional image for the menu
+  dataAiHint?: string; // For Unsplash search keywords for placeholder images
 }
 
 export interface ParseResumeOutput {
@@ -90,4 +92,35 @@ export interface CalendarEvent {
   // Placeholders for future features
   weather?: string; 
   toolsNeeded?: string[];
+}
+
+export interface ChefWallEvent {
+  id: string;
+  title: string;
+  description: string;
+  maxPax: number;
+  eventDateTime: string; // Combined date and time string
+  location: string;
+  pricePerPerson: number;
+  chefsInvolved: string[]; // Array of chef names or IDs
+  tags: string[]; // e.g., ["Casual", "Fine Dining", "Outdoor"]
+  imageUrl?: string;
+  isPublic: boolean;
+  chefId: string; // ID of the chef who posted
+  chefName: string; // Name of the chef
+  chefAvatarUrl?: string; // Avatar of the posting chef
+}
+
+export interface CustomerWallPost {
+  id: string;
+  customerName: string;
+  customerAvatarUrl?: string;
+  eventType: string;
+  numberOfPeople: number;
+  budget: string; // e.g., "$500 total" or "$50/person"
+  cuisinePreferences: string;
+  desiredDates: string; // Text field for flexibility
+  extraNotes?: string;
+  isPublic: boolean; // Public (all chefs) or Private (specific chef - future feature)
+  postedAt: string; // e.g., "2 hours ago"
 }

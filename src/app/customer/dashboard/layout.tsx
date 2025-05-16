@@ -1,13 +1,15 @@
+
 import { DashboardLayout, type NavItem } from '@/components/dashboard-layout';
-import { LayoutDashboard, UserCircle, FileText, Send, CalendarCheck2, Heart } from 'lucide-react';
+import { LayoutDashboard, UserCircle, Send, CalendarCheck2, MessageSquare, Utensils, CalendarSearch } from 'lucide-react';
 
 const customerNavItems: NavItem[] = [
   { href: '/customer/dashboard', label: 'Overview', icon: <LayoutDashboard />, matchExact: true },
   { href: '/customer/dashboard/profile', label: 'My Profile', icon: <UserCircle /> },
-  { href: '/customer/menus', label: 'Browse Menus', icon: <Heart /> }, // Link to main browse page
   { href: '/customer/requests/new', label: 'Make a Request', icon: <Send /> },
-  { href: '/customer/dashboard/events', label: 'My Events', icon: <CalendarCheck2 /> },
-  { href: '/customer/dashboard/messages', label: 'Messages', icon: <FileText /> },
+  { href: '/customer/menus', label: 'Browse Chef Menus', icon: <Utensils /> }, 
+  { href: '/customer/wall', label: 'Browse Chef Events', icon: <CalendarSearch /> },
+  { href: '/customer/dashboard/events', label: 'My Booked Events', icon: <CalendarCheck2 /> },
+  { href: '/customer/dashboard/messages', label: 'Messages', icon: <MessageSquare /> },
 ];
 
 export default function CustomerDashboardLayout({
@@ -26,3 +28,4 @@ export default function CustomerDashboardLayout({
     </DashboardLayout>
   );
 }
+
