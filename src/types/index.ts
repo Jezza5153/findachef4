@@ -1,3 +1,4 @@
+
 export interface Menu {
   id: string;
   title: string;
@@ -17,26 +18,25 @@ export interface Menu {
 export interface ParseResumeOutput {
   experience: string;
   skills: string[];
-  education?: string; // Added education
+  education?: string; 
 }
 
 export interface ChefProfile {
   id: string;
   name: string;
   email: string;
+  tagline?: string; 
   bio: string;
   specialties: string[];
   profilePictureUrl?: string;
-  experienceSummary?: string; // Parsed from resume
-  skills?: string[]; // Parsed from resume
-  education?: string; // Parsed from resume or manual input - Added
-  portfolioLinks?: string[]; // This was pre-existing, might remove if using new portfolio structure below
-  tagline?: string; // Added
-  portfolioItem1Url?: string; // Added for portfolio
-  portfolioItem1Caption?: string; // Added for portfolio
-  portfolioItem2Url?: string; // Added for portfolio
-  portfolioItem2Caption?: string; // Added for portfolio
-  resumeFileUrl?: string; // Added for resume download link
+  experienceSummary?: string; 
+  skills?: string[]; 
+  education?: string; 
+  portfolioItem1Url?: string; 
+  portfolioItem1Caption?: string; 
+  portfolioItem2Url?: string; 
+  portfolioItem2Caption?: string; 
+  resumeFileUrl?: string; 
 }
 
 export interface CustomerRequest {
@@ -46,8 +46,8 @@ export interface CustomerRequest {
   cuisinePreference: string;
   pax: number;
   eventDate: Date | undefined;
-  notes: string;
-  customerId?: string; // Optional for now
+  notes?: string; // Made notes optional to match form
+  customerId?: string; 
 }
 
 export interface Testimonial {
@@ -61,4 +61,16 @@ export interface Testimonial {
 export interface Option {
   value: string;
   label: string;
+}
+
+export interface ShoppingListItem {
+  id: string;
+  name: string;
+  quantity: number;
+  unit: string;
+  estimatedCost: number;
+  notes?: string;
+  purchased: boolean;
+  menuId?: string; // Optional: for filtering by menu
+  eventId?: string; // Optional: for filtering by event
 }
