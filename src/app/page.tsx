@@ -1,6 +1,7 @@
+
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { CheckCircle, DollarSign, Lock, ShieldCheck, Users } from 'lucide-react';
+import { Lock, MessagesSquare, ShieldCheck } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import type { Testimonial } from '@/types';
@@ -12,20 +13,15 @@ const benefits = [
     description: 'Access a curated network of professional chefs with verified credentials and experience.',
   },
   {
+    icon: <MessagesSquare className="h-10 w-10 text-primary" />,
+    title: 'In-Platform Messaging & Booking',
+    description: 'Seamlessly communicate with chefs and book services directly through our secure platform.',
+  },
+  {
     icon: <Lock className="h-10 w-10 text-primary" />,
-    title: 'Secure Payments',
-    description: 'Enjoy peace of mind with our secure in-app payment system for all bookings.',
+    title: 'Protected Payments & Trust Score',
+    description: 'Enjoy peace of mind with our secure payment system and transparent trust indicators.',
   },
-  {
-    icon: <Users className="h-10 w-10 text-primary" />,
-    title: 'Chef-Hosted Events',
-    description: 'Discover unique culinary events hosted by our talented chefs, or book them for your own.',
-  },
-  {
-    icon: <DollarSign className="h-10 w-10 text-primary" />,
-    title: 'Transparent Pricing',
-    description: 'Clear, upfront pricing for menus and services. No hidden fees.',
-  }
 ];
 
 const testimonials: Testimonial[] = [
@@ -56,7 +52,7 @@ export default function Home() {
   return (
     <div className="flex flex-col">
       {/* Hero Section */}
-      <section className="relative py-20 md:py-32 bg-gradient-to-br from-blue-100 via-slate-50 to-orange-100"> {/* Updated gradient to match new theme idea */}
+      <section className="relative py-20 md:py-32 bg-gradient-to-br from-blue-100 via-slate-50 to-orange-100">
         <div className="absolute inset-0">
             <Image 
               src="https://placehold.co/1920x1080.png" 
@@ -69,18 +65,18 @@ export default function Home() {
         </div>
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
           <h1 className="text-4xl font-extrabold tracking-tight text-foreground sm:text-5xl md:text-6xl">
-            <span className="block">Discover Your Next</span>
-            <span className="block text-primary">Culinary Experience</span>
+            <span className="block">Book a chef, plan an event,</span>
+            <span className="block text-primary">or host your own — all on one platform.</span>
           </h1>
           <p className="mt-6 max-w-2xl mx-auto text-lg text-foreground/80 sm:text-xl md:text-2xl">
             Connect with talented independent chefs for any occasion. Book private chefs, explore unique menus, or join exclusive chef-hosted events.
           </p>
           <div className="mt-10 flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4">
             <Button asChild size="lg" className="text-lg px-8 py-4 bg-primary hover:bg-primary/90 text-primary-foreground">
-              <Link href="/customer/menus">Find a Chef</Link>
+              <Link href="/customer/menus">I’m a Customer</Link>
             </Button>
             <Button asChild size="lg" variant="outline" className="text-lg px-8 py-4 border-primary text-primary hover:bg-primary/10">
-              <Link href="/chef/signup">Become a Chef</Link>
+              <Link href="/chef/signup">I’m a Chef</Link>
             </Button>
           </div>
         </div>
@@ -95,7 +91,7 @@ export default function Home() {
               We provide a seamless, secure, and inspiring platform for all your culinary needs.
             </p>
           </div>
-          <div className="mt-16 grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-16 grid grid-cols-1 gap-8 md:grid-cols-3"> {/* Changed to md:grid-cols-3 for 3 benefits */}
             {benefits.map((benefit) => (
               <Card key={benefit.title} className="text-center shadow-lg hover:shadow-xl transition-shadow duration-300">
                 <CardHeader className="items-center">
