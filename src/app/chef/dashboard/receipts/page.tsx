@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import * as z from 'zod';
@@ -14,6 +14,7 @@ import {
   DialogTrigger,
   DialogFooter,
   DialogClose,
+  DialogDescription as ShadDialogDescription, // Alias to avoid conflict
 } from '@/components/ui/dialog';
 import {
   Form,
@@ -38,16 +39,19 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/componen
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
 import type { Receipt, CostType } from '@/types';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
-import { PlusCircle, Trash2, FileText, Edit3, UploadCloud, CalendarIcon, Download, DollarSign } from 'lucide-react';
+import { PlusCircle, Trash2, FileText, Edit3, UploadCloud, CalendarIcon, Download, DollarSign, Camera, Sparkles, InfoIcon } from 'lucide-react';
+import Image from 'next/image';
+import { receiptParserFlow } from '@/ai/flows/receipt-parser-flow'; 
 
 const costTypes: CostType[] = ['Ingredient', 'Equipment', 'Tax', 'BAS', 'Travel', 'Other'];
 
 const receiptFormSchema = z.object({
-  fileName: z.string().optional(), // Simplified for now
+  file: z.any().optional(), // Allow any file type for now, can be refined
   vendor: z.string().min(1, { message: 'Vendor name is required.' }),
   date: z.date({ required_error: 'Receipt date is required.' }),
   totalAmount: z.coerce.number().min(0.01, { message: 'Total amount must be greater than 0.' }),
@@ -60,15 +64,25 @@ const receiptFormSchema = z.object({
 type ReceiptFormValues = z.infer<typeof receiptFormSchema>;
 
 const initialReceipts: Receipt[] = [
-  { id: 'r1', vendor: 'SuperMart', date: new Date(2024, 6, 15), totalAmount: 125.50, costType: 'Ingredient', assignedToEventId: 'event1', notes: 'Groceries for Corporate Lunch' },
-  { id: 'r2', vendor: 'Kitchen Supplies Co.', date: new Date(2024, 6, 10), totalAmount: 75.00, costType: 'Equipment', notes: 'New set of knives' },
-  { id: 'r3', vendor: 'Fuel Station', date: new Date(2024, 6, 14), totalAmount: 30.00, costType: 'Travel', assignedToEventId: 'event1' },
+  { id: 'r1', fileName:'supermart_receipt.pdf', vendor: 'SuperMart', date: new Date(2024, 6, 15), totalAmount: 125.50, costType: 'Ingredient', assignedToEventId: 'event1', notes: 'Groceries for Corporate Lunch' },
+  { id: 'r2', fileName:'kitchen_co_invoice.jpg', vendor: 'Kitchen Supplies Co.', date: new Date(2024, 6, 10), totalAmount: 75.00, costType: 'Equipment', notes: 'New set of knives' },
+  { id: 'r3', fileName:'fuel_july14.png', vendor: 'Fuel Station', date: new Date(2024, 6, 14), totalAmount: 30.00, costType: 'Travel', assignedToEventId: 'event1' },
 ];
 
 export default function ReceiptsPage() {
   const [receipts, setReceipts] = useState<Receipt[]>(initialReceipts);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [editingReceipt, setEditingReceipt] = useState<Receipt | null>(null);
+  const [isCameraDialogOpen, setIsCameraDialogOpen] = useState(false);
+  const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
+  const [capturedImageDataUri, setCapturedImageDataUri] = useState<string | null>(null);
+  const [isPreviewCapture, setIsPreviewCapture] = useState(false);
+  const [isParsingReceipt, setIsParsingReceipt] = useState(false);
+  
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const { toast } = useToast();
 
   const form = useForm<ReceiptFormValues>({
@@ -80,19 +94,54 @@ export default function ReceiptsPage() {
       assignedToMenuId: '',
       costType: undefined,
       notes: '',
+      file: null,
     },
   });
 
+  useEffect(() => {
+    if (isCameraDialogOpen && hasCameraPermission === null) { // Check only if permission status is unknown
+      const getCameraPermission = async () => {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+          setHasCameraPermission(true);
+          if (videoRef.current) {
+            videoRef.current.srcObject = stream;
+          }
+        } catch (error) {
+          console.error('Error accessing camera:', error);
+          setHasCameraPermission(false);
+          toast({
+            variant: 'destructive',
+            title: 'Camera Access Denied',
+            description: 'Please enable camera permissions in your browser settings.',
+          });
+        }
+      };
+      getCameraPermission();
+    } else if (!isCameraDialogOpen && videoRef.current?.srcObject) {
+      // Stop camera stream when dialog closes
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach(track => track.stop());
+      videoRef.current.srcObject = null;
+      setHasCameraPermission(null); // Reset permission status for next open
+    }
+  }, [isCameraDialogOpen, toast, hasCameraPermission]);
+
   const openUploadDialog = (receiptToEdit: Receipt | null = null) => {
     setEditingReceipt(receiptToEdit);
+    setCapturedImageDataUri(null); 
+    setIsPreviewCapture(false);
     if (receiptToEdit) {
       form.reset({
         ...receiptToEdit,
-        date: receiptToEdit.date ? new Date(receiptToEdit.date) : new Date(), // Ensure date is a Date object
+        date: receiptToEdit.date ? new Date(receiptToEdit.date) : new Date(),
+        file: receiptToEdit.fileName ? { name: receiptToEdit.fileName } : null, 
       });
+      if (receiptToEdit.imageUrl) { // If we store and have an actual image URL for editing
+        setCapturedImageDataUri(receiptToEdit.imageUrl);
+      }
     } else {
       form.reset({
-        fileName: '',
         vendor: '',
         date: new Date(),
         totalAmount: 0,
@@ -100,23 +149,89 @@ export default function ReceiptsPage() {
         assignedToMenuId: '',
         costType: undefined,
         notes: '',
+        file: null,
       });
     }
     setIsUploadDialogOpen(true);
   };
 
+  const handleCapturePhoto = () => {
+    if (videoRef.current && canvasRef.current) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const context = canvas.getContext('2d');
+      if (context) {
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const dataUri = canvas.toDataURL('image/jpeg');
+        setCapturedImageDataUri(dataUri);
+        setIsPreviewCapture(true);
+      }
+    }
+  };
+
+  const handleUseCapturedImage = () => {
+    form.setValue('file', { name: `cam_capture_${Date.now()}.jpg` }); // Simulate file object
+    setIsCameraDialogOpen(false);
+    setIsPreviewCapture(false); 
+    // capturedImageDataUri is already set and will be used for AI parsing
+  };
+
+  const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      form.setValue('file', file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setCapturedImageDataUri(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+  
+  const handleAutoFillWithAI = async () => {
+    if (!capturedImageDataUri) {
+      toast({ title: "No Image", description: "Please capture or upload an image first.", variant: "destructive" });
+      return;
+    }
+    setIsParsingReceipt(true);
+    toast({ title: "AI Processing", description: "Analyzing receipt image..." });
+    try {
+      const result = await receiptParserFlow({ receiptImageUri: capturedImageDataUri });
+      if (result) {
+        if (result.vendor) form.setValue('vendor', result.vendor);
+        if (result.date) {
+           try {
+            form.setValue('date', new Date(result.date)); // Assumes YYYY-MM-DD or parsable format
+           } catch (e) { console.warn("AI returned invalid date format for receipt:", result.date); }
+        }
+        if (result.totalAmount !== undefined) form.setValue('totalAmount', result.totalAmount);
+        toast({ title: "AI Autofill Complete", description: "Fields populated. Please review." });
+      } else {
+        toast({ title: "AI Autofill", description: "Could not extract all information. Please fill manually.", variant: "default" });
+      }
+    } catch (error) {
+      console.error("Error parsing receipt with AI:", error);
+      toast({ title: "AI Error", description: "Failed to process receipt with AI.", variant: "destructive" });
+    } finally {
+      setIsParsingReceipt(false);
+    }
+  };
+
+
   const onSubmitReceipt = (data: ReceiptFormValues) => {
-    // Simulate file handling for now
-    const receiptFileName = data.fileName || (editingReceipt?.fileName) || `receipt_${Date.now()}.pdf`;
+    const receiptFileName = (data.file as File)?.name || editingReceipt?.fileName || `receipt_${Date.now()}.pdf`;
 
     if (editingReceipt) {
-      setReceipts(receipts.map(r => r.id === editingReceipt.id ? { ...editingReceipt, ...data, fileName: receiptFileName } : r));
+      setReceipts(receipts.map(r => r.id === editingReceipt.id ? { ...editingReceipt, ...data, fileName: receiptFileName, imageUrl: capturedImageDataUri || editingReceipt.imageUrl } : r));
       toast({ title: 'Receipt Updated', description: `Receipt from "${data.vendor}" has been updated.` });
     } else {
       const newReceipt: Receipt = {
         id: String(Date.now()),
         ...data,
         fileName: receiptFileName,
+        imageUrl: capturedImageDataUri || undefined,
       };
       setReceipts([...receipts, newReceipt]);
       toast({ title: 'Receipt Added', description: `Receipt from "${data.vendor}" has been added.` });
@@ -124,6 +239,8 @@ export default function ReceiptsPage() {
     form.reset();
     setEditingReceipt(null);
     setIsUploadDialogOpen(false);
+    setCapturedImageDataUri(null);
+    if (fileInputRef.current) fileInputRef.current.value = ""; // Clear file input
   };
 
   const handleDeleteReceipt = (receiptId: string) => {
@@ -152,46 +269,62 @@ export default function ReceiptsPage() {
           <FileText className="mr-3 h-8 w-8 text-primary" /> Receipts & Cost Management
         </h1>
         <Button onClick={() => openUploadDialog()}>
-          <PlusCircle className="mr-2 h-5 w-5" /> Upload New Receipt
+          <PlusCircle className="mr-2 h-5 w-5" /> Add New Receipt
         </Button>
       </div>
 
-      <Dialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen}>
+      {/* Main Receipt Dialog */}
+      <Dialog open={isUploadDialogOpen} onOpenChange={(isOpen) => {
+          setIsUploadDialogOpen(isOpen);
+          if (!isOpen) {
+            setCapturedImageDataUri(null); 
+            setIsPreviewCapture(false);
+            if (fileInputRef.current) fileInputRef.current.value = "";
+          }
+      }}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingReceipt ? 'Edit Receipt' : 'Upload New Receipt'}</DialogTitle>
-            <FormDescription>Fill in the details for your expense. OCR simulation: fields are manual for now.</FormDescription>
+            <DialogTitle>{editingReceipt ? 'Edit Receipt' : 'Add New Receipt'}</DialogTitle>
+            <ShadDialogDescription>Fill in the details for your expense. Use camera or upload a file.</ShadDialogDescription>
           </DialogHeader>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmitReceipt)} className="space-y-4 p-1">
-              <FormField
-                control={form.control}
-                name="fileName"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Receipt File (Simulated)</FormLabel>
-                    <FormControl>
-                      <div className="flex items-center space-x-2">
-                        <Input 
-                          type="file" 
-                          id="receipt-upload-input" 
-                          className="hidden"
-                          onChange={(e) => field.onChange(e.target.files?.[0]?.name || '')}
-                        />
-                        <label 
-                            htmlFor="receipt-upload-input" 
-                            className="flex items-center justify-center w-full px-4 py-2 border-2 border-dashed rounded-md cursor-pointer hover:border-primary"
-                        >
-                            <UploadCloud className="mr-2 h-4 w-4"/>
-                            {field.value || 'Click to select file (simulated)'}
-                        </label>
-                      </div>
-                    </FormControl>
-                    <FormDescription>Max 5MB. PDF, JPG, PNG.</FormDescription>
-                    <FormMessage />
-                  </FormItem>
+              
+              <FormItem>
+                <FormLabel>Receipt Image</FormLabel>
+                <div className="flex flex-col sm:flex-row items-center gap-2">
+                    <Button type="button" variant="outline" onClick={() => setIsCameraDialogOpen(true)} className="w-full sm:w-auto">
+                        <Camera className="mr-2 h-4 w-4"/> Capture with Camera
+                    </Button>
+                    <span className="text-xs text-muted-foreground hidden sm:block">OR</span>
+                     <Input 
+                        id="receipt-upload-input" 
+                        type="file" 
+                        accept="image/png, image/jpeg, image/webp, application/pdf"
+                        className="w-full sm:flex-1"
+                        onChange={handleFileSelected}
+                        ref={fileInputRef}
+                      />
+                </div>
+                 {capturedImageDataUri && form.getValues('file') && (
+                    <div className="mt-2 text-center">
+                        <Image src={capturedImageDataUri} alt="Receipt preview" width={150} height={200} className="rounded-md object-contain mx-auto border" data-ai-hint="receipt document image" />
+                        <p className="text-xs text-muted-foreground mt-1">Preview of: {(form.getValues('file') as File)?.name || 'Captured Image'}</p>
+                    </div>
                 )}
-              />
+                <FormDescription>Max 5MB. PDF, JPG, PNG, WEBP.</FormDescription>
+                 <Button 
+                    type="button" 
+                    onClick={handleAutoFillWithAI} 
+                    disabled={!capturedImageDataUri || isParsingReceipt} 
+                    variant="outline"
+                    className="w-full mt-2"
+                  >
+                    <Sparkles className="mr-2 h-4 w-4"/> 
+                    {isParsingReceipt ? "Parsing..." : "Auto-fill with AI (from image)"}
+                </Button>
+              </FormItem>
+
               <FormField
                 control={form.control}
                 name="vendor"
@@ -305,12 +438,53 @@ export default function ReceiptsPage() {
                 <DialogClose asChild>
                   <Button type="button" variant="outline">Cancel</Button>
                 </DialogClose>
-                <Button type="submit">{editingReceipt ? 'Save Changes' : 'Add Receipt'}</Button>
+                <Button type="submit" disabled={isParsingReceipt}>{editingReceipt ? 'Save Changes' : 'Add Receipt'}</Button>
               </DialogFooter>
             </form>
           </Form>
         </DialogContent>
       </Dialog>
+
+      {/* Camera Dialog */}
+      <Dialog open={isCameraDialogOpen} onOpenChange={setIsCameraDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Capture Receipt with Camera</DialogTitle>
+          </DialogHeader>
+          {hasCameraPermission === false && (
+            <Alert variant="destructive">
+              <AlertTitle>Camera Access Required</AlertTitle>
+              <AlertDescription>
+                Please allow camera access in your browser settings to use this feature. You might need to refresh the page after granting permission.
+              </AlertDescription>
+            </Alert>
+          )}
+          {hasCameraPermission === true && (
+            <>
+              {!isPreviewCapture ? (
+                <video ref={videoRef} className="w-full aspect-video rounded-md bg-muted" autoPlay playsInline muted />
+              ) : (
+                capturedImageDataUri && <Image src={capturedImageDataUri} alt="Captured receipt" width={400} height={300} className="rounded-md object-contain mx-auto border" data-ai-hint="receipt scan" />
+              )}
+              <canvas ref={canvasRef} className="hidden"></canvas>
+            </>
+          )}
+          <DialogFooter className="sm:justify-between">
+            {!isPreviewCapture ? (
+              <>
+                <Button type="button" variant="outline" onClick={() => setIsCameraDialogOpen(false)}>Cancel</Button>
+                <Button type="button" onClick={handleCapturePhoto} disabled={hasCameraPermission !== true}>Capture Photo</Button>
+              </>
+            ) : (
+              <>
+                <Button type="button" variant="outline" onClick={() => {setIsPreviewCapture(false); setCapturedImageDataUri(null);}}>Retake</Button>
+                <Button type="button" onClick={handleUseCapturedImage}>Use This Image</Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
 
       <Card>
         <CardHeader>
@@ -326,7 +500,7 @@ export default function ReceiptsPage() {
                   <TableHead className="text-right">Amount</TableHead>
                   <TableHead>Cost Type</TableHead>
                   <TableHead>Assigned To</TableHead>
-                  <TableHead>File</TableHead>
+                  <TableHead>File/Notes</TableHead>
                   <TableHead className="text-right w-[120px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -341,7 +515,10 @@ export default function ReceiptsPage() {
                         {receipt.assignedToEventId && <div>Event: {receipt.assignedToEventId}</div>}
                         {receipt.assignedToMenuId && <div>Menu: {receipt.assignedToMenuId}</div>}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground truncate max-w-xs">{receipt.fileName || 'N/A'}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground truncate max-w-[200px]">
+                      {receipt.fileName && <div className="font-medium text-foreground">{receipt.fileName}</div>}
+                      {receipt.notes && <div className="italic">{receipt.notes}</div>}
+                    </TableCell>
                     <TableCell className="text-right">
                       <Button variant="ghost" size="icon" onClick={() => openUploadDialog(receipt)} className="mr-1">
                         <Edit3 className="h-4 w-4" />
@@ -363,14 +540,26 @@ export default function ReceiptsPage() {
          {receipts.length > 0 && (
             <CardFooter className="flex flex-col items-end space-y-2 pt-4 border-t">
                 <div className="text-lg font-semibold flex items-center">
-                    <DollarSign className="mr-1 h-5 w-5 text-green-600" />
+                    <DollarSign className="mr-1 h-5 w-5 text-green-600" data-ai-hint="dollar money currency" />
                     Total Expenses: ${totalExpenses.toFixed(2)}
                 </div>
-                <p className="text-xs text-muted-foreground">Monthly report and advanced filtering coming soon.</p>
             </CardFooter>
         )}
       </Card>
       
+      <Alert className="mt-8">
+        <InfoIcon className="h-4 w-4" />
+        <AlertTitle>Payout & Financial Information</AlertTitle>
+        <AlertDescription>
+          <ul className="list-disc list-inside text-xs space-y-1">
+            <li>Payments for completed events are held by FindAChef and typically released to your account 48 hours after the event is marked complete by both parties, allowing a window for customer feedback or complaints.</li>
+            <li>For public ticketed events you host via The Wall, payouts are generally scheduled 7 days *before* the event date to help with upfront costs, subject to terms.</li>
+            <li>Always ensure all receipts for an event are uploaded promptly for accurate cost tracking and potential tax purposes.</li>
+            <li>Cancellation policies and fund release in such cases are detailed in the FindAChef Terms of Service.</li>
+          </ul>
+        </AlertDescription>
+      </Alert>
+
       <div className="flex justify-end mt-6">
         <Button onClick={handleExport} variant="outline">
           <Download className="mr-2 h-5 w-5" /> Export Data (CSV/Xero)

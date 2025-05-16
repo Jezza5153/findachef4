@@ -7,7 +7,9 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Badge } from '@/components/ui/badge';
 import type { CalendarEvent } from '@/types';
 import { format, parseISO, isSameDay } from 'date-fns';
-import { CalendarDays, Users, DollarSign, MapPin, Utensils, Info, Sun, ChefHat, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
+import { CalendarDays, Users, DollarSign, MapPin, Utensils, Info, Sun, ChefHat, AlertTriangle, CheckCircle, Clock, QrCode } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
 
 // Mock initial events
 const MOCK_EVENTS: CalendarEvent[] = [
@@ -81,6 +83,7 @@ const MOCK_EVENTS: CalendarEvent[] = [
 export default function ChefCalendarPage() {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
   const [allEvents, setAllEvents] = useState<CalendarEvent[]>(MOCK_EVENTS); // In a real app, fetch this
+  const { toast } = useToast();
 
   const eventsForSelectedDate = useMemo(() => {
     if (!selectedDate) return [];
@@ -105,9 +108,19 @@ export default function ChefCalendarPage() {
     }
   };
   
-  // Feature: Google Calendar Sync (Placeholder)
   const handleGoogleCalendarSync = () => {
-    alert("Google Calendar Sync feature coming soon!");
+    toast({
+        title: "Google Calendar Sync",
+        description: "This feature is coming soon!",
+    });
+  };
+
+  const handleProcessCompletion = (eventId: string) => {
+    toast({
+        title: "Process Event Completion",
+        description: `Simulated: Initiate QR Scan / Mark event ${eventId} as complete after scan. In a real app, this would involve QR scanning and backend updates for fund release.`,
+        duration: 5000,
+    });
   };
 
 
@@ -117,13 +130,14 @@ export default function ChefCalendarPage() {
         <h1 className="text-3xl font-bold flex items-center">
           <CalendarDays className="mr-3 h-8 w-8 text-primary" /> My Calendar & Events
         </h1>
-        <button 
+        <Button 
             onClick={handleGoogleCalendarSync}
-            className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded inline-flex items-center text-sm"
+            variant="outline"
+            className="text-sm"
         >
             <svg className="fill-current w-4 h-4 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 3h-1V1h-2v2H7V1H5v2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 18H4V8h16v13z"/><path fill="none" d="M0 0h24v24H0z"/></svg>
             <span>Sync with Google Calendar</span>
-        </button>
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -166,20 +180,20 @@ export default function ChefCalendarPage() {
                 <CardContent className="space-y-3">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm">
                     <div className="flex items-center text-muted-foreground">
-                      <Users className="h-4 w-4 mr-2 text-primary" />
+                      <Users className="h-4 w-4 mr-2 text-primary" data-ai-hint="people group users" />
                       PAX: <span className="font-medium text-foreground ml-1">{event.pax}</span>
                     </div>
                     <div className="flex items-center text-muted-foreground">
-                      <DollarSign className="h-4 w-4 mr-2 text-green-600" />
+                      <DollarSign className="h-4 w-4 mr-2 text-green-600" data-ai-hint="money dollar currency" />
                       Price: <span className="font-medium text-foreground ml-1">${event.pricePerHead}/head</span>
                     </div>
                     <div className="flex items-center text-muted-foreground col-span-full sm:col-span-1">
-                      <Utensils className="h-4 w-4 mr-2 text-primary" />
+                      <Utensils className="h-4 w-4 mr-2 text-primary" data-ai-hint="cutlery food restaurant" />
                       Menu: <span className="font-medium text-foreground ml-1">{event.menuName}</span>
                     </div>
                      {event.location && (
                       <div className="flex items-center text-muted-foreground col-span-full sm:col-span-1">
-                        <MapPin className="h-4 w-4 mr-2 text-red-500" />
+                        <MapPin className="h-4 w-4 mr-2 text-red-500" data-ai-hint="location map pin" />
                         Location: <span className="font-medium text-foreground ml-1">{event.location}</span>
                       </div>
                     )}
@@ -201,26 +215,38 @@ export default function ChefCalendarPage() {
                     </div>
                   )}
                   
-                  {/* Placeholder for weather */}
                   {event.weather && (
-                     <div className="text-xs text-muted-foreground flex items-center"><Sun className="h-3 w-3 mr-1 text-yellow-500"/>Weather: {event.weather}</div>
+                     <div className="text-xs text-muted-foreground flex items-center"><Sun className="h-3 w-3 mr-1 text-yellow-500" data-ai-hint="sun weather forecast" />Weather: {event.weather}</div>
                   )}
-                  {/* Placeholder for tools */}
                   {event.toolsNeeded && event.toolsNeeded.length > 0 && (
                      <div className="text-xs text-muted-foreground">Tools Checklist: {event.toolsNeeded.join(', ')}</div>
                   )}
                 </CardContent>
-                {event.status !== 'Cancelled' && (
-                     <CardFooter>
-                        <button className="text-xs text-blue-500 hover:underline">View/Edit Details</button>
-                    </CardFooter>
-                )}
+                <CardFooter className="flex flex-col items-start space-y-2 pt-4 border-t">
+                    {event.status === 'Confirmed' && (
+                        <>
+                            <p className="text-xs text-muted-foreground">
+                                Event Completion: At the event, the customer will provide a QR code. Scan it to confirm completion and initiate the final payout process. Remember to upload all receipts post-event.
+                            </p>
+                            <Button variant="outline" size="sm" onClick={() => handleProcessCompletion(event.id)} className="w-full sm:w-auto">
+                                <QrCode className="mr-2 h-4 w-4" />
+                                Scan QR / Process Completion
+                            </Button>
+                        </>
+                    )}
+                    {(event.status === 'Confirmed' || event.status === 'Pending') && (
+                         <Button variant="link" size="sm" className="p-0 h-auto text-xs text-blue-500 hover:underline">View/Edit Details</Button>
+                    )}
+                    {event.status === 'Cancelled' && (
+                        <p className="text-xs text-destructive">This event has been cancelled.</p>
+                    )}
+                </CardFooter>
               </Card>
             ))
           ) : (
             <Card className="text-center py-12 border-dashed">
               <CardContent>
-                <CalendarDays className="mx-auto h-12 w-12 text-muted-foreground mb-3" />
+                <CalendarDays className="mx-auto h-12 w-12 text-muted-foreground mb-3" data-ai-hint="calendar no events" />
                 <p className="text-muted-foreground">No events scheduled for this day.</p>
                 <p className="text-xs text-muted-foreground mt-1">Select another date to view events.</p>
               </CardContent>

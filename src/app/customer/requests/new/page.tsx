@@ -1,3 +1,4 @@
+
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -23,6 +24,7 @@ import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { CalendarIcon, FileText, Send, DollarSign, Users, Utensils, Info } from 'lucide-react';
 import type { CustomerRequest } from '@/types';
+import Link from 'next/link';
 
 const requestFormSchema = z.object({
   eventType: z.string().min(3, { message: 'Event type must be at least 3 characters.' }),
@@ -53,6 +55,7 @@ export default function NewRequestPage() {
     const newRequest: CustomerRequest = {
       id: String(Date.now()), // Mock ID
       ...data,
+      customerId: 'customer123', // Mock customer ID
     };
     console.log('New Customer Request:', newRequest);
     // Simulate API call
@@ -67,7 +70,7 @@ export default function NewRequestPage() {
     <div className="container mx-auto max-w-2xl py-12 px-4 sm:px-6 lg:px-8">
       <Card className="shadow-xl">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <div className="mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary" data-ai-hint="request form icon">
             <FileText className="h-8 w-8" />
           </div>
           <CardTitle className="text-3xl font-bold">Post Your Event Request</CardTitle>
@@ -140,7 +143,7 @@ export default function NewRequestPage() {
                 name="eventDate"
                 render={({ field }) => (
                   <FormItem className="flex flex-col">
-                    <FormLabel className="mb-1">Event Date</FormLabel>
+                    <FormLabel className="mb-1 flex items-center"><CalendarIcon className="mr-2 h-4 w-4 text-muted-foreground"/>Event Date</FormLabel>
                     <Popover>
                       <PopoverTrigger asChild>
                         <FormControl>
@@ -172,6 +175,9 @@ export default function NewRequestPage() {
                         />
                       </PopoverContent>
                     </Popover>
+                    <FormDescription className="text-xs">
+                        Please note that cancellation policies apply. Review our <Link href="/terms#cancellation" className="underline hover:text-primary">Terms of Service</Link> for details.
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
