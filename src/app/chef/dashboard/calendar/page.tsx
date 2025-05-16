@@ -1,0 +1,233 @@
+
+'use client';
+
+import { useState, useEffect, useMemo } from 'react';
+import { Calendar } from '@/components/ui/calendar';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import type { CalendarEvent } from '@/types';
+import { format, parseISO, isSameDay } from 'date-fns';
+import { CalendarDays, Users, DollarSign, MapPin, Utensils, Info, Sun, ChefHat, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
+
+// Mock initial events
+const MOCK_EVENTS: CalendarEvent[] = [
+  {
+    id: 'event1',
+    date: new Date(new Date().setDate(new Date().getDate() + 2)).toISOString().split('T')[0], // 2 days from now
+    title: 'Corporate Lunch Catering',
+    customerName: 'Tech Solutions Inc.',
+    pax: 50,
+    menuName: 'Gourmet Sandwich Platter',
+    pricePerHead: 35,
+    location: '123 Business Park, Suite 100',
+    notes: 'Ensure vegetarian options are clearly marked. 2 gluten-free meals needed.',
+    coChefs: ['Chef John Doe'],
+    status: 'Confirmed',
+    weather: 'Sunny, 22°C (Placeholder)',
+    toolsNeeded: ['Serving platters', 'Chafing dishes', 'Cooler boxes (Placeholder)'],
+  },
+  {
+    id: 'event2',
+    date: new Date(new Date().setDate(new Date().getDate() + 7)).toISOString().split('T')[0], // 7 days from now
+    title: 'Anniversary Dinner for Two',
+    customerName: 'Mr. & Mrs. Smith',
+    pax: 2,
+    menuName: 'Luxury Seafood Menu',
+    pricePerHead: 150,
+    location: 'Client\'s Residence - 456 Ocean View Dr.',
+    notes: 'Surprise dessert with "Happy Anniversary" message.',
+    status: 'Confirmed',
+    weather: 'Clear night, 18°C (Placeholder)',
+  },
+  {
+    id: 'event3',
+    date: new Date(new Date().setDate(new Date().getDate() + 7)).toISOString().split('T')[0], // Another event on the same day
+    title: 'Kids Birthday Party',
+    customerName: 'Jane Doe (for Leo)',
+    pax: 15,
+    menuName: 'Fun & Healthy Kids Menu',
+    pricePerHead: 25,
+    location: 'Community Park Pavilion',
+    notes: 'Nut-free. Include a small birthday cake.',
+    status: 'Pending',
+  },
+   {
+    id: 'event4',
+    date: new Date(new Date().setDate(new Date().getDate() + 10)).toISOString().split('T')[0], // 10 days from now
+    title: 'Private Cooking Class',
+    customerName: 'Maria Rodriguez',
+    pax: 4,
+    menuName: 'Italian Pasta Making',
+    pricePerHead: 75,
+    location: 'Chef\'s Studio',
+    notes: 'Focus on hands-on experience. All ingredients provided by chef.',
+    status: 'Confirmed',
+    toolsNeeded: ['Pasta machine', 'Aprons', 'Ingredients checklist (Placeholder)'],
+  },
+  {
+    id: 'event5',
+    date: new Date(new Date().setDate(new Date().getDate() + 12)).toISOString().split('T')[0], 
+    title: 'Cancelled Event Example',
+    customerName: 'Old Booking',
+    pax: 10,
+    menuName: 'Standard Buffet',
+    pricePerHead: 40,
+    location: 'Previous Venue',
+    status: 'Cancelled',
+  },
+];
+
+
+export default function ChefCalendarPage() {
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
+  const [allEvents, setAllEvents] = useState<CalendarEvent[]>(MOCK_EVENTS); // In a real app, fetch this
+
+  const eventsForSelectedDate = useMemo(() => {
+    if (!selectedDate) return [];
+    return allEvents.filter(event => isSameDay(parseISO(event.date), selectedDate));
+  }, [selectedDate, allEvents]);
+
+  const getStatusBadgeVariant = (status: CalendarEvent['status']) => {
+    switch (status) {
+      case 'Confirmed': return 'default';
+      case 'Pending': return 'secondary';
+      case 'Cancelled': return 'destructive';
+      default: return 'outline';
+    }
+  };
+
+  const getStatusIcon = (status: CalendarEvent['status']) => {
+    switch (status) {
+      case 'Confirmed': return <CheckCircle className="h-4 w-4 mr-1.5 text-green-600" />;
+      case 'Pending': return <Clock className="h-4 w-4 mr-1.5 text-yellow-600" />;
+      case 'Cancelled': return <AlertTriangle className="h-4 w-4 mr-1.5 text-red-600" />;
+      default: return <Info className="h-4 w-4 mr-1.5" />;
+    }
+  };
+  
+  // Feature: Google Calendar Sync (Placeholder)
+  const handleGoogleCalendarSync = () => {
+    alert("Google Calendar Sync feature coming soon!");
+  };
+
+
+  return (
+    <div className="space-y-8">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <h1 className="text-3xl font-bold flex items-center">
+          <CalendarDays className="mr-3 h-8 w-8 text-primary" /> My Calendar & Events
+        </h1>
+        <button 
+            onClick={handleGoogleCalendarSync}
+            className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded inline-flex items-center text-sm"
+        >
+            <svg className="fill-current w-4 h-4 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 3h-1V1h-2v2H7V1H5v2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 18H4V8h16v13z"/><path fill="none" d="M0 0h24v24H0z"/></svg>
+            <span>Sync with Google Calendar</span>
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <Card className="lg:col-span-1 shadow-md">
+          <CardHeader>
+            <CardTitle>Select a Date</CardTitle>
+          </CardHeader>
+          <CardContent className="flex justify-center">
+            <Calendar
+              mode="single"
+              selected={selectedDate}
+              onSelect={setSelectedDate}
+              className="rounded-md border"
+              disabled={(date) => date < new Date(new Date().setDate(new Date().getDate() - 365)) || date > new Date(new Date().setDate(new Date().getDate() + 365*2))} // Example: 1 year past, 2 years future
+            />
+          </CardContent>
+        </Card>
+
+        <div className="lg:col-span-2 space-y-6">
+          <h2 className="text-2xl font-semibold">
+            Events for: {selectedDate ? format(selectedDate, 'PPP') : 'No date selected'}
+          </h2>
+          {eventsForSelectedDate.length > 0 ? (
+            eventsForSelectedDate.map(event => (
+              <Card key={event.id} className={`shadow-lg border-l-4 ${
+                event.status === 'Confirmed' ? 'border-green-500' :
+                event.status === 'Pending' ? 'border-yellow-500' :
+                event.status === 'Cancelled' ? 'border-red-500' : 'border-gray-300'
+              }`}>
+                <CardHeader>
+                  <div className="flex justify-between items-start">
+                    <CardTitle className="text-xl">{event.title}</CardTitle>
+                    <Badge variant={getStatusBadgeVariant(event.status)} className="flex items-center">
+                      {getStatusIcon(event.status)}
+                      {event.status}
+                    </Badge>
+                  </div>
+                  {event.customerName && <CardDescription>For: {event.customerName}</CardDescription>}
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                    <div className="flex items-center text-muted-foreground">
+                      <Users className="h-4 w-4 mr-2 text-primary" />
+                      PAX: <span className="font-medium text-foreground ml-1">{event.pax}</span>
+                    </div>
+                    <div className="flex items-center text-muted-foreground">
+                      <DollarSign className="h-4 w-4 mr-2 text-green-600" />
+                      Price: <span className="font-medium text-foreground ml-1">${event.pricePerHead}/head</span>
+                    </div>
+                    <div className="flex items-center text-muted-foreground col-span-full sm:col-span-1">
+                      <Utensils className="h-4 w-4 mr-2 text-primary" />
+                      Menu: <span className="font-medium text-foreground ml-1">{event.menuName}</span>
+                    </div>
+                     {event.location && (
+                      <div className="flex items-center text-muted-foreground col-span-full sm:col-span-1">
+                        <MapPin className="h-4 w-4 mr-2 text-red-500" />
+                        Location: <span className="font-medium text-foreground ml-1">{event.location}</span>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {event.notes && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-muted-foreground mb-0.5 flex items-center"><Info className="h-3 w-3 mr-1"/>Notes:</h4>
+                      <p className="text-sm bg-muted/50 p-2 rounded-md">{event.notes}</p>
+                    </div>
+                  )}
+
+                  {event.coChefs && event.coChefs.length > 0 && (
+                    <div>
+                      <h4 className="text-xs font-semibold text-muted-foreground mb-0.5 flex items-center"><ChefHat className="h-3 w-3 mr-1"/>Co-Chefs:</h4>
+                      <div className="flex flex-wrap gap-2">
+                        {event.coChefs.map(chef => <Badge key={chef} variant="secondary">{chef}</Badge>)}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Placeholder for weather */}
+                  {event.weather && (
+                     <div className="text-xs text-muted-foreground flex items-center"><Sun className="h-3 w-3 mr-1 text-yellow-500"/>Weather: {event.weather}</div>
+                  )}
+                  {/* Placeholder for tools */}
+                  {event.toolsNeeded && event.toolsNeeded.length > 0 && (
+                     <div className="text-xs text-muted-foreground">Tools Checklist: {event.toolsNeeded.join(', ')}</div>
+                  )}
+                </CardContent>
+                {event.status !== 'Cancelled' && (
+                     <CardFooter>
+                        <button className="text-xs text-blue-500 hover:underline">View/Edit Details</button>
+                    </CardFooter>
+                )}
+              </Card>
+            ))
+          ) : (
+            <Card className="text-center py-12 border-dashed">
+              <CardContent>
+                <CalendarDays className="mx-auto h-12 w-12 text-muted-foreground mb-3" />
+                <p className="text-muted-foreground">No events scheduled for this day.</p>
+                <p className="text-xs text-muted-foreground mt-1">Select another date to view events.</p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

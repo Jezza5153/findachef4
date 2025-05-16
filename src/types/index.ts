@@ -74,3 +74,20 @@ export interface ShoppingListItem {
   menuId?: string; // Optional: for filtering by menu
   eventId?: string; // Optional: for filtering by event
 }
+
+export interface CalendarEvent {
+  id: string;
+  date: string; // YYYY-MM-DD format
+  title: string;
+  customerName?: string;
+  pax: number;
+  menuName: string;
+  pricePerHead: number;
+  location?: string;
+  notes?: string; // Dietary notes, special requests etc.
+  coChefs?: string[];
+  status: 'Confirmed' | 'Pending' | 'Cancelled';
+  // Placeholders for future features
+  weather?: string; 
+  toolsNeeded?: string[];
+}
