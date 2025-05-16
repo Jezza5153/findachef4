@@ -3,7 +3,7 @@
 
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useForm } from 'react-hook-form';
+import { useForm, useForm as useTaxForm } from 'react-hook-form'; // Aliased useForm for tax advice
 import * as z from 'zod';
 import { Button } from '@/components/ui/button';
 import {
@@ -14,7 +14,7 @@ import {
   DialogTrigger,
   DialogFooter,
   DialogClose,
-  DialogDescription as ShadDialogDescription, // Alias to avoid conflict
+  DialogDescription as ShadDialogDescription,
 } from '@/components/ui/dialog';
 import {
   Form,
@@ -41,27 +41,35 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
-import type { Receipt, CostType } from '@/types';
+import type { Receipt, CostType, TaxAdviceInput, TaxAdviceOutput } from '@/types';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
-import { PlusCircle, Trash2, FileText, Edit3, UploadCloud, CalendarIcon, Download, DollarSign, Camera, Sparkles, InfoIcon } from 'lucide-react';
+import { PlusCircle, Trash2, FileText, Edit3, UploadCloud, CalendarIcon, Download, DollarSign, Camera, Sparkles, InfoIcon, MessageCircleQuestion, Loader2 } from 'lucide-react';
 import Image from 'next/image';
 import { receiptParserFlow } from '@/ai/flows/receipt-parser-flow'; 
+import { getTaxAdvice } from '@/ai/flows/tax-advice-flow';
 
 const costTypes: CostType[] = ['Ingredient', 'Equipment', 'Tax', 'BAS', 'Travel', 'Other'];
 
 const receiptFormSchema = z.object({
-  file: z.any().optional(), 
+  file: z.any().optional(),
   vendor: z.string().min(1, { message: 'Vendor name is required.' }),
   date: z.date({ required_error: 'Receipt date is required.' }),
   totalAmount: z.coerce.number().min(0.01, { message: 'Total amount must be greater than 0.' }),
   assignedToEventId: z.string().optional(),
   assignedToMenuId: z.string().optional(),
-  costType: z.enum(costTypes, { required_error: 'Cost type is required.'}),
+  costType: z.enum(costTypes as [CostType, ...CostType[]], { required_error: 'Cost type is required.'}),
   notes: z.string().optional(),
 });
 
 type ReceiptFormValues = z.infer<typeof receiptFormSchema>;
+
+const taxAdviceFormSchema = z.object({
+    region: z.string().min(2, { message: 'Region is required (e.g., Australia, California).' }),
+    query: z.string().min(10, { message: 'Please enter a specific tax question (min 10 characters).' }),
+});
+type TaxAdviceFormValues = z.infer<typeof taxAdviceFormSchema>;
+
 
 const initialReceipts: Receipt[] = [
   { id: 'r1', fileName:'supermart_receipt.pdf', vendor: 'SuperMart', date: new Date(2024, 6, 15), totalAmount: 125.50, costType: 'Ingredient', assignedToEventId: 'event1', notes: 'Groceries for Corporate Lunch' },
@@ -78,6 +86,9 @@ export default function ReceiptsPage() {
   const [capturedImageDataUri, setCapturedImageDataUri] = useState<string | null>(null);
   const [isPreviewCapture, setIsPreviewCapture] = useState(false);
   const [isParsingReceipt, setIsParsingReceipt] = useState(false);
+  const [isTaxAdviceDialogOpen, setIsTaxAdviceDialogOpen] = useState(false);
+  const [taxAdviceResponse, setTaxAdviceResponse] = useState<TaxAdviceOutput | null>(null);
+  const [isFetchingTaxAdvice, setIsFetchingTaxAdvice] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -95,6 +106,14 @@ export default function ReceiptsPage() {
       costType: undefined,
       notes: '',
       file: null,
+    },
+  });
+
+  const taxForm = useTaxForm<TaxAdviceFormValues>({
+    resolver: zodResolver(taxAdviceFormSchema),
+    defaultValues: {
+        region: '',
+        query: '',
     },
   });
 
@@ -136,10 +155,6 @@ export default function ReceiptsPage() {
         date: receiptToEdit.date ? new Date(receiptToEdit.date) : new Date(),
         file: receiptToEdit.fileName ? { name: receiptToEdit.fileName } : null, 
       });
-      // If we store and have an actual image URL for editing
-      // if (receiptToEdit.imageUrl) { 
-      //   setCapturedImageDataUri(receiptToEdit.imageUrl);
-      // }
     } else {
       form.reset({
         vendor: '',
@@ -202,8 +217,8 @@ export default function ReceiptsPage() {
         if (result.vendor) form.setValue('vendor', result.vendor);
         if (result.date) {
            try {
-            // Attempt to parse various common date formats AI might return
-            const parsedDate = new Date(result.date.replace(/-/g, '/')); // Replace hyphens for broader compatibility
+            // Attempt to parse date, tolerant of YYYY-MM-DD or YYYY/MM/DD
+            const parsedDate = new Date(result.date.replace(/-/g, '/')); 
             if (!isNaN(parsedDate.getTime())) {
                  form.setValue('date', parsedDate);
             } else {
@@ -215,7 +230,8 @@ export default function ReceiptsPage() {
                 toast({ title: "AI Autofill", description: "Error processing date from AI. Please set manually.", variant: "default" });
             }
         }
-        if (result.totalAmount !== undefined) form.setValue('totalAmount', result.totalAmount);
+        if (result.totalAmount !== undefined && result.totalAmount !== null) form.setValue('totalAmount', result.totalAmount);
+        if (result.suggestedCostType) form.setValue('costType', result.suggestedCostType);
         toast({ title: "AI Autofill Complete", description: "Fields populated. Please review." });
       } else {
         toast({ title: "AI Autofill", description: "Could not extract all information. Please fill manually.", variant: "default" });
@@ -228,9 +244,9 @@ export default function ReceiptsPage() {
     }
   };
 
-
   const onSubmitReceipt = (data: ReceiptFormValues) => {
-    const receiptFileName = (data.file as File)?.name || editingReceipt?.fileName || `receipt_${Date.now()}.pdf`;
+    const receiptFileName = (data.file instanceof File) ? data.file.name : editingReceipt?.fileName || `receipt_${Date.now()}.pdf`;
+
 
     if (editingReceipt) {
       setReceipts(receipts.map(r => r.id === editingReceipt.id ? { ...editingReceipt, ...data, fileName: receiptFileName, date: data.date as Date } : r));
@@ -239,9 +255,8 @@ export default function ReceiptsPage() {
       const newReceipt: Receipt = {
         id: String(Date.now()),
         ...data,
-        date: data.date as Date, // Ensure date is a Date object
+        date: data.date as Date,
         fileName: receiptFileName,
-        // imageUrl: capturedImageDataUri || undefined, // If we were to store/display this
       };
       setReceipts([...receipts, newReceipt]);
       toast({ title: 'Receipt Added', description: `Receipt from "${data.vendor}" has been added.` });
@@ -272,15 +287,36 @@ export default function ReceiptsPage() {
     });
   };
 
+  const onSubmitTaxAdvice = async (data: TaxAdviceFormValues) => {
+    setIsFetchingTaxAdvice(true);
+    setTaxAdviceResponse(null);
+    toast({ title: "Getting Tax Advice", description: "Please wait..." });
+    try {
+        const response = await getTaxAdvice(data);
+        setTaxAdviceResponse(response);
+    } catch (error) {
+        console.error("Error getting tax advice:", error);
+        toast({ title: "AI Error", description: "Failed to get tax advice.", variant: "destructive" });
+        setTaxAdviceResponse({ advice: "Could not retrieve advice at this time.", disclaimer: "Please try again later."});
+    } finally {
+        setIsFetchingTaxAdvice(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-3xl font-bold flex items-center">
           <FileText className="mr-3 h-8 w-8 text-primary" data-ai-hint="document file"/> Receipts & Cost Management
         </h1>
-        <Button onClick={() => openUploadDialog()}>
-          <PlusCircle className="mr-2 h-5 w-5" /> Add New Receipt
-        </Button>
+        <div className="flex space-x-2">
+            <Button onClick={() => openUploadDialog()}>
+                <PlusCircle className="mr-2 h-5 w-5" /> Add New Receipt
+            </Button>
+            <Button variant="outline" onClick={() => { taxForm.reset(); setTaxAdviceResponse(null); setIsTaxAdviceDialogOpen(true);}}>
+                <MessageCircleQuestion className="mr-2 h-5 w-5" /> Get Tax Advice
+            </Button>
+        </div>
       </div>
 
       {/* Main Receipt Dialog */}
@@ -299,7 +335,6 @@ export default function ReceiptsPage() {
           </DialogHeader>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmitReceipt)} className="space-y-4 p-1">
-              
               <FormItem>
                 <FormLabel>Receipt Image</FormLabel>
                 <div className="flex flex-col sm:flex-row items-center gap-2">
@@ -319,7 +354,7 @@ export default function ReceiptsPage() {
                  {capturedImageDataUri && form.getValues('file') && (
                     <div className="mt-2 text-center">
                         <Image src={capturedImageDataUri} alt="Receipt preview" width={150} height={200} className="rounded-md object-contain mx-auto border" data-ai-hint="receipt document image" />
-                        <p className="text-xs text-muted-foreground mt-1">Preview of: {(form.getValues('file') as File)?.name || 'Captured Image'}</p>
+                        <p className="text-xs text-muted-foreground mt-1">Preview of: {(form.getValues('file') instanceof File ? (form.getValues('file') as File).name : 'Captured Image')}</p>
                     </div>
                 )}
                 <FormDescription>Max 5MB. PDF, JPG, PNG, WEBP.</FormDescription>
@@ -330,11 +365,10 @@ export default function ReceiptsPage() {
                     variant="outline"
                     className="w-full mt-2"
                   >
-                    <Sparkles className="mr-2 h-4 w-4"/> 
+                    {isParsingReceipt ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Sparkles className="mr-2 h-4 w-4"/> }
                     {isParsingReceipt ? "Parsing..." : "Auto-fill with AI (from image)"}
                 </Button>
               </FormItem>
-
               <FormField
                 control={form.control}
                 name="vendor"
@@ -391,7 +425,7 @@ export default function ReceiptsPage() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Cost Type</FormLabel>
-                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
                       <FormControl>
                         <SelectTrigger>
                           <SelectValue placeholder="Select a cost type" />
@@ -469,7 +503,6 @@ export default function ReceiptsPage() {
               </AlertDescription>
             </Alert>
           )}
-          {/* Always render video and canvas elements to avoid conditional rendering issues with refs */}
           <video ref={videoRef} className={cn("w-full aspect-video rounded-md bg-muted", { 'hidden': hasCameraPermission !== true || isPreviewCapture })} autoPlay playsInline muted />
           <canvas ref={canvasRef} className="hidden"></canvas>
           {hasCameraPermission === true && isPreviewCapture && capturedImageDataUri && (
@@ -492,6 +525,57 @@ export default function ReceiptsPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Tax Advice Dialog */}
+      <Dialog open={isTaxAdviceDialogOpen} onOpenChange={setIsTaxAdviceDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+                <DialogTitle>AI Tax Advice Assistant</DialogTitle>
+                <ShadDialogDescription>Ask a tax-related question based on your region. This is not professional advice.</ShadDialogDescription>
+            </DialogHeader>
+            <Form {...taxForm}>
+                <form onSubmit={taxForm.handleSubmit(onSubmitTaxAdvice)} className="space-y-4">
+                    <FormField
+                        control={taxForm.control}
+                        name="region"
+                        render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Your Country/Region</FormLabel>
+                                <FormControl><Input placeholder="e.g., Australia, California, UK" {...field} /></FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )}
+                    />
+                    <FormField
+                        control={taxForm.control}
+                        name="query"
+                        render={({ field }) => (
+                            <FormItem>
+                                <FormLabel>Your Tax Question</FormLabel>
+                                <FormControl><Textarea placeholder="e.g., What are common tax deductions for private chefs?" {...field} /></FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )}
+                    />
+                    <Button type="submit" disabled={isFetchingTaxAdvice} className="w-full">
+                        {isFetchingTaxAdvice ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageCircleQuestion className="mr-2 h-4 w-4" />}
+                        {isFetchingTaxAdvice ? "Getting Advice..." : "Ask AI"}
+                    </Button>
+                </form>
+            </Form>
+            {taxAdviceResponse && (
+                <div className="mt-6 space-y-3 rounded-md border bg-muted/50 p-4">
+                    <h4 className="font-semibold">AI Response:</h4>
+                    <p className="text-sm whitespace-pre-wrap">{taxAdviceResponse.advice}</p>
+                    <p className="text-xs italic text-muted-foreground">{taxAdviceResponse.disclaimer}</p>
+                </div>
+            )}
+             <DialogFooter className="mt-4">
+                <DialogClose asChild>
+                    <Button type="button" variant="outline">Close</Button>
+                </DialogClose>
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Card>
         <CardHeader>
@@ -554,6 +638,23 @@ export default function ReceiptsPage() {
         )}
       </Card>
       
+      <Card className="mt-8">
+        <CardHeader>
+            <CardTitle>Financial Tools & Future Features</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
+            <p>
+                <strong>Event Profitability:</strong> In the future, you'll be able to filter receipts by Event ID to see specific cost breakdowns and calculate profitability for each event.
+            </p>
+            <p>
+                <strong>Invoice Generation:</strong> Upon event completion and confirmation, invoices will be automatically generated for both you and the customer, accessible through your respective dashboards.
+            </p>
+             <p>
+                <strong>AI Cost Insights:</strong> We're working on AI tools to provide deeper insights into your spending patterns, helping you optimize menu pricing and purchasing. (Placeholder: A button "Get AI Insights on Event Costs" could appear here when an event is selected/filtered).
+            </p>
+        </CardContent>
+      </Card>
+
       <Alert className="mt-8">
         <InfoIcon className="h-4 w-4" />
         <AlertTitle>Payout & Financial Information</AlertTitle>
@@ -575,3 +676,6 @@ export default function ReceiptsPage() {
     </div>
   );
 }
+
+
+    

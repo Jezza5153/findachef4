@@ -1,7 +1,4 @@
 
-
-
-
 export interface Menu {
   id: string;
   title: string;
@@ -118,6 +115,7 @@ export interface ChefWallEvent {
   chefId: string; // ID of the chef who posted
   chefName: string; // Name of the chef
   chefAvatarUrl?: string; // Avatar of the posting chef
+  dataAiHint?: string;
 }
 
 export interface CustomerWallPost {
@@ -132,6 +130,7 @@ export interface CustomerWallPost {
   extraNotes?: string;
   isPublic: boolean; // Public (all chefs) or Private (specific chef - future feature)
   postedAt: string; // e.g., "2 hours ago"
+  dataAiHint?: string;
 }
 
 export interface CustomerProfile {
@@ -165,4 +164,15 @@ export interface Receipt {
   costType: CostType;
   notes?: string;
   // imageUrl?: string; // For preview, if needed in future
+}
+
+// Tax Advice Flow Types
+export interface TaxAdviceInput {
+  region: string;
+  query: string;
+}
+
+export interface TaxAdviceOutput {
+  advice: string;
+  disclaimer: string;
 }
