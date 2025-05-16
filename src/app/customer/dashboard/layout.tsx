@@ -1,4 +1,8 @@
 
+'use client';
+
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { DashboardLayout, type NavItem } from '@/components/dashboard-layout';
 import { LayoutDashboard, UserCircle, Send, CalendarCheck2, MessageSquare, Utensils, CalendarSearch } from 'lucide-react';
 
@@ -17,10 +21,22 @@ export default function CustomerDashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
+  const router = useRouter();
+
+  useEffect(() => {
+    // This check needs to be client-side aware
+    if (typeof window !== 'undefined') {
+      const isLoggedIn = localStorage.getItem('isLoggedIn');
+      if (isLoggedIn !== 'true') {
+        router.push('/login');
+      }
+    }
+  }, [router]);
+
   return (
     <DashboardLayout 
       navItems={customerNavItems}
-      userName="Customer Name" // Placeholder
+      userName="Customer Name" // Placeholder, will be updated by DashboardLayout from localStorage
       userRole="Valued Customer" // Placeholder
       userAvatarUrl="https://placehold.co/100x100.png" // Placeholder
     >
@@ -28,4 +44,3 @@ export default function CustomerDashboardLayout({
     </DashboardLayout>
   );
 }
-

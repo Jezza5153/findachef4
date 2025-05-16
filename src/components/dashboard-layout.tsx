@@ -1,6 +1,7 @@
+
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   SidebarProvider,
   Sidebar,
@@ -18,7 +19,8 @@ import { Button } from './ui/button';
 import { LogOut, User, Bell } from 'lucide-react';
 import Link from 'next/link';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { useToast } from '@/hooks/use-toast';
 
 export interface NavItem {
   href: string;
@@ -38,11 +40,38 @@ interface DashboardLayoutProps {
 export function DashboardLayout({
   children,
   navItems,
-  userName = "User Name",
-  userRole = "Role",
+  userName: initialUserName = "User",
+  userRole: initialUserRole = "Role",
   userAvatarUrl,
 }: DashboardLayoutProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { toast } = useToast();
+  const [currentUserName, setCurrentUserName] = useState(initialUserName);
+  const [currentUserRole, setCurrentUserRole] = useState(initialUserRole);
+
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const storedName = localStorage.getItem('userName');
+      const storedRole = localStorage.getItem('userRole');
+      if (storedName) setCurrentUserName(storedName);
+      if (storedRole) setCurrentUserRole(storedRole);
+    }
+  }, [pathname]); // Re-check on route change if needed, or use a global state
+
+  const handleLogout = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('isLoggedIn');
+      localStorage.removeItem('userName');
+      localStorage.removeItem('userRole');
+    }
+    toast({
+      title: 'Logged Out',
+      description: 'You have been successfully logged out.',
+    });
+    router.push('/login');
+  };
 
   return (
     <SidebarProvider defaultOpen>
@@ -77,18 +106,18 @@ export function DashboardLayout({
           <SidebarFooter className="p-4 mt-auto border-t">
             <div className="group-data-[collapsible=icon]:hidden flex items-center space-x-3">
               <Avatar>
-                <AvatarImage src={userAvatarUrl || "https://placehold.co/40x40.png"} alt={userName} data-ai-hint="person avatar" />
-                <AvatarFallback>{userName.substring(0, 2).toUpperCase()}</AvatarFallback>
+                <AvatarImage src={userAvatarUrl || "https://placehold.co/40x40.png"} alt={currentUserName} data-ai-hint="person avatar" />
+                <AvatarFallback>{currentUserName.substring(0, 2).toUpperCase()}</AvatarFallback>
               </Avatar>
               <div>
-                <p className="text-sm font-medium text-sidebar-foreground">{userName}</p>
-                <p className="text-xs text-sidebar-foreground/70">{userRole}</p>
+                <p className="text-sm font-medium text-sidebar-foreground">{currentUserName}</p>
+                <p className="text-xs text-sidebar-foreground/70">{currentUserRole}</p>
               </div>
             </div>
             <div className="hidden group-data-[collapsible=icon]:flex justify-center">
                <Avatar>
-                <AvatarImage src={userAvatarUrl || "https://placehold.co/40x40.png"} alt={userName} data-ai-hint="person avatar" />
-                <AvatarFallback>{userName.substring(0, 1).toUpperCase()}</AvatarFallback>
+                <AvatarImage src={userAvatarUrl || "https://placehold.co/40x40.png"} alt={currentUserName} data-ai-hint="person avatar" />
+                <AvatarFallback>{currentUserName.substring(0, 1).toUpperCase()}</AvatarFallback>
               </Avatar>
             </div>
           </SidebarFooter>
@@ -108,9 +137,9 @@ export function DashboardLayout({
                 <Bell className="h-5 w-5" />
               </Button>
               <Button variant="ghost" size="icon" aria-label="Profile">
-                <User className="h-5 w-5" />
+                <User className="h-5 w-5" /> {/* This could link to the specific profile page */}
               </Button>
-              <Button variant="ghost" size="icon" aria-label="Logout">
+              <Button variant="ghost" size="icon" aria-label="Logout" onClick={handleLogout}>
                 <LogOut className="h-5 w-5" />
               </Button>
             </div>
