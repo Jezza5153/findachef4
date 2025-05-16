@@ -1,23 +1,27 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { ShieldAlert, ListChecks, UserCog, FileWarning, UserCheck, FileSearch2, BadgeCheck, MessageCircleWarning, Gavel, Award, MessageSquare, LockKeyhole, CalendarX2, UsersRound } from 'lucide-react';
+import { ShieldAlert, ListChecks, UserCog, FileWarning, UserCheck, FileSearch2, BadgeCheck, MessageCircleWarning, Gavel, Award, MessageSquare, LockKeyhole, CalendarX2, UsersRound, Banknote, PauseCircle, Undo2, ClipboardCheck, FileCheck2, BotMessageSquare, ShieldBan, CreditCard } from 'lucide-react';
 
 export default function AdminPage() {
   const adminFeatures = [
     { name: "View All Chefs & Customers", icon: <UsersRound className="mr-2 h-5 w-5 text-primary" /> },
     { name: "Manually approve new chef accounts", description: "Check resume quality, no contact info, professionalism.", icon: <UserCheck className="mr-2 h-5 w-5 text-blue-600" /> },
     { name: "Approve Menus", icon: <ListChecks className="mr-2 h-5 w-5 text-green-600" /> },
-    { name: "Review GPT resume parse accuracy", description: "Fix any resume to tag mismatches.", icon: <FileSearch2 className="mr-2 h-5 w-5 text-indigo-600" /> },
+    { name: "Review GPT resume parse accuracy", description: "Fix any resume to tag mismatches.", icon: <BotMessageSquare className="mr-2 h-5 w-5 text-indigo-600" /> },
     { name: "Check for fake tags or exaggerated bios", description: "Ensure chef tags match their real experience.", icon: <BadgeCheck className="mr-2 h-5 w-5 text-teal-600" /> },
     { name: "Monitor active chat threads", description: "Look for off-platform contact attempts or spam.", icon: <MessageSquare className="mr-2 h-5 w-5 text-sky-600" /> },
     { name: "Oversee Automated Chat Locking", description: "Review and manage locks on conversation threads after bookings.", icon: <LockKeyhole className="mr-2 h-5 w-5 text-slate-600" /> },
-    { name: "Manage Expired Requests Queue", description: "Handle stale or unresolved customer posts from The Wall.", icon: <CalendarX2 className="mr-2 h-5 w-5 text-orange-600" /> },
+    { name: "Manage Expired Requests Queue", description: "Handle stale or unresolved customer posts from The Wall. Delete after 14 days.", icon: <CalendarX2 className="mr-2 h-5 w-5 text-orange-600" /> },
     { name: "Review Flagged Messages (Contact Info, Unsafe Content)", icon: <MessageCircleWarning className="mr-2 h-5 w-5 text-destructive" /> },
-    { name: "Manage Violations (Warnings, Penalties, Bans)", icon: <Gavel className="mr-2 h-5 w-5 text-red-700" /> },
+    { name: "Manage Violations (Warnings, Penalties, Bans)", description: "Issue warnings for first offenses (15% fund deduction), enforce bans for second offenses.", icon: <Gavel className="mr-2 h-5 w-5 text-red-700" /> },
     { name: "Moderate Reports (Chef Misconduct, Customer Fraud)", icon: <FileWarning className="mr-2 h-5 w-5 text-destructive" /> },
-    { name: "Assign 'Trusted by FindAChef' Badge", icon: <Award className="mr-2 h-5 w-5 text-amber-600" /> },
+    { name: "Assign 'Trusted by FindAChef' Badge", description: "Manually assign to chefs with a proven track record. Not automated.", icon: <Award className="mr-2 h-5 w-5 text-amber-600" /> },
     { name: "Trust Score Override", icon: <ShieldAlert className="mr-2 h-5 w-5 text-yellow-600" /> },
     { name: "View Flagged Resumes (Contact Info, Unsafe Content)", icon: <FileWarning className="mr-2 h-5 w-5 text-destructive" /> },
+    { name: "Approve post-event payouts (50% release)", description: "Confirm event is complete, customer hasn’t raised a dispute (48 hours post-event).", icon: <CreditCard className="mr-2 h-5 w-5 text-green-700" /> },
+    { name: "Freeze payments if dispute is raised", description: "Pause automatic release, investigate complaint.", icon: <ShieldBan className="mr-2 h-5 w-5 text-orange-700" /> },
+    { name: "Issue refunds for cancelled events", description: "Apply refund rules (e.g., full refund if chef cancels <7 days before event, or 50% if customer cancels <30 days).", icon: <Undo2 className="mr-2 h-5 w-5 text-blue-700" /> },
+    { name: "Check receipt upload compliance", description: "Ensure receipts match event/menu tags. Required for post-event payout.", icon: <FileCheck2 className="mr-2 h-5 w-5 text-indigo-700" /> },
   ];
 
   return (
@@ -25,7 +29,7 @@ export default function AdminPage() {
       <Card className="shadow-lg">
         <CardHeader className="text-center">
           <div className="mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
-            <ShieldAlert className="h-8 w-8" />
+            <UserCog className="h-8 w-8" />
           </div>
           <CardTitle className="text-3xl font-bold">Admin Dashboard</CardTitle>
           <CardDescription className="text-lg">
