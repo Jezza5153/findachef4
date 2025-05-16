@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'CulinaryConnect',
+  title: 'FindAChef',
   description: 'Discover and book independent chefs for private or public events.',
 };
 

@@ -54,7 +54,7 @@ export function Footer() {
 
         <div className="mt-8 border-t border-border/40 pt-8">
           <p className="text-center text-xs text-foreground/70">
-            &copy; {new Date().getFullYear()} CulinaryConnect. All rights reserved.
+            &copy; {new Date().getFullYear()} FindAChef. All rights reserved.
           </p>
         </div>
       </div>

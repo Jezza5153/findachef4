@@ -12,7 +12,7 @@ export function Logo({ href = "/", className, textClassName, ...props }: LogoPro
     <Link href={href} className="flex items-center space-x-2">
       <ChefHat className={cn("h-8 w-8 text-primary", className)} {...props} />
       <span className={cn("text-2xl font-bold text-foreground", textClassName)}>
-        CulinaryConnect
+        FindAChef
       </span>
     </Link>
   );

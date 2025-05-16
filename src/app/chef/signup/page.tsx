@@ -100,7 +100,7 @@ export default function ChefSignupPage() {
     // TODO: Implement actual signup logic (e.g., Firebase Auth, API call)
     toast({
       title: 'Signup Successful (Simulated)',
-      description: 'Your chef profile has been created. Welcome to CulinaryConnect!',
+      description: 'Your chef profile has been created. Welcome to FindAChef!',
     });
     form.reset();
     setResumeParsedData(null);
@@ -115,7 +115,7 @@ export default function ChefSignupPage() {
           <div className="mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
             <ChefHat className="h-8 w-8" />
           </div>
-          <CardTitle className="text-3xl font-bold">Become a Chef on CulinaryConnect</CardTitle>
+          <CardTitle className="text-3xl font-bold">Become a Chef on FindAChef</CardTitle>
           <CardDescription className="text-lg">
             Join our platform to showcase your skills, manage bookings, and connect with clients.
           </CardDescription>

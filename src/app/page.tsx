@@ -32,7 +32,7 @@ const testimonials: Testimonial[] = [
   {
     id: '1',
     customerName: 'Sarah L.',
-    text: "CulinaryConnect made finding a chef for my anniversary dinner so easy! The food was incredible, and the whole process was seamless.",
+    text: "FindAChef made finding a chef for my anniversary dinner so easy! The food was incredible, and the whole process was seamless.",
     eventName: 'Anniversary Dinner',
     avatarUrl: 'https://placehold.co/100x100.png',
   },
@@ -46,7 +46,7 @@ const testimonials: Testimonial[] = [
   {
     id: '3',
     customerName: 'Maria G.',
-    text: "We booked a chef for a corporate event, and everyone was impressed. Highly recommend CulinaryConnect!",
+    text: "We booked a chef for a corporate event, and everyone was impressed. Highly recommend FindAChef!",
     eventName: 'Corporate Event',
     avatarUrl: 'https://placehold.co/100x100.png',
   }
@@ -56,7 +56,7 @@ export default function Home() {
   return (
     <div className="flex flex-col">
       {/* Hero Section */}
-      <section className="relative py-20 md:py-32 bg-gradient-to-br from-amber-100 via-beige-50 to-orange-100">
+      <section className="relative py-20 md:py-32 bg-gradient-to-br from-blue-100 via-slate-50 to-orange-100"> {/* Updated gradient to match new theme idea */}
         <div className="absolute inset-0">
             <Image 
               src="https://placehold.co/1920x1080.png" 
@@ -90,7 +90,7 @@ export default function Home() {
       <section className="py-16 md:py-24 bg-background">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center">
-            <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">Why Choose CulinaryConnect?</h2>
+            <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">Why Choose FindAChef?</h2>
             <p className="mt-4 max-w-2xl mx-auto text-lg text-foreground/70">
               We provide a seamless, secure, and inspiring platform for all your culinary needs.
             </p>
@@ -174,7 +174,7 @@ export default function Home() {
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">Ready to Get Started?</h2>
           <p className="mt-4 max-w-2xl mx-auto text-lg text-foreground/70">
-            Join CulinaryConnect today and elevate your dining experiences or showcase your culinary talents.
+            Join FindAChef today and elevate your dining experiences or showcase your culinary talents.
           </p>
           <div className="mt-10 flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4">
             <Button asChild size="lg" className="text-lg px-8 py-4 bg-primary hover:bg-primary/90 text-primary-foreground">
