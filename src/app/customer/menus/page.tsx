@@ -126,7 +126,7 @@ export default function CustomerMenusPage() {
       <header className="mb-12 text-center">
         <h1 className="text-4xl font-bold tracking-tight text-foreground sm:text-5xl">Explore Our Chefs' Menus</h1>
         <p className="mt-4 max-w-2xl mx-auto text-lg text-foreground/70">
-          Discover a world of flavors. Check availability and request a menu to connect with talented chefs.
+          Discover a world of flavors. Browse menus anonymously, check availability, and request a menu to connect with talented chefs. Chef details are revealed after a booking is confirmed.
         </p>
       </header>
 

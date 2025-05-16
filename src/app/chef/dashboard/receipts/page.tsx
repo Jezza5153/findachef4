@@ -51,7 +51,7 @@ import { receiptParserFlow } from '@/ai/flows/receipt-parser-flow';
 const costTypes: CostType[] = ['Ingredient', 'Equipment', 'Tax', 'BAS', 'Travel', 'Other'];
 
 const receiptFormSchema = z.object({
-  file: z.any().optional(), // Allow any file type for now, can be refined
+  file: z.any().optional(), 
   vendor: z.string().min(1, { message: 'Vendor name is required.' }),
   date: z.date({ required_error: 'Receipt date is required.' }),
   totalAmount: z.coerce.number().min(0.01, { message: 'Total amount must be greater than 0.' }),
@@ -99,7 +99,7 @@ export default function ReceiptsPage() {
   });
 
   useEffect(() => {
-    if (isCameraDialogOpen && hasCameraPermission === null) { // Check only if permission status is unknown
+    if (isCameraDialogOpen && hasCameraPermission === null) { 
       const getCameraPermission = async () => {
         try {
           const stream = await navigator.mediaDevices.getUserMedia({ video: true });
@@ -119,11 +119,10 @@ export default function ReceiptsPage() {
       };
       getCameraPermission();
     } else if (!isCameraDialogOpen && videoRef.current?.srcObject) {
-      // Stop camera stream when dialog closes
       const stream = videoRef.current.srcObject as MediaStream;
       stream.getTracks().forEach(track => track.stop());
       videoRef.current.srcObject = null;
-      setHasCameraPermission(null); // Reset permission status for next open
+      setHasCameraPermission(null); 
     }
   }, [isCameraDialogOpen, toast, hasCameraPermission]);
 
@@ -137,9 +136,10 @@ export default function ReceiptsPage() {
         date: receiptToEdit.date ? new Date(receiptToEdit.date) : new Date(),
         file: receiptToEdit.fileName ? { name: receiptToEdit.fileName } : null, 
       });
-      if (receiptToEdit.imageUrl) { // If we store and have an actual image URL for editing
-        setCapturedImageDataUri(receiptToEdit.imageUrl);
-      }
+      // If we store and have an actual image URL for editing
+      // if (receiptToEdit.imageUrl) { 
+      //   setCapturedImageDataUri(receiptToEdit.imageUrl);
+      // }
     } else {
       form.reset({
         vendor: '',
@@ -172,10 +172,9 @@ export default function ReceiptsPage() {
   };
 
   const handleUseCapturedImage = () => {
-    form.setValue('file', { name: `cam_capture_${Date.now()}.jpg` }); // Simulate file object
+    form.setValue('file', { name: `cam_capture_${Date.now()}.jpg` }); 
     setIsCameraDialogOpen(false);
     setIsPreviewCapture(false); 
-    // capturedImageDataUri is already set and will be used for AI parsing
   };
 
   const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -203,8 +202,18 @@ export default function ReceiptsPage() {
         if (result.vendor) form.setValue('vendor', result.vendor);
         if (result.date) {
            try {
-            form.setValue('date', new Date(result.date)); // Assumes YYYY-MM-DD or parsable format
-           } catch (e) { console.warn("AI returned invalid date format for receipt:", result.date); }
+            // Attempt to parse various common date formats AI might return
+            const parsedDate = new Date(result.date.replace(/-/g, '/')); // Replace hyphens for broader compatibility
+            if (!isNaN(parsedDate.getTime())) {
+                 form.setValue('date', parsedDate);
+            } else {
+                console.warn("AI returned unparsable date format for receipt:", result.date);
+                toast({ title: "AI Autofill", description: "Could not parse date from AI. Please set manually.", variant: "default" });
+            }
+           } catch (e) { 
+                console.warn("AI returned invalid date format for receipt:", result.date, e);
+                toast({ title: "AI Autofill", description: "Error processing date from AI. Please set manually.", variant: "default" });
+            }
         }
         if (result.totalAmount !== undefined) form.setValue('totalAmount', result.totalAmount);
         toast({ title: "AI Autofill Complete", description: "Fields populated. Please review." });
@@ -224,14 +233,15 @@ export default function ReceiptsPage() {
     const receiptFileName = (data.file as File)?.name || editingReceipt?.fileName || `receipt_${Date.now()}.pdf`;
 
     if (editingReceipt) {
-      setReceipts(receipts.map(r => r.id === editingReceipt.id ? { ...editingReceipt, ...data, fileName: receiptFileName, imageUrl: capturedImageDataUri || editingReceipt.imageUrl } : r));
+      setReceipts(receipts.map(r => r.id === editingReceipt.id ? { ...editingReceipt, ...data, fileName: receiptFileName, date: data.date as Date } : r));
       toast({ title: 'Receipt Updated', description: `Receipt from "${data.vendor}" has been updated.` });
     } else {
       const newReceipt: Receipt = {
         id: String(Date.now()),
         ...data,
+        date: data.date as Date, // Ensure date is a Date object
         fileName: receiptFileName,
-        imageUrl: capturedImageDataUri || undefined,
+        // imageUrl: capturedImageDataUri || undefined, // If we were to store/display this
       };
       setReceipts([...receipts, newReceipt]);
       toast({ title: 'Receipt Added', description: `Receipt from "${data.vendor}" has been added.` });
@@ -240,7 +250,7 @@ export default function ReceiptsPage() {
     setEditingReceipt(null);
     setIsUploadDialogOpen(false);
     setCapturedImageDataUri(null);
-    if (fileInputRef.current) fileInputRef.current.value = ""; // Clear file input
+    if (fileInputRef.current) fileInputRef.current.value = ""; 
   };
 
   const handleDeleteReceipt = (receiptId: string) => {
@@ -266,7 +276,7 @@ export default function ReceiptsPage() {
     <div className="space-y-8">
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold flex items-center">
-          <FileText className="mr-3 h-8 w-8 text-primary" /> Receipts & Cost Management
+          <FileText className="mr-3 h-8 w-8 text-primary" data-ai-hint="document file"/> Receipts & Cost Management
         </h1>
         <Button onClick={() => openUploadDialog()}>
           <PlusCircle className="mr-2 h-5 w-5" /> Add New Receipt
@@ -459,16 +469,13 @@ export default function ReceiptsPage() {
               </AlertDescription>
             </Alert>
           )}
-          {hasCameraPermission === true && (
-            <>
-              {!isPreviewCapture ? (
-                <video ref={videoRef} className="w-full aspect-video rounded-md bg-muted" autoPlay playsInline muted />
-              ) : (
-                capturedImageDataUri && <Image src={capturedImageDataUri} alt="Captured receipt" width={400} height={300} className="rounded-md object-contain mx-auto border" data-ai-hint="receipt scan" />
-              )}
-              <canvas ref={canvasRef} className="hidden"></canvas>
-            </>
+          {/* Always render video and canvas elements to avoid conditional rendering issues with refs */}
+          <video ref={videoRef} className={cn("w-full aspect-video rounded-md bg-muted", { 'hidden': hasCameraPermission !== true || isPreviewCapture })} autoPlay playsInline muted />
+          <canvas ref={canvasRef} className="hidden"></canvas>
+          {hasCameraPermission === true && isPreviewCapture && capturedImageDataUri && (
+            <Image src={capturedImageDataUri} alt="Captured receipt" width={400} height={300} className="rounded-md object-contain mx-auto border" data-ai-hint="receipt scan" />
           )}
+          
           <DialogFooter className="sm:justify-between">
             {!isPreviewCapture ? (
               <>
@@ -568,7 +575,3 @@ export default function ReceiptsPage() {
     </div>
   );
 }
-
-    
-
-    
