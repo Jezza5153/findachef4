@@ -1,27 +1,29 @@
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { ShieldAlert, ListChecks, UserCog, FileWarning, UserCheck, FileSearch2, BadgeCheck, MessageCircleWarning, Gavel, Award, MessageSquare, LockKeyhole, CalendarX2, UsersRound, Banknote, PauseCircle, Undo2, ClipboardCheck, FileCheck2, BotMessageSquare, ShieldBan, CreditCard } from 'lucide-react';
+import { ShieldAlert, ListChecks, UserCog, FileWarning, UserCheck, FileSearch2, BadgeCheck, MessageCircleWarning, Gavel, Award, MessageSquare, LockKeyhole, CalendarX2, UsersRound, Banknote, PauseCircle, Undo2, ClipboardCheck, FileCheck2, BotMessageSquare, ShieldBan, CreditCard, CalendarCheck2 as CalendarCheckIcon } from 'lucide-react';
 
 export default function AdminPage() {
   const adminFeatures = [
-    { name: "View All Chefs & Customers", icon: <UsersRound className="mr-2 h-5 w-5 text-primary" /> },
-    { name: "Manually approve new chef accounts", description: "Check resume quality, no contact info, professionalism.", icon: <UserCheck className="mr-2 h-5 w-5 text-blue-600" /> },
+    { name: "Approve Co-hosted Events", description: "Confirm both chefs are approved and willing to collaborate on the event.", icon: <ClipboardCheck className="mr-2 h-5 w-5 text-purple-600" /> },
     { name: "Approve Menus", description: "Verify menu content, accurate pricing, no personal branding/links, and ensure chef identity remains hidden pre-booking.", icon: <ListChecks className="mr-2 h-5 w-5 text-green-600" /> },
-    { name: "Review GPT resume parse accuracy", description: "Fix any resume to tag mismatches.", icon: <BotMessageSquare className="mr-2 h-5 w-5 text-indigo-600" /> },
-    { name: "Check for fake tags or exaggerated bios", description: "Ensure chef tags match their real experience.", icon: <BadgeCheck className="mr-2 h-5 w-5 text-teal-600" /> },
-    { name: "Monitor active chat threads", description: "Look for off-platform contact attempts or spam.", icon: <MessageSquare className="mr-2 h-5 w-5 text-sky-600" /> },
-    { name: "Oversee Automated Chat Locking", description: "Review and manage locks on conversation threads after bookings.", icon: <LockKeyhole className="mr-2 h-5 w-5 text-slate-600" /> },
-    { name: "Manage Expired Requests Queue", description: "Handle stale or unresolved customer posts from The Wall. Delete after 14 days.", icon: <CalendarX2 className="mr-2 h-5 w-5 text-orange-600" /> },
-    { name: "Review Flagged Messages (Contact Info, Unsafe Content)", icon: <MessageCircleWarning className="mr-2 h-5 w-5 text-destructive" /> },
-    { name: "Manage Violations (Warnings, Penalties, Bans)", description: "Issue warnings for first offenses (15% fund deduction), enforce bans for second offenses.", icon: <Gavel className="mr-2 h-5 w-5 text-red-700" /> },
-    { name: "Moderate Reports (Chef Misconduct, Customer Fraud)", icon: <FileWarning className="mr-2 h-5 w-5 text-destructive" /> },
-    { name: "Assign 'Trusted by FindAChef' Badge", description: "Manually assign to chefs with a proven track record. Not automated.", icon: <Award className="mr-2 h-5 w-5 text-amber-600" /> },
-    { name: "Trust Score Override", icon: <ShieldAlert className="mr-2 h-5 w-5 text-yellow-600" /> },
-    { name: "View Flagged Resumes (Contact Info, Unsafe Content)", icon: <FileWarning className="mr-2 h-5 w-5 text-destructive" /> },
     { name: "Approve post-event payouts (50% release)", description: "Confirm event is complete, customer hasn’t raised a dispute (48 hours post-event).", icon: <CreditCard className="mr-2 h-5 w-5 text-green-700" /> },
+    { name: "Assign 'Trusted by FindAChef' Badge", description: "Manually assign to chefs with a proven track record. Not automated.", icon: <Award className="mr-2 h-5 w-5 text-amber-600" /> },
+    { name: "Check for fake tags or exaggerated bios", description: "Ensure chef tags match their real experience.", icon: <BadgeCheck className="mr-2 h-5 w-5 text-teal-600" /> },
+    { name: "Check receipt upload compliance", description: "Ensure receipts match event/menu tags. Required for post-event payout.", icon: <FileCheck2 className="mr-2 h-5 w-5 text-indigo-700" /> },
     { name: "Freeze payments if dispute is raised", description: "Pause automatic release, investigate complaint.", icon: <ShieldBan className="mr-2 h-5 w-5 text-orange-700" /> },
     { name: "Issue refunds for cancelled events", description: "Apply refund rules (e.g., full refund if chef cancels <7 days before event, or 50% if customer cancels <30 days).", icon: <Undo2 className="mr-2 h-5 w-5 text-blue-700" /> },
-    { name: "Check receipt upload compliance", description: "Ensure receipts match event/menu tags. Required for post-event payout.", icon: <FileCheck2 className="mr-2 h-5 w-5 text-indigo-700" /> },
+    { name: "Manage Expired Requests Queue", description: "Handle stale or unresolved customer posts from The Wall. Delete after 14 days.", icon: <CalendarX2 className="mr-2 h-5 w-5 text-orange-600" /> },
+    { name: "Manage Violations (Warnings, Penalties, Bans)", description: "Issue warnings for first offenses (15% fund deduction), enforce bans for second offenses.", icon: <Gavel className="mr-2 h-5 w-5 text-red-700" /> },
+    { name: "Manually approve new chef accounts", description: "Check resume quality, no contact info, professionalism.", icon: <UserCheck className="mr-2 h-5 w-5 text-blue-600" /> },
+    { name: "Moderate Reports (Chef Misconduct, Customer Fraud)", icon: <FileWarning className="mr-2 h-5 w-5 text-destructive" /> },
+    { name: "Monitor active chat threads", description: "Look for off-platform contact attempts or spam.", icon: <MessageSquare className="mr-2 h-5 w-5 text-sky-600" /> },
+    { name: "Oversee Automated Chat Locking", description: "Review and manage locks on conversation threads after bookings.", icon: <LockKeyhole className="mr-2 h-5 w-5 text-slate-600" /> },
+    { name: "Review Flagged Messages (Contact Info, Unsafe Content)", icon: <MessageCircleWarning className="mr-2 h-5 w-5 text-destructive" /> },
+    { name: "Review GPT resume parse accuracy", description: "Fix any resume to tag mismatches.", icon: <BotMessageSquare className="mr-2 h-5 w-5 text-indigo-600" /> },
+    { name: "Review Published Chef Events", description: "Ensure event details on The Chef's Wall are clear, fair, and not duplicated.", icon: <CalendarCheckIcon className="mr-2 h-5 w-5 text-cyan-600" /> },
+    { name: "Trust Score Override", icon: <ShieldAlert className="mr-2 h-5 w-5 text-yellow-600" /> },
+    { name: "View All Chefs & Customers", icon: <UsersRound className="mr-2 h-5 w-5 text-primary" /> },
+    { name: "View Flagged Resumes (Contact Info, Unsafe Content)", icon: <FileSearch2 className="mr-2 h-5 w-5 text-destructive" /> },
   ];
 
   return (
