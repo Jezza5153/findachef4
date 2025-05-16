@@ -353,7 +353,7 @@ export default function ReceiptsPage() {
                 </div>
                  {capturedImageDataUri && form.getValues('file') && (
                     <div className="mt-2 text-center">
-                        <Image src={capturedImageDataUri} alt="Receipt preview" width={150} height={200} className="rounded-md object-contain mx-auto border" data-ai-hint="receipt document image" />
+                        <Image src={capturedImageDataUri} alt="Receipt preview" width={150} height={200} className="rounded-md object-contain mx-auto border" data-ai-hint="receipt document" />
                         <p className="text-xs text-muted-foreground mt-1">Preview of: {(form.getValues('file') instanceof File ? (form.getValues('file') as File).name : 'Captured Image')}</p>
                     </div>
                 )}
@@ -631,7 +631,7 @@ export default function ReceiptsPage() {
          {receipts.length > 0 && (
             <CardFooter className="flex flex-col items-end space-y-2 pt-4 border-t">
                 <div className="text-lg font-semibold flex items-center">
-                    <DollarSign className="mr-1 h-5 w-5 text-green-600" data-ai-hint="dollar money currency" />
+                    <DollarSign className="mr-1 h-5 w-5 text-green-600" data-ai-hint="dollar money" />
                     Total Expenses: ${totalExpenses.toFixed(2)}
                 </div>
             </CardFooter>
@@ -660,10 +660,18 @@ export default function ReceiptsPage() {
         <AlertTitle>Payout & Financial Information</AlertTitle>
         <AlertDescription>
           <ul className="list-disc list-inside text-xs space-y-1">
-            <li>Payments for completed events are held by FindAChef and typically released to your account 48 hours after the event is marked complete by both parties, allowing a window for customer feedback or complaints.</li>
-            <li>For public ticketed events you host via The Wall, payouts are generally scheduled 7 days *before* the event date to help with upfront costs, subject to terms.</li>
+            <li><strong>Initial Fund Distribution:</strong> Upon customer booking confirmation, 46% of the event cost is released to the chef and 4% to FindAChef immediately.</li>
+            <li><strong>Escrow & Final Release:</strong> The remaining 50% is held by FindAChef. This portion is released to the chef after the event is confirmed complete by the customer (typically via QR code scan at the event).</li>
+            <li><strong>Public Ticketed Events:</strong> For events you host and sell tickets for via The Chef's Wall, payouts are generally scheduled 7 days *before* the event date to assist with upfront costs (subject to terms).</li>
+            <li><strong>Cancellations by Chef:</strong> If a chef cancels an event, a full refund is issued to the customer. Admin will be notified to assist and manage chef accountability, which may include penalties if a replacement cannot be found.</li>
+            <li><strong>Cancellations by Customer:</strong>
+                <ul>
+                    <li>If a customer cancels more than 20 days before the event, a 50% refund is typically processed.</li>
+                    <li>If a customer cancels less than 20 days before the event, a 20% refund is processed. In this case, 15% of the total event cost goes to the chef and 15% to FindAChef.</li>
+                    <li>Refer to the full <a href="/terms#cancellation" className="underline hover:text-primary">Terms of Service</a> for complete cancellation policy details.</li>
+                </ul>
+            </li>
             <li>Always ensure all receipts for an event are uploaded promptly for accurate cost tracking and potential tax purposes.</li>
-            <li>Cancellation policies and fund release in such cases are detailed in the FindAChef Terms of Service.</li>
           </ul>
         </AlertDescription>
       </Alert>
@@ -676,6 +684,4 @@ export default function ReceiptsPage() {
     </div>
   );
 }
-
-
     

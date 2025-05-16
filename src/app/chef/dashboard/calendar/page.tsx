@@ -40,6 +40,7 @@ const MOCK_EVENTS: CalendarEvent[] = [
     notes: 'Surprise dessert with "Happy Anniversary" message.',
     status: 'Confirmed',
     weather: 'Clear night, 18°C (Placeholder)',
+    coChefs: [],
   },
   {
     id: 'event3',
@@ -52,7 +53,7 @@ const MOCK_EVENTS: CalendarEvent[] = [
     location: 'Community Park Pavilion',
     notes: 'Nut-free. Include a small birthday cake.',
     status: 'Pending',
-    coChefs: [], // No co-chefs for this one
+    coChefs: [], 
   },
    {
     id: 'event4',
@@ -66,6 +67,7 @@ const MOCK_EVENTS: CalendarEvent[] = [
     notes: 'Focus on hands-on experience. All ingredients provided by chef.',
     status: 'Confirmed',
     toolsNeeded: ['Pasta machine', 'Aprons', 'Ingredients checklist (Placeholder)'],
+    coChefs: ['Chef Luigi'],
   },
   {
     id: 'event5',
@@ -77,6 +79,7 @@ const MOCK_EVENTS: CalendarEvent[] = [
     pricePerHead: 40,
     location: 'Previous Venue',
     status: 'Cancelled',
+    coChefs: [],
   },
 ];
 
@@ -119,8 +122,8 @@ export default function ChefCalendarPage() {
   const handleProcessCompletion = (eventId: string) => {
     toast({
         title: "Process Event Completion",
-        description: `Simulated: Initiate QR Scan / Mark event ${eventId} as complete after scan. In a real app, this would involve QR scanning and backend updates for fund release.`,
-        duration: 5000,
+        description: `Simulated: Initiate QR Scan / Mark event ${eventId} as complete. This action would trigger the release of the remaining 50% of funds held in escrow.`,
+        duration: 7000,
     });
   };
 
@@ -181,20 +184,20 @@ export default function ChefCalendarPage() {
                 <CardContent className="space-y-3">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm">
                     <div className="flex items-center text-muted-foreground">
-                      <Users className="h-4 w-4 mr-2 text-primary" data-ai-hint="people group users" />
+                      <Users className="h-4 w-4 mr-2 text-primary" data-ai-hint="people group" />
                       PAX: <span className="font-medium text-foreground ml-1">{event.pax}</span>
                     </div>
                     <div className="flex items-center text-muted-foreground">
-                      <DollarSign className="h-4 w-4 mr-2 text-green-600" data-ai-hint="money dollar currency" />
+                      <DollarSign className="h-4 w-4 mr-2 text-green-600" data-ai-hint="money dollar" />
                       Price: <span className="font-medium text-foreground ml-1">${event.pricePerHead}/head</span>
                     </div>
                     <div className="flex items-center text-muted-foreground col-span-full sm:col-span-1">
-                      <Utensils className="h-4 w-4 mr-2 text-primary" data-ai-hint="cutlery food restaurant" />
+                      <Utensils className="h-4 w-4 mr-2 text-primary" data-ai-hint="cutlery food" />
                       Menu: <span className="font-medium text-foreground ml-1">{event.menuName}</span>
                     </div>
                      {event.location && (
                       <div className="flex items-center text-muted-foreground col-span-full sm:col-span-1">
-                        <MapPin className="h-4 w-4 mr-2 text-red-500" data-ai-hint="location map pin" />
+                        <MapPin className="h-4 w-4 mr-2 text-red-500" data-ai-hint="location map" />
                         Location: <span className="font-medium text-foreground ml-1">{event.location}</span>
                       </div>
                     )}
@@ -217,7 +220,7 @@ export default function ChefCalendarPage() {
                   )}
                   
                   {event.weather && (
-                     <div className="text-xs text-muted-foreground flex items-center"><Sun className="h-3 w-3 mr-1 text-yellow-500" data-ai-hint="sun weather forecast" />Weather: {event.weather}</div>
+                     <div className="text-xs text-muted-foreground flex items-center"><Sun className="h-3 w-3 mr-1 text-yellow-500" data-ai-hint="sun weather" />Weather: {event.weather}</div>
                   )}
                   {event.toolsNeeded && event.toolsNeeded.length > 0 && (
                      <div className="text-xs text-muted-foreground">Tools Checklist: {event.toolsNeeded.join(', ')}</div>
@@ -227,11 +230,11 @@ export default function ChefCalendarPage() {
                     {event.status === 'Confirmed' && (
                         <>
                             <p className="text-xs text-muted-foreground">
-                                Event Completion: At the event, the customer will provide a QR code. Scan it to confirm completion and initiate the final payout process. Remember to upload all receipts post-event.
+                                <strong>Event Completion:</strong> At the event, the customer will provide a QR code. Scan it to confirm completion and initiate the release of the remaining 50% of your funds. Remember to upload all related receipts.
                             </p>
                             <Button variant="outline" size="sm" onClick={() => handleProcessCompletion(event.id)} className="w-full sm:w-auto">
                                 <QrCode className="mr-2 h-4 w-4" />
-                                Scan QR / Process Completion
+                                Scan Customer QR / Process Completion
                             </Button>
                         </>
                     )}
@@ -247,7 +250,7 @@ export default function ChefCalendarPage() {
           ) : (
             <Card className="text-center py-12 border-dashed">
               <CardContent>
-                <CalendarDays className="mx-auto h-12 w-12 text-muted-foreground mb-3" data-ai-hint="calendar no events" />
+                <CalendarDays className="mx-auto h-12 w-12 text-muted-foreground mb-3" data-ai-hint="calendar empty" />
                 <p className="text-muted-foreground">No events scheduled for this day.</p>
                 <p className="text-xs text-muted-foreground mt-1">Select another date to view events.</p>
               </CardContent>
