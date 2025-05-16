@@ -40,19 +40,38 @@ export default function LoginPage() {
   });
 
   const handleLogin = (data: LoginFormValues) => {
-    // Simulate login - in a real app, you'd call your auth service
     console.log('Login attempt:', data);
     if (typeof window !== 'undefined') {
       localStorage.setItem('isLoggedIn', 'true');
-      // Simulate setting a user role or some user data
-      localStorage.setItem('userRole', 'customer'); // Default to customer for this mock
       localStorage.setItem('userName', data.email.split('@')[0] || 'User');
+
+      // Simulate role-based login and initial chef status
+      if (data.email.toLowerCase().includes('chef@')) {
+        localStorage.setItem('userRole', 'chef');
+        localStorage.setItem('isChefApproved', 'false'); // Simulate needs approval
+        localStorage.setItem('isChefSubscribed', 'false'); // Simulate not subscribed
+        toast({
+          title: 'Chef Login (Simulated)',
+          description: 'Welcome, Chef! Your account status will be checked.',
+        });
+        // For testing approved chef:
+        // if (data.email.toLowerCase().includes('approvedchef@')) {
+        //   localStorage.setItem('isChefApproved', 'true');
+        //   localStorage.setItem('isChefSubscribed', 'true'); // Or false to test subscription
+        // }
+        router.push('/chef/dashboard');
+      } else {
+        localStorage.setItem('userRole', 'customer');
+        // Clear any lingering chef-specific flags for customer logins
+        localStorage.removeItem('isChefApproved');
+        localStorage.removeItem('isChefSubscribed');
+        toast({
+          title: 'Login Successful',
+          description: 'Welcome back!',
+        });
+        router.push('/customer/dashboard');
+      }
     }
-    toast({
-      title: 'Login Successful',
-      description: 'Welcome back!',
-    });
-    router.push('/customer/dashboard'); // Redirect to customer dashboard by default
   };
 
   return (
@@ -77,7 +96,7 @@ export default function LoginPage() {
                   <FormItem>
                     <FormLabel>Email Address</FormLabel>
                     <FormControl>
-                      <Input type="email" placeholder="you@example.com" {...field} />
+                      <Input type="email" placeholder="you@example.com (e.g., chef@example.com or customer@example.com)" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>

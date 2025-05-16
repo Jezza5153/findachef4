@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm, Controller } from 'react-hook-form';
 import * as z from 'zod';
@@ -24,7 +24,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { MenuCard } from '@/components/menu-card';
 import type { Menu, Option } from '@/types';
 import { useToast } from '@/hooks/use-toast';
-import { PlusCircle, Edit, Trash2, NotebookText, Eye, EyeOff, ShoppingCart } from 'lucide-react';
+import { PlusCircle, Edit, Trash2, NotebookText, Eye, EyeOff, ShoppingCart, AlertCircle } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+
 
 const dietaryOptions: Option[] = [
   { value: 'Vegetarian', label: 'Vegetarian' },
@@ -48,7 +50,6 @@ const menuFormSchema = z.object({
 
 type MenuFormValues = z.infer<typeof menuFormSchema>;
 
-// Mock initial menus
 const initialMenus: Menu[] = [
   {
     id: '1',
@@ -63,6 +64,7 @@ const initialMenus: Menu[] = [
     chefName: 'Chef Julia',
     imageUrl: 'https://placehold.co/600x400.png',
     costPrice: 30,
+    dataAiHint: 'italian food',
   },
   {
     id: '2',
@@ -77,6 +79,7 @@ const initialMenus: Menu[] = [
     chefName: 'Chef Julia',
     imageUrl: 'https://placehold.co/600x400.png',
     costPrice: 55,
+    dataAiHint: 'french food',
   },
 ];
 
@@ -84,7 +87,16 @@ export default function MenuManagementPage() {
   const [menus, setMenus] = useState<Menu[]>(initialMenus);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingMenu, setEditingMenu] = useState<Menu | null>(null);
+  const [isChefSubscribed, setIsChefSubscribed] = useState<boolean>(false);
   const { toast } = useToast();
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const subscriptionStatus = localStorage.getItem('isChefSubscribed');
+      setIsChefSubscribed(subscriptionStatus === 'true');
+    }
+  }, []);
+
 
   const form = useForm<MenuFormValues>({
     resolver: zodResolver(menuFormSchema),
@@ -103,17 +115,15 @@ export default function MenuManagementPage() {
 
   const onSubmit = (data: MenuFormValues) => {
     if (editingMenu) {
-      // Update existing menu
       setMenus(menus.map(menu => menu.id === editingMenu.id ? { ...editingMenu, ...data, dietaryInfo: data.dietaryInfo || [] } : menu));
       toast({ title: 'Menu Updated', description: `"${data.title}" has been successfully updated.` });
     } else {
-      // Add new menu
       const newMenu: Menu = {
         id: String(Date.now()),
         ...data,
         dietaryInfo: data.dietaryInfo || [],
-        chefId: 'chef123', // Placeholder
-        chefName: 'Chef Julia' // Placeholder
+        chefId: 'chef123', 
+        chefName: 'Chef Julia' 
       };
       setMenus([...menus, newMenu]);
       toast({ title: 'Menu Created', description: `"${data.title}" has been successfully created.` });
@@ -152,7 +162,6 @@ export default function MenuManagementPage() {
       title: 'Added to Shopping List (Simulated)',
       description: `Items for "${menu?.title}" have been notionally added to your shopping list.`,
     });
-    // In a real app, this would update shopping list state/data
   };
   
   const openNewMenuDialog = () => {
@@ -311,15 +320,29 @@ export default function MenuManagementPage() {
                     <div className="space-y-0.5">
                       <FormLabel className="text-base">Publish Menu</FormLabel>
                       <FormDescription>
-                        Make this menu visible to customers on the platform (effectively publishing it).
+                        Make this menu visible to customers. 
+                        {!isChefSubscribed && " Publishing public menus requires an active subscription."}
                       </FormDescription>
                     </div>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
+                    <TooltipProvider>
+                      <Tooltip delayDuration={100}>
+                        <TooltipTrigger asChild>
+                          <FormControl>
+                            <Switch
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                              disabled={!isChefSubscribed && field.value}
+                              aria-readonly={!isChefSubscribed && field.value}
+                            />
+                          </FormControl>
+                        </TooltipTrigger>
+                        {!isChefSubscribed && (
+                          <TooltipContent>
+                            <p className="flex items-center"><AlertCircle className="mr-2 h-4 w-4" />Subscription required to publish publicly.</p>
+                          </TooltipContent>
+                        )}
+                      </Tooltip>
+                    </TooltipProvider>
                   </FormItem>
                 )}
               />
@@ -344,7 +367,7 @@ export default function MenuManagementPage() {
               onDelete={handleDelete}
               onAddToShoppingList={handleAddToShoppingList}
               isChefOwner={true}
-              showChefDetails={false} // Chef doesn't need to see their own name on their dashboard cards
+              showChefDetails={false} 
             />
           ))}
         </div>
