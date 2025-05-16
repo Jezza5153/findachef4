@@ -1,6 +1,7 @@
 
 
 
+
 export interface Menu {
   id: string;
   title: string;
@@ -149,4 +150,19 @@ export interface CustomerProfile {
   defaultTheme?: string;
   defaultDietaryNotes?: string;
   defaultExtraComments?: string;
+}
+
+export type CostType = 'Ingredient' | 'Equipment' | 'Tax' | 'BAS' | 'Travel' | 'Other';
+
+export interface Receipt {
+  id: string;
+  fileName?: string; // Name of the uploaded file
+  vendor: string;
+  date: Date;
+  totalAmount: number;
+  assignedToEventId?: string;
+  assignedToMenuId?: string;
+  costType: CostType;
+  notes?: string;
+  // imageUrl?: string; // For preview, if needed in future
 }
