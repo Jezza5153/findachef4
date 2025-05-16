@@ -1,3 +1,4 @@
+
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -15,13 +16,15 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ResumeUploadForm } from '@/components/resume-upload-form';
 import { useState } from 'react';
 import type { ParseResumeOutput } from '@/ai/flows/resume-parser';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
-import { ChefHat, UserPlus, UploadCloud } from 'lucide-react';
+import { ChefHat, UserPlus, UploadCloud, ShieldCheck } from 'lucide-react';
+import Link from 'next/link';
 
 const chefSignupSchema = z.object({
   email: z.string().email({ message: 'Invalid email address.' }),
@@ -33,6 +36,9 @@ const chefSignupSchema = z.object({
   profilePicture: z.instanceof(File).optional()
     .refine(file => !file || file.size <= 2 * 1024 * 1024, `Max file size is 2MB.`)
     .refine(file => !file || ['image/jpeg', 'image/png', 'image/webp'].includes(file.type), `Only JPG, PNG, WEBP files are allowed.`),
+  agreedToTerms: z.boolean().refine(value => value === true, {
+    message: 'You must agree to the terms and policies to continue.',
+  }),
 }).refine(data => data.password === data.confirmPassword, {
   message: "Passwords don't match",
   path: ['confirmPassword'],
@@ -55,6 +61,7 @@ export default function ChefSignupPage() {
       name: '',
       bio: '',
       specialties: '',
+      agreedToTerms: false,
     },
   });
 
@@ -185,13 +192,13 @@ export default function ChefSignupPage() {
               <FormField
                   control={form.control}
                   name="profilePicture"
-                  render={({ field }) => (
+                  render={({ field }) => ( // field is not directly used here, onChange is handled by handleProfilePictureChange
                     <FormItem>
                       <FormLabel>Profile Picture</FormLabel>
                       <FormControl>
                         <div className="flex items-center space-x-4">
                           {profilePicturePreview ? (
-                            <Image src={profilePicturePreview} alt="Profile preview" width={80} height={80} className="rounded-full object-cover" />
+                            <Image src={profilePicturePreview} alt="Profile preview" width={80} height={80} className="rounded-full object-cover" data-ai-hint="person avatar" />
                           ) : (
                             <div className="h-20 w-20 rounded-full bg-muted flex items-center justify-center text-muted-foreground">
                               <UserPlus className="h-10 w-10" />
@@ -239,12 +246,37 @@ export default function ChefSignupPage() {
                 name="specialties"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Specialties / Cuisine Types</FormLabel>
+                    <FormLabel>Specialties / Cuisine Types (Tags)</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g., Italian, French, Pastry, Vegan, Gluten-Free" {...field} />
+                      <Input placeholder="e.g., Italian, Pastry, Plant-based, Foraging" {...field} />
                     </FormControl>
-                    <FormDescription>Comma-separated list of your culinary specialties.</FormDescription>
+                    <FormDescription>Comma-separated list of your culinary specialties or tags.</FormDescription>
                     <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="agreedToTerms"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4 shadow-sm">
+                    <FormControl>
+                      <Checkbox
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                    <div className="space-y-1 leading-none">
+                      <FormLabel className="flex items-center">
+                        <ShieldCheck className="mr-2 h-4 w-4 text-muted-foreground" />
+                        Agreement & Policies
+                      </FormLabel>
+                      <FormDescription>
+                        I agree to the FindAChef <Link href="/terms" className="underline hover:text-primary">Terms of Service</Link>, <Link href="/chef-policies" className="underline hover:text-primary">Chef Program Policies</Link>, and acknowledge the <Link href="/privacy" className="underline hover:text-primary">Privacy Policy</Link>.
+                      </FormDescription>
+                      <FormMessage />
+                    </div>
                   </FormItem>
                 )}
               />
@@ -262,3 +294,5 @@ export default function ChefSignupPage() {
     </div>
   );
 }
+
+    
