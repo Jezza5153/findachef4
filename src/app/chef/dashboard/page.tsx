@@ -1,5 +1,6 @@
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { BarChart, CalendarClock, DollarSign, LineChart, MessageCircleMore, NotebookText } from 'lucide-react';
+import { CalendarClock, MessageCircleMore, ShieldCheck } from 'lucide-react';
 import {
   ChartContainer,
   ChartTooltip,
@@ -7,17 +8,8 @@ import {
   ChartLegend,
   ChartLegendContent,
 } from "@/components/ui/chart"
-import { Bar, CartesianGrid, XAxis, YAxis, Line, ResponsiveContainer, BarChart as RechartsBarChart, LineChart as RechartsLineChart } from "recharts"
+import { Bar, CartesianGrid, XAxis, YAxis, ResponsiveContainer, BarChart as RechartsBarChart } from "recharts"
 import type { ChartConfig } from "@/components/ui/chart"
-
-constยอดBookingData = [
-  { month: "Jan", bookings: 12 },
-  { month: "Feb", bookings: 19 },
-  { month: "Mar", bookings: 15 },
-  { month: "Apr", bookings: 22 },
-  { month: "May", bookings: 18 },
-  { month: "Jun", bookings: 25 },
-]
 
 const menuEngagementData = [
   { menu: "Menu A", views: 150, requests: 15 },
@@ -27,10 +19,6 @@ const menuEngagementData = [
 ]
 
 const chartConfig: ChartConfig = {
-  bookings: {
-    label: "Bookings",
-    color: "hsl(var(--primary))",
-  },
   views: {
     label: "Views",
     color: "hsl(var(--chart-1))",
@@ -45,25 +33,15 @@ const chartConfig: ChartConfig = {
 export default function ChefDashboardPage() {
   return (
     <div className="space-y-8">
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-2"> {/* Adjusted grid for 2 cards */}
         <Card className="shadow-md">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Pending Bookings</CardTitle>
+            <CardTitle className="text-sm font-medium">Booking Requests</CardTitle>
             <MessageCircleMore className="h-5 w-5 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">5</div>
+            <div className="text-2xl font-bold">5</div> {/* Placeholder */}
             <p className="text-xs text-muted-foreground">+2 from last week</p>
-          </CardContent>
-        </Card>
-        <Card className="shadow-md">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Menus</CardTitle>
-            <NotebookText className="h-5 w-5 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">12</div>
-            <p className="text-xs text-muted-foreground">3 public, 9 private</p>
           </CardContent>
         </Card>
         <Card className="shadow-md">
@@ -72,7 +50,7 @@ export default function ChefDashboardPage() {
             <CalendarClock className="h-5 w-5 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">3</div>
+            <div className="text-2xl font-bold">3</div> {/* Placeholder */}
             <p className="text-xs text-muted-foreground">Next event in 5 days</p>
           </CardContent>
         </Card>
@@ -81,24 +59,7 @@ export default function ChefDashboardPage() {
       <div className="grid gap-6 md:grid-cols-2">
         <Card className="shadow-md">
           <CardHeader>
-            <CardTitle>Booking Trends</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ChartContainer config={chartConfig} className="h-[250px] w-full">
-              <RechartsLineChart data={ยอดBookingData}>
-                <CartesianGrid vertical={false} />
-                <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} />
-                <YAxis />
-                <ChartTooltip content={<ChartTooltipContent />} />
-                <Line type="monotone" dataKey="bookings" stroke="var(--color-bookings)" strokeWidth={2} dot={false} />
-              </RechartsLineChart>
-            </ChartContainer>
-          </CardContent>
-        </Card>
-
-        <Card className="shadow-md">
-          <CardHeader>
-            <CardTitle>Menu Engagement</CardTitle>
+            <CardTitle>Menu Engagement Stats</CardTitle>
           </CardHeader>
           <CardContent>
             <ChartContainer config={chartConfig} className="h-[250px] w-full">
@@ -114,9 +75,18 @@ export default function ChefDashboardPage() {
             </ChartContainer>
           </CardContent>
         </Card>
+        <Card className="shadow-md">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Trust Score</CardTitle>
+            <ShieldCheck className="h-5 w-5 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">4.8/5</div> {/* Placeholder */}
+            <p className="text-xs text-muted-foreground">Based on reviews & platform activity</p>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Quick Actions or Recent Activity can be added here */}
        <Card className="shadow-md">
         <CardHeader>
           <CardTitle>Recent Activity</CardTitle>
