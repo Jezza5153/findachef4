@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -22,6 +23,9 @@ const mockPublicMenus: Menu[] = [
     isPublic: true,
     imageUrl: 'https://placehold.co/600x400.png',
     pax: 4,
+    averageRating: 4.5,
+    numberOfRatings: 25,
+    dataAiHint: "burger gourmet",
   },
   {
     id: 'pub2',
@@ -33,6 +37,9 @@ const mockPublicMenus: Menu[] = [
     isPublic: true,
     imageUrl: 'https://placehold.co/600x400.png',
     pax: 6,
+    averageRating: 4.8,
+    numberOfRatings: 40,
+    dataAiHint: "thai curry",
   },
   {
     id: 'pub3',
@@ -44,6 +51,9 @@ const mockPublicMenus: Menu[] = [
     isPublic: true,
     imageUrl: 'https://placehold.co/600x400.png',
     pax: 8,
+    averageRating: 4.2,
+    numberOfRatings: 18,
+    dataAiHint: "spanish tapas",
   },
    {
     id: 'pub4',
@@ -55,6 +65,23 @@ const mockPublicMenus: Menu[] = [
     isPublic: true,
     imageUrl: 'https://placehold.co/600x400.png',
     pax: 2,
+    averageRating: 4.9,
+    numberOfRatings: 55,
+    dataAiHint: "sushi platter",
+  },
+  {
+    id: 'pub5',
+    title: 'Italian Pasta Workshop',
+    description: 'Hands-on pasta making class followed by a delicious meal with your creations.',
+    cuisine: 'Italian',
+    pricePerHead: 70,
+    dietaryInfo: ['Vegetarian Option'],
+    isPublic: true,
+    imageUrl: 'https://placehold.co/600x400.png',
+    pax: 10,
+    averageRating: 4.6,
+    numberOfRatings: 30,
+    dataAiHint: "pasta workshop",
   },
 ];
 
@@ -67,6 +94,7 @@ export default function CustomerMenusPage() {
 
   // Simulate fetching menus
   useEffect(() => {
+    // In a real app, you'd fetch this data
     setMenus(mockPublicMenus);
   }, []);
 
@@ -74,7 +102,7 @@ export default function CustomerMenusPage() {
     const requestedMenu = menus.find(m => m.id === menuId);
     // Simulate sending an anonymized request
     toast({
-      title: 'Menu Requested (Simulated)',
+      title: 'Availability Check & Request Sent (Simulated)',
       description: `Your request for "${requestedMenu?.title}" has been sent. The chef will be in touch if available.`,
     });
     // In a real app, this would trigger a notification/message to the chef without revealing identities yet.
@@ -85,12 +113,12 @@ export default function CustomerMenusPage() {
                           menu.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           menu.cuisine.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCuisine = cuisineFilter === 'all' || menu.cuisine.toLowerCase() === cuisineFilter.toLowerCase();
-    const matchesDietary = dietaryFilter === 'all' || menu.dietaryInfo.some(d => d.toLowerCase().includes(dietaryFilter.toLowerCase()));
+    const matchesDietary = dietaryFilter === 'all' || (menu.dietaryInfo && menu.dietaryInfo.some(d => d.toLowerCase().includes(dietaryFilter.toLowerCase())));
     return matchesSearch && matchesCuisine && matchesDietary;
   });
   
-  const uniqueCuisines = ['all', ...new Set(mockPublicMenus.map(menu => menu.cuisine))];
-  const uniqueDietaryOptions = ['all', ...new Set(mockPublicMenus.flatMap(menu => menu.dietaryInfo))];
+  const uniqueCuisines = ['all', ...new Set(mockPublicMenus.map(menu => menu.cuisine).filter(Boolean))];
+  const uniqueDietaryOptions = ['all', ...new Set(mockPublicMenus.flatMap(menu => menu.dietaryInfo).filter(Boolean))];
 
 
   return (
@@ -98,7 +126,7 @@ export default function CustomerMenusPage() {
       <header className="mb-12 text-center">
         <h1 className="text-4xl font-bold tracking-tight text-foreground sm:text-5xl">Explore Our Chefs' Menus</h1>
         <p className="mt-4 max-w-2xl mx-auto text-lg text-foreground/70">
-          Discover a world of flavors. Request a menu and connect with talented chefs.
+          Discover a world of flavors. Check availability and request a menu to connect with talented chefs.
         </p>
       </header>
 

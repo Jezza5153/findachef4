@@ -15,6 +15,8 @@ export interface Menu {
   costPrice?: number; // For chef's internal calculation
   imageUrl?: string; // Optional image for the menu
   dataAiHint?: string; // For Unsplash search keywords for placeholder images
+  averageRating?: number; // Optional: for customer reviews
+  numberOfRatings?: number; // Optional: for customer reviews
 }
 
 export interface ParseResumeOutput {
@@ -123,4 +125,22 @@ export interface CustomerWallPost {
   extraNotes?: string;
   isPublic: boolean; // Public (all chefs) or Private (specific chef - future feature)
   postedAt: string; // e.g., "2 hours ago"
+}
+
+export interface CustomerProfile {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  profilePictureUrl?: string;
+  kitchenEquipment?: string[]; // e.g., ["Oven", "Mixer"]
+  addressDetails?: string;
+  defaultEventType?: string;
+  defaultPax?: number;
+  defaultBudget?: string; // e.g., "per person" or "total"
+  defaultBudgetAmount?: number;
+  defaultFrequency?: string; // e.g., "Once", "Weekly"
+  defaultTheme?: string;
+  defaultDietaryNotes?: string;
+  defaultExtraComments?: string;
 }

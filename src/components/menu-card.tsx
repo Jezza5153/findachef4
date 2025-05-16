@@ -6,7 +6,7 @@ import type { Menu } from '@/types';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ChefHat, DollarSign, Eye, EyeOff, Leaf, Users, WheatOff, Vegan as VeganIcon, ShoppingCart } from 'lucide-react';
+import { ChefHat, DollarSign, Eye, EyeOff, Leaf, Users, WheatOff, Vegan as VeganIcon, ShoppingCart, Star } from 'lucide-react';
 
 interface MenuCardProps {
   menu: Menu;
@@ -35,6 +35,19 @@ export function MenuCard({
     return null;
   };
 
+  const renderStars = (rating: number) => {
+    const fullStars = Math.floor(rating);
+    const halfStar = rating % 1 >= 0.5;
+    const emptyStars = 5 - fullStars - (halfStar ? 1 : 0);
+    return (
+      <>
+        {Array(fullStars).fill(0).map((_, i) => <Star key={`full-${i}`} className="h-4 w-4 fill-yellow-400 text-yellow-400" />)}
+        {halfStar && <Star key="half" className="h-4 w-4 fill-yellow-400 text-yellow-400" style={{ clipPath: 'polygon(0 0, 50% 0, 50% 100%, 0 100%)' }} />}
+        {Array(emptyStars).fill(0).map((_, i) => <Star key={`empty-${i}`} className="h-4 w-4 text-yellow-400" />)}
+      </>
+    );
+  };
+
   return (
     <Card className="flex flex-col h-full shadow-lg hover:shadow-xl transition-shadow duration-300 overflow-hidden">
       <CardHeader className="p-0 relative">
@@ -44,7 +57,7 @@ export function MenuCard({
           width={600}
           height={400}
           className="w-full h-48 object-cover"
-          data-ai-hint="food photography"
+          data-ai-hint={menu.dataAiHint || "food photography"}
         />
         {isChefOwner && (
             <Badge variant={menu.isPublic ? "default" : "secondary"} className="absolute top-2 right-2">
@@ -71,6 +84,12 @@ export function MenuCard({
             <span>By Chef {menu.chefName}</span>
           </div>
         )}
+        {!showChefDetails && menu.averageRating !== undefined && menu.numberOfRatings !== undefined && (
+          <div className="flex items-center text-sm text-muted-foreground mb-2">
+            {renderStars(menu.averageRating)}
+            <span className="ml-1.5">({menu.numberOfRatings} {menu.numberOfRatings === 1 ? 'rating' : 'ratings'})</span>
+          </div>
+        )}
         <div className="flex items-center text-sm text-primary mb-1">
           <ChefHat className="h-4 w-4 mr-1.5" />
           <span>{menu.cuisine}</span>
@@ -80,7 +99,7 @@ export function MenuCard({
         <div className="space-y-2 text-sm">
           <div className="flex items-center text-muted-foreground">
             <DollarSign className="h-4 w-4 mr-1.5 text-green-600" />
-            Sale Price: <span className="font-semibold text-foreground ml-1">${menu.pricePerHead.toFixed(2)} per head</span>
+            Price: <span className="font-semibold text-foreground ml-1">${menu.pricePerHead.toFixed(2)} per head</span>
           </div>
            {isChefOwner && menu.costPrice !== undefined && (
              <div className="flex items-center text-sm text-muted-foreground">
@@ -126,7 +145,7 @@ export function MenuCard({
         )}
         {!isChefOwner && onRequest && (
           <Button onClick={() => onRequest(menu.id)} className="w-full" variant="default">
-            Request this Menu
+            View Availability / Request Menu
           </Button>
         )}
       </CardFooter>
