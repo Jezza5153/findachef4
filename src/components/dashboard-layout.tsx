@@ -70,14 +70,13 @@ export function DashboardLayout({
       if (storedName) setCurrentUserName(storedName);
       if (storedRole) setCurrentUserRole(storedRole);
     }
-  }, [pathname]); // Re-check on route change if needed, or use a global state
+  }, [pathname]); 
 
   const handleLogout = () => {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('isLoggedIn');
       localStorage.removeItem('userName');
       localStorage.removeItem('userRole');
-      // Clear chef-specific flags on any logout for safety
       localStorage.removeItem('isChefApproved');
       localStorage.removeItem('isChefSubscribed');
     }
@@ -161,8 +160,8 @@ export function DashboardLayout({
                       <br /><br />
                       For urgent platform issues regarding an ongoing or imminent event, please:
                       <ul className="list-disc list-inside mt-2">
-                        <li>Email: <a href="mailto:support@findachef.com" className="underline">support@findachef.com</a></li>
-                        <li>Call: (XXX) XXX-XXXX (Replace with actual number)</li>
+                        <li>Email: <a href="mailto:support@findachef.com" className="underline">support@findachef.com</a> (Example)</li>
+                        <li>Call: Your Emergency Contact Number Here</li>
                       </ul>
                       Please have your Event ID and relevant details ready.
                     </AlertDialogDescription>
@@ -177,7 +176,6 @@ export function DashboardLayout({
                 <Bell className="h-5 w-5" />
               </Button>
 
-              {/* Determine profile link based on role */}
               <Button variant="ghost" size="icon" aria-label="Profile" asChild>
                 <Link href={currentUserRole?.toLowerCase() === 'chef' ? '/chef/dashboard/profile' : '/customer/dashboard/profile'}>
                     <User className="h-5 w-5" />
@@ -196,5 +194,3 @@ export function DashboardLayout({
     </SidebarProvider>
   );
 }
-
-    

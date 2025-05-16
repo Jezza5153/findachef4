@@ -142,10 +142,9 @@ export default function ShoppingListPage() {
 
   const handleExportToCSV = () => {
     toast({
-      title: 'Export to CSV (Simulated)',
-      description: 'Your shopping list would be exported as a CSV file here.',
+      title: 'Export to CSV',
+      description: 'This feature is a placeholder. Real CSV export requires backend logic.',
     });
-    // Actual CSV export logic would go here
   };
 
   return (
@@ -290,11 +289,11 @@ export default function ShoppingListPage() {
         {items.length > 0 && (
             <CardFooter className="flex flex-col items-end space-y-2 pt-4 border-t">
                 <div className="text-lg font-semibold flex items-center">
-                    <DollarSign className="mr-1 h-5 w-5 text-green-600" />
+                    <DollarSign className="mr-1 h-5 w-5 text-green-600" data-ai-hint="money cost"/>
                     Remaining Cost: ${remainingCost.toFixed(2)}
                 </div>
                 <div className="text-sm text-muted-foreground flex items-center">
-                    <DollarSign className="mr-1 h-4 w-4" />
+                    <DollarSign className="mr-1 h-4 w-4" data-ai-hint="money cost"/>
                     Total Estimated Cost: ${totalEstimatedCost.toFixed(2)}
                 </div>
             </CardFooter>

@@ -54,7 +54,7 @@ const mockChefs: ChefProfile[] = [
   {
     id: 'chef4',
     name: 'Julia Child',
-    email: 'julia.c@example.com', // Already in profile page, slightly different for uniqueness here
+    email: 'julia.c@example.com', 
     tagline: 'Brought French Cuisine to America',
     bio: 'Beloved author and television personality who demystified French cooking for American audiences.',
     specialties: ['French', 'Classic European', 'Pastry'],
@@ -105,8 +105,8 @@ export default function ChefDirectoryPage() {
 
   const handleInviteCollaborate = (chefName: string) => {
     toast({
-      title: 'Collaboration Invite Sent (Simulated)',
-      description: `Your invitation to collaborate has been sent to ${chefName}. They will receive it in their Requests inbox.`,
+      title: 'Collaboration Invite Sent',
+      description: `Your invitation to collaborate has been sent to ${chefName}. (This is a placeholder action)`,
     });
   };
 
@@ -171,7 +171,7 @@ export default function ChefDirectoryPage() {
                 <h3 className="text-lg font-semibold">{chef.name}</h3>
                 {chef.tagline && <p className="text-xs text-muted-foreground mb-2">{chef.tagline}</p>}
                 <div className="flex flex-wrap justify-center gap-1 my-2">
-                  {chef.specialties.slice(0, 3).map(spec => ( // Show max 3 specialties
+                  {chef.specialties.slice(0, 3).map(spec => ( 
                     <Badge key={spec} variant="secondary">{spec}</Badge>
                   ))}
                 </div>
@@ -191,7 +191,7 @@ export default function ChefDirectoryPage() {
       ) : (
         <Card className="text-center py-12 border-dashed">
           <CardContent>
-            <Users className="mx-auto h-12 w-12 text-muted-foreground mb-3" />
+            <Users className="mx-auto h-12 w-12 text-muted-foreground mb-3" data-ai-hint="empty state users"/>
             <p className="text-muted-foreground">No chefs found matching your criteria.</p>
             <p className="text-xs text-muted-foreground mt-1">Try adjusting your filters.</p>
           </CardContent>

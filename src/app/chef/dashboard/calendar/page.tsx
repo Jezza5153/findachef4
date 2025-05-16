@@ -35,7 +35,7 @@ const MOCK_EVENTS: CalendarEvent[] = [
     notes: 'Ensure vegetarian options are clearly marked. 2 gluten-free meals needed.',
     coChefs: ['Chef John Doe', 'Chef Assistant Jane'],
     status: 'Confirmed',
-    weather: 'Sunny, 22°C (Placeholder)',
+    weather: 'Sunny, 22°C (Weather data is a placeholder)',
     toolsNeeded: ['Serving platters', 'Chafing dishes', 'Cooler boxes (Placeholder)'],
   },
   {
@@ -49,7 +49,7 @@ const MOCK_EVENTS: CalendarEvent[] = [
     location: 'Client\'s Residence - 456 Ocean View Dr.',
     notes: 'Surprise dessert with "Happy Anniversary" message.',
     status: 'Confirmed',
-    weather: 'Clear night, 18°C (Placeholder)',
+    weather: 'Clear night, 18°C (Weather data is a placeholder)',
     coChefs: [],
   },
   {
@@ -96,7 +96,7 @@ const MOCK_EVENTS: CalendarEvent[] = [
 
 export default function ChefCalendarPage() {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
-  const [allEvents, setAllEvents] = useState<CalendarEvent[]>(MOCK_EVENTS); // In a real app, fetch this
+  const [allEvents, setAllEvents] = useState<CalendarEvent[]>(MOCK_EVENTS); 
   const [blockedDates, setBlockedDates] = useState<Date[]>([]);
   const { toast } = useToast();
 
@@ -131,14 +131,14 @@ export default function ChefCalendarPage() {
   const handleGoogleCalendarSync = () => {
     toast({
         title: "Google Calendar Sync",
-        description: "This feature is coming soon!",
+        description: "This feature is a placeholder. Real integration requires backend setup.",
     });
   };
 
   const handleProcessCompletion = (eventId: string) => {
     toast({
         title: "Process Event Completion",
-        description: `Simulated: Initiate QR Scan / Mark event ${eventId} as complete. This action would trigger the release of the remaining 50% of funds held in escrow.`,
+        description: `Action for event ${eventId} (e.g., QR Scan) initiated. This would trigger backend processes for fund release.`,
         duration: 7000,
     });
   };
@@ -289,7 +289,7 @@ export default function ChefCalendarPage() {
                         </>
                     )}
                     {(event.status === 'Confirmed' || event.status === 'Pending') && (
-                         <Button variant="link" size="sm" className="p-0 h-auto text-xs text-blue-500 hover:underline">View/Edit Details</Button>
+                         <Button variant="link" size="sm" className="p-0 h-auto text-xs text-blue-500 hover:underline">View/Edit Details (Placeholder)</Button>
                     )}
                     {event.status === 'Cancelled' && (
                         <p className="text-xs text-destructive">This event has been cancelled.</p>
@@ -313,5 +313,3 @@ export default function ChefCalendarPage() {
     </div>
   );
 }
-
-    
