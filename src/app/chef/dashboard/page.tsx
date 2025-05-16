@@ -1,3 +1,4 @@
+'use client';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { CalendarClock, MessageCircleMore, ShieldCheck } from 'lucide-react';
