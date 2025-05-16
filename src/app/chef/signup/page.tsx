@@ -31,6 +31,7 @@ const chefSignupSchema = z.object({
   password: z.string().min(8, { message: 'Password must be at least 8 characters.' }),
   confirmPassword: z.string(),
   name: z.string().min(2, { message: 'Name must be at least 2 characters.' }),
+  abn: z.string().min(1, {message: 'ABN is required.'}),
   bio: z.string().min(20, {message: 'Bio must be at least 20 characters.'}).max(500, {message: "Bio cannot exceed 500 characters."}),
   specialties: z.string().min(1, { message: 'Please list at least one specialty.' }), // Comma-separated
   profilePicture: z.instanceof(File).optional()
@@ -59,6 +60,7 @@ export default function ChefSignupPage() {
       password: '',
       confirmPassword: '',
       name: '',
+      abn: '',
       bio: '',
       specialties: '',
       agreedToTerms: false,
@@ -119,7 +121,7 @@ export default function ChefSignupPage() {
     <div className="container mx-auto max-w-4xl py-12 px-4 sm:px-6 lg:px-8">
       <Card className="shadow-xl">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <div className="mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary" data-ai-hint="chef hat logo">
             <ChefHat className="h-8 w-8" />
           </div>
           <CardTitle className="text-3xl font-bold">Become a Chef on FindAChef</CardTitle>
@@ -186,6 +188,19 @@ export default function ChefSignupPage() {
                     </FormItem>
                   )}
                 />
+                 <FormField
+                  control={form.control}
+                  name="abn"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>ABN (Australian Business Number)</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Your ABN" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               </div>
 
               <h3 className="text-xl font-semibold border-b pb-2 pt-4">Profile Details</h3>
@@ -200,7 +215,7 @@ export default function ChefSignupPage() {
                           {profilePicturePreview ? (
                             <Image src={profilePicturePreview} alt="Profile preview" width={80} height={80} className="rounded-full object-cover" data-ai-hint="person avatar" />
                           ) : (
-                            <div className="h-20 w-20 rounded-full bg-muted flex items-center justify-center text-muted-foreground">
+                            <div className="h-20 w-20 rounded-full bg-muted flex items-center justify-center text-muted-foreground" data-ai-hint="avatar placeholder">
                               <UserPlus className="h-10 w-10" />
                             </div>
                           )}
@@ -273,7 +288,7 @@ export default function ChefSignupPage() {
                         Agreement & Policies
                       </FormLabel>
                       <FormDescription>
-                        I agree to the FindAChef <Link href="/terms" className="underline hover:text-primary">Terms of Service</Link>, <Link href="/chef-policies" className="underline hover:text-primary">Chef Program Policies</Link>, and acknowledge the <Link href="/privacy" className="underline hover:text-primary">Privacy Policy</Link>.
+                        I agree to the FindAChef <Link href="/terms" className="underline hover:text-primary">Terms of Service</Link>, <Link href="/chef-policies" className="underline hover:text-primary">Chef Program Policies</Link>, and acknowledge the <Link href="/privacy" className="underline hover:text-primary">Privacy Policy</Link>. This includes keeping all communications and payments on the platform.
                       </FormDescription>
                       <FormMessage />
                     </div>
