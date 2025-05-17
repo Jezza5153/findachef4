@@ -5,9 +5,9 @@ import { useState, useEffect, useMemo } from 'react';
 import { Calendar } from '@/components/ui/calendar';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import type { CalendarEvent } from '@/types';
+import type { CalendarEvent, ChefProfile } from '@/types';
 import { format, parseISO, isSameDay, startOfDay } from 'date-fns';
-import { CalendarDays, Users, DollarSign, MapPin, Utensils, Info, Sun, ChefHat, AlertTriangle, CheckCircle, Clock, QrCode, Ban } from 'lucide-react';
+import { CalendarDays, Users, DollarSign, MapPin, Utensils, Info, Sun, ChefHat, AlertTriangle, CheckCircle, Clock, QrCode, Ban, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -20,12 +20,16 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { useAuth } from '@/context/AuthContext';
+import { db } from '@/lib/firebase';
+import { doc, getDoc, updateDoc, Timestamp } from 'firebase/firestore';
 
-// Mock initial events
+// Mock initial events - will be replaced by Firestore data eventually
 const MOCK_EVENTS: CalendarEvent[] = [
   {
     id: 'event1',
-    date: new Date(new Date().setDate(new Date().getDate() + 2)).toISOString().split('T')[0], // 2 days from now
+    chefId: 'mockChef', // Add chefId
+    date: new Date(new Date().setDate(new Date().getDate() + 2)).toISOString().split('T')[0], 
     title: 'Corporate Lunch Catering',
     customerName: 'Tech Solutions Inc.',
     pax: 50,
@@ -40,7 +44,8 @@ const MOCK_EVENTS: CalendarEvent[] = [
   },
   {
     id: 'event2',
-    date: new Date(new Date().setDate(new Date().getDate() + 7)).toISOString().split('T')[0], // 7 days from now
+    chefId: 'mockChef',
+    date: new Date(new Date().setDate(new Date().getDate() + 7)).toISOString().split('T')[0], 
     title: 'Anniversary Dinner for Two',
     customerName: 'Mr. & Mrs. Smith',
     pax: 2,
@@ -52,9 +57,10 @@ const MOCK_EVENTS: CalendarEvent[] = [
     weather: 'Clear night, 18°C (Weather data is a placeholder)',
     coChefs: [],
   },
-  {
+   {
     id: 'event3',
-    date: new Date(new Date().setDate(new Date().getDate() + 7)).toISOString().split('T')[0], // Another event on the same day
+    chefId: 'mockChef',
+    date: new Date(new Date().setDate(new Date().getDate() + 7)).toISOString().split('T')[0], 
     title: 'Kids Birthday Party',
     customerName: 'Jane Doe (for Leo)',
     pax: 15,
@@ -67,7 +73,8 @@ const MOCK_EVENTS: CalendarEvent[] = [
   },
    {
     id: 'event4',
-    date: new Date(new Date().setDate(new Date().getDate() + 10)).toISOString().split('T')[0], // 10 days from now
+    chefId: 'mockChef',
+    date: new Date(new Date().setDate(new Date().getDate() + 10)).toISOString().split('T')[0], 
     title: 'Private Cooking Class',
     customerName: 'Maria Rodriguez',
     pax: 4,
@@ -81,6 +88,7 @@ const MOCK_EVENTS: CalendarEvent[] = [
   },
   {
     id: 'event5',
+    chefId: 'mockChef',
     date: new Date(new Date().setDate(new Date().getDate() + 12)).toISOString().split('T')[0],
     title: 'Cancelled Event Example',
     customerName: 'Old Booking',
@@ -95,10 +103,40 @@ const MOCK_EVENTS: CalendarEvent[] = [
 
 
 export default function ChefCalendarPage() {
+  const { user } = useAuth();
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
-  const [allEvents, setAllEvents] = useState<CalendarEvent[]>(MOCK_EVENTS); 
+  const [allEvents, setAllEvents] = useState<CalendarEvent[]>(MOCK_EVENTS); // Stays mock for now
   const [blockedDates, setBlockedDates] = useState<Date[]>([]);
+  const [isLoadingBlockedDates, setIsLoadingBlockedDates] = useState(true);
   const { toast } = useToast();
+
+  useEffect(() => {
+    const fetchBlockedDates = async () => {
+      if (!user) {
+        setIsLoadingBlockedDates(false);
+        return;
+      }
+      setIsLoadingBlockedDates(true);
+      try {
+        const userDocRef = doc(db, "users", user.uid);
+        const docSnap = await getDoc(userDocRef);
+        if (docSnap.exists()) {
+          const userData = docSnap.data() as ChefProfile;
+          if (userData.blockedDates) {
+            setBlockedDates(userData.blockedDates.map(isoString => parseISO(isoString)));
+          } else {
+            setBlockedDates([]);
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching blocked dates:", error);
+        toast({ title: "Error", description: "Could not fetch blocked dates.", variant: "destructive" });
+      } finally {
+        setIsLoadingBlockedDates(false);
+      }
+    };
+    fetchBlockedDates();
+  }, [user, toast]);
 
   const eventsForSelectedDate = useMemo(() => {
     if (!selectedDate) return [];
@@ -130,35 +168,59 @@ export default function ChefCalendarPage() {
 
   const handleGoogleCalendarSync = () => {
     toast({
-        title: "Google Calendar Sync",
+        title: "Google Calendar Sync (Placeholder)",
         description: "This feature is a placeholder. Real integration requires backend setup.",
     });
   };
 
   const handleProcessCompletion = (eventId: string) => {
     toast({
-        title: "Process Event Completion",
+        title: "Process Event Completion (Placeholder)",
         description: `Action for event ${eventId} (e.g., QR Scan) initiated. This would trigger backend processes for fund release.`,
         duration: 7000,
     });
   };
 
-  const handleToggleBlockDate = () => {
-    if (!selectedDate) {
+  const handleToggleBlockDate = async () => {
+    if (!user || !selectedDate) {
       toast({ title: "No Date Selected", description: "Please select a date to block or unblock.", variant: "destructive" });
       return;
     }
     const dateToToggle = startOfDay(selectedDate);
     const alreadyBlocked = blockedDates.some(d => isSameDay(d, dateToToggle));
+    let newBlockedDatesIso: string[];
+    let newBlockedDates: Date[];
 
     if (alreadyBlocked) {
-      setBlockedDates(prev => prev.filter(d => !isSameDay(d, dateToToggle)));
-      toast({ title: "Date Unblocked", description: `${format(dateToToggle, 'PPP')} is now available.` });
+      newBlockedDates = blockedDates.filter(d => !isSameDay(d, dateToToggle));
+      newBlockedDatesIso = newBlockedDates.map(d => d.toISOString().split('T')[0]);
     } else {
-      setBlockedDates(prev => [...prev, dateToToggle]);
-      toast({ title: "Date Blocked", description: `${format(dateToToggle, 'PPP')} is now marked as unavailable.` });
+      newBlockedDates = [...blockedDates, dateToToggle];
+      newBlockedDatesIso = newBlockedDates.map(d => d.toISOString().split('T')[0]);
+    }
+    
+    try {
+      const userDocRef = doc(db, "users", user.uid);
+      await updateDoc(userDocRef, { blockedDates: newBlockedDatesIso });
+      setBlockedDates(newBlockedDates);
+      toast({ 
+        title: alreadyBlocked ? "Date Unblocked" : "Date Blocked", 
+        description: `${format(dateToToggle, 'PPP')} is now ${alreadyBlocked ? 'available' : 'marked as unavailable.'}` 
+      });
+    } catch (error) {
+      console.error("Error updating blocked dates:", error);
+      toast({ title: "Update Error", description: "Could not update blocked status.", variant: "destructive"});
     }
   };
+
+  if (isLoadingBlockedDates) {
+     return (
+      <div className="flex justify-center items-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="ml-2">Loading calendar data...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -187,14 +249,22 @@ export default function ChefCalendarPage() {
               selected={selectedDate}
               onSelect={setSelectedDate}
               className="rounded-md border"
-              disabled={(date) => date < new Date(new Date().setDate(new Date().getDate() - 365)) || date > new Date(new Date().setDate(new Date().getDate() + 365*2))} // Example: 1 year past, 2 years future
+              disabled={(date) => date < new Date(new Date().setDate(new Date().getDate() - 365)) || date > new Date(new Date().setDate(new Date().getDate() + 365*2))} 
               modifiers={{ blocked: blockedDates }}
-              modifiersStyles={{ blocked: { textDecoration: 'line-through', color: 'hsl(var(--destructive))', opacity: 0.6 } }}
+              modifiersStyles={{ 
+                blocked: { 
+                  textDecoration: 'line-through', 
+                  color: 'hsl(var(--destructive))', 
+                  backgroundColor: 'hsl(var(--destructive) / 0.1)',
+                  opacity: 0.6 
+                } 
+              }}
             />
             <Button onClick={handleToggleBlockDate} variant="outline" className="mt-4 w-full">
               <Ban className="mr-2 h-4 w-4"/>
               {isDateBlocked ? "Unblock Selected Date" : "Block Selected Date"}
             </Button>
+             <p className="text-xs text-muted-foreground mt-2">Blocked dates will prevent new booking requests.</p>
           </CardContent>
         </Card>
 
@@ -205,7 +275,7 @@ export default function ChefCalendarPage() {
           </h2>
 
           {isDateBlocked && eventsForSelectedDate.length === 0 && (
-            <Card className="text-center py-12 border-dashed border-destructive/50">
+            <Card className="text-center py-12 border-dashed border-destructive/50 bg-destructive/5">
               <CardContent>
                 <Ban className="mx-auto h-12 w-12 text-destructive mb-3" data-ai-hint="blocked warning" />
                 <p className="text-destructive font-semibold">This date is marked as unavailable.</p>

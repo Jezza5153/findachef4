@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import * as z from 'zod';
@@ -38,7 +38,10 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import type { ShoppingListItem } from '@/types';
-import { PlusCircle, Trash2, ShoppingCart, FileDown, Edit, DollarSign } from 'lucide-react';
+import { PlusCircle, Trash2, ShoppingCart, FileDown, Edit, DollarSign, Loader2 } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
+import { db } from '@/lib/firebase';
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where, serverTimestamp, Timestamp } from 'firebase/firestore';
 
 const shoppingListItemSchema = z.object({
   name: z.string().min(1, { message: 'Item name is required.' }),
@@ -50,15 +53,10 @@ const shoppingListItemSchema = z.object({
 
 type ShoppingListItemFormValues = z.infer<typeof shoppingListItemSchema>;
 
-const initialShoppingListItems: ShoppingListItem[] = [
-  { id: '1', name: 'Chicken Breast', quantity: 2, unit: 'kg', estimatedCost: 20, purchased: false, notes: 'Skinless, boneless' },
-  { id: '2', name: 'Basmati Rice', quantity: 1, unit: 'kg', estimatedCost: 5, purchased: true },
-  { id: '3', name: 'Olive Oil', quantity: 1, unit: 'bottle (750ml)', estimatedCost: 12, purchased: false },
-  { id: '4', name: 'Tomatoes', quantity: 5, unit: 'pcs', estimatedCost: 3, purchased: false, notes: 'Ripe, on vine' },
-];
-
 export default function ShoppingListPage() {
-  const [items, setItems] = useState<ShoppingListItem[]>(initialShoppingListItems);
+  const { user } = useAuth();
+  const [items, setItems] = useState<ShoppingListItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [isAddItemDialogOpen, setIsAddItemDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<ShoppingListItem | null>(null);
   const { toast } = useToast();
@@ -73,6 +71,29 @@ export default function ShoppingListPage() {
       notes: '',
     },
   });
+
+  useEffect(() => {
+    const fetchItems = async () => {
+      if (!user) {
+        setIsLoading(false);
+        return;
+      }
+      setIsLoading(true);
+      try {
+        const itemsCollectionRef = collection(db, "users", user.uid, "shoppingListItems");
+        const q = query(itemsCollectionRef, orderBy("createdAt", "desc"));
+        const querySnapshot = await getDocs(q);
+        const fetchedItems = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ShoppingListItem));
+        setItems(fetchedItems);
+      } catch (error) {
+        console.error("Error fetching shopping list items:", error);
+        toast({ title: "Error", description: "Could not fetch shopping list items.", variant: "destructive" });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchItems();
+  }, [user, toast]);
 
   const openAddItemDialog = (itemToEdit: ShoppingListItem | null = null) => {
     setEditingItem(itemToEdit);
@@ -96,38 +117,69 @@ export default function ShoppingListPage() {
     setIsAddItemDialogOpen(true);
   };
 
-  const onSubmitItem = (data: ShoppingListItemFormValues) => {
-    if (editingItem) {
-      setItems(items.map(item => item.id === editingItem.id ? { ...editingItem, ...data } : item));
-      toast({ title: 'Item Updated', description: `"${data.name}" has been updated.` });
-    } else {
-      const newItem: ShoppingListItem = {
-        id: String(Date.now()),
-        ...data,
-        purchased: false,
-      };
-      setItems([...items, newItem]);
-      toast({ title: 'Item Added', description: `"${data.name}" has been added to your shopping list.` });
+  const onSubmitItem = async (data: ShoppingListItemFormValues) => {
+    if (!user) {
+      toast({ title: "Error", description: "You must be logged in.", variant: "destructive" });
+      return;
     }
-    form.reset();
-    setEditingItem(null);
-    setIsAddItemDialogOpen(false);
+    
+    const itemData = {
+      ...data,
+      chefId: user.uid,
+      purchased: editingItem ? editingItem.purchased : false,
+      createdAt: editingItem ? editingItem.createdAt : serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    try {
+      if (editingItem) {
+        const itemDocRef = doc(db, "users", user.uid, "shoppingListItems", editingItem.id);
+        await updateDoc(itemDocRef, itemData);
+        setItems(items.map(item => item.id === editingItem.id ? { ...editingItem, ...itemData, id: editingItem.id } : item));
+        toast({ title: 'Item Updated', description: `"${data.name}" has been updated.` });
+      } else {
+        const docRef = await addDoc(collection(db, "users", user.uid, "shoppingListItems"), itemData);
+        setItems([{ ...itemData, id: docRef.id }, ...items]);
+        toast({ title: 'Item Added', description: `"${data.name}" has been added.` });
+      }
+      form.reset();
+      setEditingItem(null);
+      setIsAddItemDialogOpen(false);
+    } catch (error) {
+        console.error("Error saving shopping list item:", error);
+        toast({ title: "Save Error", description: "Could not save item.", variant: "destructive" });
+    }
   };
 
-  const handleDeleteItem = (itemId: string) => {
+  const handleDeleteItem = async (itemId: string) => {
+    if (!user) return;
     const itemToDelete = items.find(item => item.id === itemId);
     if (window.confirm(`Are you sure you want to delete "${itemToDelete?.name}"?`)) {
-      setItems(items.filter(item => item.id !== itemId));
-      toast({ title: 'Item Deleted', description: `"${itemToDelete?.name}" removed.`, variant: 'destructive' });
+      try {
+        await deleteDoc(doc(db, "users", user.uid, "shoppingListItems", itemId));
+        setItems(items.filter(item => item.id !== itemId));
+        toast({ title: 'Item Deleted', description: `"${itemToDelete?.name}" removed.`, variant: "destructive" });
+      } catch (error) {
+        console.error("Error deleting item:", error);
+        toast({ title: "Delete Error", description: "Could not delete item.", variant: "destructive" });
+      }
     }
   };
 
-  const handleTogglePurchased = (itemId: string) => {
-    setItems(
-      items.map(item =>
-        item.id === itemId ? { ...item, purchased: !item.purchased } : item
-      )
-    );
+  const handleTogglePurchased = async (itemId: string) => {
+    if (!user) return;
+    const itemToUpdate = items.find(item => item.id === itemId);
+    if (itemToUpdate) {
+      const newPurchasedStatus = !itemToUpdate.purchased;
+      try {
+        const itemDocRef = doc(db, "users", user.uid, "shoppingListItems", itemId);
+        await updateDoc(itemDocRef, { purchased: newPurchasedStatus });
+        setItems(items.map(item => item.id === itemId ? { ...item, purchased: newPurchasedStatus } : item));
+      } catch (error) {
+        console.error("Error updating purchased status:", error);
+        toast({ title: "Update Error", description: "Could not update status.", variant: "destructive" });
+      }
+    }
   };
 
   const totalEstimatedCost = useMemo(() => {
@@ -142,10 +194,19 @@ export default function ShoppingListPage() {
 
   const handleExportToCSV = () => {
     toast({
-      title: 'Export to CSV',
+      title: 'Export to CSV (Placeholder)',
       description: 'This feature is a placeholder. Real CSV export requires backend logic.',
     });
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="ml-2">Loading shopping list...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">

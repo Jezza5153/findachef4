@@ -7,44 +7,47 @@ export interface Menu {
   pricePerHead: number;
   dietaryInfo: string[]; // e.g., ["Vegetarian", "Gluten-Free"]
   isPublic: boolean;
-  chefId?: string;
+  chefId: string; // Made non-optional
   chefName?: string;
-  chefProfilePictureUrl?: string; // Added for displaying in non-anonymized contexts
-  pax?: number; // Number of people the menu serves
-  costPrice?: number; // For chef's internal calculation
-  imageUrl?: string; // Optional image for the menu
-  dataAiHint?: string; // For Unsplash search keywords for placeholder images
-  averageRating?: number; // Optional: for customer reviews
-  numberOfRatings?: number; // Optional: for customer reviews
+  chefProfilePictureUrl?: string; 
+  pax?: number; 
+  costPrice?: number; 
+  imageUrl?: string; 
+  dataAiHint?: string; 
+  averageRating?: number; 
+  numberOfRatings?: number; 
+  createdAt?: any; // Firestore Timestamp
+  updatedAt?: any; // Firestore Timestamp
 }
 
 export interface ParseResumeOutput {
   experience: string;
   skills: string[];
-  education?: string; 
+  education?: string;
 }
 
 export interface ChefProfile {
-  id: string;
+  id: string; // Corresponds to Firebase Auth UID
   name: string;
   email: string;
-  tagline?: string; 
+  abn?: string;
+  tagline?: string;
   bio: string;
   specialties: string[];
   profilePictureUrl?: string;
-  experienceSummary?: string; 
-  skills?: string[]; 
-  education?: string; 
-  portfolioItem1Url?: string; 
-  portfolioItem1Caption?: string; 
-  portfolioItem2Url?: string; 
-  portfolioItem2Caption?: string; 
-  resumeFileUrl?: string; 
-  // Fields below could be added for more detailed directory filtering/display
-  // experienceLevel?: 'Entry' | 'Junior' | 'Mid-Level' | 'Senior' | 'Executive'; 
-  // starRating?: number; // e.g. 1-5 based on internal metrics or customer reviews
-  // city?: string;
-  // country?: string;
+  experienceSummary?: string;
+  skills?: string[];
+  education?: string;
+  portfolioItem1Url?: string;
+  portfolioItem1Caption?: string;
+  portfolioItem2Url?: string;
+  portfolioItem2Caption?: string;
+  resumeFileUrl?: string;
+  role?: 'chef' | 'customer' | 'admin';
+  isApproved?: boolean;
+  isSubscribed?: boolean;
+  createdAt?: any; // Firestore Timestamp
+  blockedDates?: string[]; // Array of ISO date strings
 }
 
 export interface CustomerRequest {
@@ -54,8 +57,8 @@ export interface CustomerRequest {
   cuisinePreference: string;
   pax: number;
   eventDate: Date | undefined;
-  notes?: string; // Made notes optional to match form
-  customerId?: string; 
+  notes?: string; 
+  customerId?: string;
 }
 
 export interface Testimonial {
@@ -72,19 +75,22 @@ export interface Option {
 }
 
 export interface ShoppingListItem {
-  id: string;
+  id: string; // Firestore document ID
+  chefId: string; // UID of the chef who owns this item
   name: string;
   quantity: number;
   unit: string;
   estimatedCost: number;
   notes?: string;
   purchased: boolean;
-  menuId?: string; // Optional: for filtering by menu
-  eventId?: string; // Optional: for filtering by event
+  menuId?: string; 
+  eventId?: string; 
+  createdAt?: any; // Firestore Timestamp
 }
 
 export interface CalendarEvent {
-  id: string;
+  id: string; // Firestore document ID
+  chefId: string; // UID of the chef who owns this event
   date: string; // YYYY-MM-DD format
   title: string;
   customerName?: string;
@@ -92,12 +98,12 @@ export interface CalendarEvent {
   menuName: string;
   pricePerHead: number;
   location?: string;
-  notes?: string; // Dietary notes, special requests etc.
+  notes?: string; 
   coChefs?: string[];
   status: 'Confirmed' | 'Pending' | 'Cancelled';
-  // Placeholders for future features
-  weather?: string; 
+  weather?: string;
   toolsNeeded?: string[];
+  createdAt?: any; // Firestore Timestamp
 }
 
 export interface ChefWallEvent {
@@ -105,16 +111,16 @@ export interface ChefWallEvent {
   title: string;
   description: string;
   maxPax: number;
-  eventDateTime: string; // Combined date and time string
+  eventDateTime: string; 
   location: string;
   pricePerPerson: number;
-  chefsInvolved: string[]; // Array of chef names or IDs
-  tags: string[]; // e.g., ["Casual", "Fine Dining", "Outdoor"]
+  chefsInvolved: string[]; 
+  tags: string[]; 
   imageUrl?: string;
   isPublic: boolean;
-  chefId: string; // ID of the chef who posted
-  chefName: string; // Name of the chef
-  chefAvatarUrl?: string; // Avatar of the posting chef
+  chefId: string; 
+  chefName: string; 
+  chefAvatarUrl?: string; 
   dataAiHint?: string;
 }
 
@@ -124,46 +130,50 @@ export interface CustomerWallPost {
   customerAvatarUrl?: string;
   eventType: string;
   numberOfPeople: number;
-  budget: string; // e.g., "$500 total" or "$50/person"
+  budget: string; 
   cuisinePreferences: string;
-  desiredDates: string; // Text field for flexibility
+  desiredDates: string; 
   extraNotes?: string;
-  isPublic: boolean; // Public (all chefs) or Private (specific chef - future feature)
-  postedAt: string; // e.g., "2 hours ago"
+  isPublic: boolean; 
+  postedAt: string; 
   dataAiHint?: string;
 }
 
 export interface CustomerProfile {
-  id: string;
+  id: string; // Corresponds to Firebase Auth UID
   name: string;
   email: string;
   phone?: string;
   profilePictureUrl?: string;
-  kitchenEquipment?: string[]; // e.g., ["Oven", "Mixer"]
+  kitchenEquipment?: string[]; 
   addressDetails?: string;
   defaultEventType?: string;
   defaultPax?: number;
-  defaultBudget?: string; // e.g., "per person" or "total"
+  defaultBudget?: string; 
   defaultBudgetAmount?: number;
-  defaultFrequency?: string; // e.g., "Once", "Weekly"
+  defaultFrequency?: string; 
   defaultTheme?: string;
   defaultDietaryNotes?: string;
   defaultExtraComments?: string;
+  role?: 'chef' | 'customer' | 'admin';
+  createdAt?: any; // Firestore Timestamp
 }
 
 export type CostType = 'Ingredient' | 'Equipment' | 'Tax' | 'BAS' | 'Travel' | 'Other';
 
 export interface Receipt {
   id: string;
-  fileName?: string; // Name of the uploaded file
+  fileName?: string; 
   vendor: string;
-  date: Date;
+  date: Date; // Will be stored as Firestore Timestamp, converted on fetch/save
   totalAmount: number;
   assignedToEventId?: string;
   assignedToMenuId?: string;
   costType: CostType;
   notes?: string;
-  // imageUrl?: string; // For preview, if needed in future
+  chefId?: string; // UID of the chef who owns this receipt
+  createdAt?: any; // Firestore Timestamp
+  imageUrl?: string; // URL if uploaded to storage
 }
 
 // Tax Advice Flow Types

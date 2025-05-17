@@ -1,67 +1,99 @@
 
+'use client';
+
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { MenuCard } from '@/components/menu-card';
-import type { Menu } from '@/types';
-import { ArrowRight, CalendarCheck2, Send, UserCircle, Utensils, Search, Sparkles, CalendarSearch } from 'lucide-react';
+import type { Menu, ChefProfile as ChefProfileType } from '@/types';
+import { ArrowRight, CalendarCheck2, Send, UserCircle, Utensils, Search, Sparkles, CalendarSearch, Loader2 } from 'lucide-react';
 import Image from 'next/image';
+import { useEffect, useState } from 'react';
+import { db } from '@/lib/firebase';
+import { collection, query, where, limit, getDocs, orderBy } from 'firebase/firestore';
+import { useAuth } from '@/context/AuthContext';
 
-// Mock data for customer dashboard
-const topMenus: Menu[] = [
-  {
-    id: 'tm1', title: 'Weekend Brunch Special', cuisine: 'American', pricePerHead: 50, isPublic: true,
-    description: 'A delightful brunch spread with pancakes, eggs benedict, and mimosas.', dietaryInfo: ['Vegetarian option'],
-    imageUrl: 'https://placehold.co/600x400.png', dataAiHint: 'brunch food',
-  },
-  {
-    id: 'tm2', title: 'Romantic Dinner for Two', cuisine: 'Italian', pricePerHead: 150, isPublic: true,
-    description: 'An intimate Italian dinner featuring homemade pasta and fine wine pairings.', dietaryInfo: [],
-    imageUrl: 'https://placehold.co/600x400.png', dataAiHint: 'romantic dinner',
-  },
-  {
-    id: 'tm3', title: 'Family Taco Night', cuisine: 'Mexican', pricePerHead: 40, isPublic: true,
-    description: 'Build-your-own tacos with all the fixings. Fun for the whole family!', dietaryInfo: ['Gluten-Free Tortillas'],
-    imageUrl: 'https://placehold.co/600x400.png', dataAiHint: 'taco night',
-  },
-  {
-    id: 'tm4', title: 'Healthy Mediterranean Lunch', cuisine: 'Mediterranean', pricePerHead: 60, isPublic: true,
-    description: 'Fresh salads, grilled halloumi, hummus, and pita bread.', dietaryInfo: ['Vegan Option'],
-    imageUrl: 'https://placehold.co/600x400.png', dataAiHint: 'mediterranean food',
-  },
-  {
-    id: 'tm5', title: 'Sushi Making Experience', cuisine: 'Japanese', pricePerHead: 90, isPublic: true,
-    description: 'Learn to make your own sushi rolls with a professional chef.', dietaryInfo: [],
-    imageUrl: 'https://placehold.co/600x400.png', dataAiHint: 'sushi making',
-  },
-];
-
-const myBookedEvents = [
+const myBookedEventsMock = [
     { id: 'mbe1', name: 'Birthday Dinner with Chef Julia', date: 'Nov 15, 2024 - 7:00 PM', status: 'Confirmed', image: 'https://placehold.co/100x100.png', dataAiHint: 'dinner party' },
     { id: 'mbe2', name: 'Cooking Class: Pasta Making', date: 'Dec 02, 2024 - 2:00 PM', status: 'Confirmed', image: 'https://placehold.co/100x100.png', dataAiHint: 'cooking class' },
 ];
 
-const discoverChefEvents = [
+const discoverChefEventsMock = [
   { id: 'dce1', name: 'Neighborhood BBQ Fest', date: 'Upcoming: Sat, Nov 25', image: 'https://placehold.co/600x400.png' , dataAiHint: 'bbq food fest'},
   { id: 'dce2', name: 'Exclusive Wine Tasting', date: 'Upcoming: Fri, Dec 1', image: 'https://placehold.co/600x400.png', dataAiHint: 'wine tasting event' },
   { id: 'dce3', name: 'Farm-to-Table Pop-Up Dinner', date: 'Upcoming: Sat, Dec 9', image: 'https://placehold.co/600x400.png', dataAiHint: 'farm to table' },
 ];
 
-const topChefs = [
-  { id: 'tc1', name: 'Chef Ramsey Gordon', specialties: 'British, French', image: 'https://placehold.co/100x100.png', dataAiHint: 'chef portrait' },
-  { id: 'tc2', name: 'Chef Alice Waters', specialties: 'Californian, Organic', image: 'https://placehold.co/100x100.png', dataAiHint: 'chef portrait' },
-  { id: 'tc3', name: 'Chef Jiro Ono', specialties: 'Sushi, Japanese', image: 'https://placehold.co/100x100.png', dataAiHint: 'chef portrait' },
-  { id: 'tc4', name: 'Chef Massimo Bottura', specialties: 'Modern Italian', image: 'https://placehold.co/100x100.png', dataAiHint: 'chef portrait' },
-];
-
 
 export default function CustomerDashboardPage() {
+  const [topMenus, setTopMenus] = useState<Menu[]>([]);
+  const [featuredChefs, setFeaturedChefs] = useState<ChefProfileType[]>([]);
+  const [myBookedEvents, setMyBookedEvents] = useState(myBookedEventsMock); // Stays mock for now
+  const [discoverChefEvents, setDiscoverChefEvents] = useState(discoverChefEventsMock); // Stays mock for now
+  const [loadingMenus, setLoadingMenus] = useState(true);
+  const [loadingChefs, setLoadingChefs] = useState(true);
+  const { user } = useAuth();
+  const [userName, setUserName] = useState("Customer");
+
+  useEffect(() => {
+    if (user && user.displayName) {
+      setUserName(user.displayName);
+    } else if (user && user.email) {
+      setUserName(user.email.split('@')[0]);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    const fetchTopMenus = async () => {
+      setLoadingMenus(true);
+      try {
+        const menusQuery = query(
+          collection(db, "menus"),
+          where("isPublic", "==", true),
+          orderBy("createdAt", "desc"), // Example: order by most recent
+          limit(5)
+        );
+        const querySnapshot = await getDocs(menusQuery);
+        const menusData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Menu));
+        setTopMenus(menusData);
+      } catch (error) {
+        console.error("Error fetching top menus: ", error);
+      } finally {
+        setLoadingMenus(false);
+      }
+    };
+
+    const fetchFeaturedChefs = async () => {
+      setLoadingChefs(true);
+      try {
+        const chefsQuery = query(
+          collection(db, "users"),
+          where("role", "==", "chef"),
+          where("isApproved", "==", true), // Only approved chefs
+          // Add orderBy for consistent results or a specific "featured" flag if you implement one
+          limit(4) 
+        );
+        const querySnapshot = await getDocs(chefsQuery);
+        const chefsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ChefProfileType));
+        setFeaturedChefs(chefsData);
+      } catch (error) {
+        console.error("Error fetching featured chefs: ", error);
+      } finally {
+        setLoadingChefs(false);
+      }
+    };
+
+    fetchTopMenus();
+    fetchFeaturedChefs();
+  }, []);
+
+
   return (
     <div className="space-y-12">
       <Card className="bg-gradient-to-r from-primary/10 to-accent/10 p-8 shadow-lg">
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             <div>
-                <h1 className="text-3xl font-bold text-foreground">Welcome Back, Customer Name!</h1>
+                <h1 className="text-3xl font-bold text-foreground">Welcome Back, {userName}!</h1>
                 <p className="text-lg text-foreground/80 mt-2">Ready for your next culinary adventure?</p>
             </div>
             <div className="flex flex-col sm:flex-row gap-3">
@@ -95,12 +127,6 @@ export default function CustomerDashboardPage() {
                         </div>
                     </Card>
                 ))}
-                 {myBookedEvents.length === 0 && ( /* This part will likely not show if the first condition is met, adjust logic if needed for different "empty states" */
-                    <Card className="md:col-span-2 lg:col-span-3 p-6 text-center items-center justify-center flex flex-col border-dashed hover:border-primary transition-colors">
-                        <p className="text-muted-foreground mb-2">No upcoming booked events.</p>
-                        <Button variant="outline" asChild><Link href="/customer/menus">Book Your Next Event</Link></Button>
-                    </Card>
-                )}
             </div>
         ) : (
              <Card className="p-6 text-center items-center justify-center flex flex-col border-dashed hover:border-primary transition-colors">
@@ -119,9 +145,18 @@ export default function CustomerDashboardPage() {
             <Link href="/customer/menus">View All Menus <ArrowRight className="ml-1 h-4 w-4"/></Link>
           </Button>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {topMenus.slice(0, 5).map(menu => <MenuCard key={menu.id} menu={menu} showChefDetails={false} data-ai-hint={menu.dataAiHint} />)}
-        </div>
+        {loadingMenus ? (
+          <div className="flex justify-center items-center h-40">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="ml-2">Loading menus...</p>
+          </div>
+        ) : topMenus.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {topMenus.map(menu => <MenuCard key={menu.id} menu={menu} showChefDetails={false} data-ai-hint={menu.dataAiHint} />)}
+          </div>
+        ) : (
+          <p className="text-muted-foreground text-center">No public menus available right now. Check back soon!</p>
+        )}
       </section>
 
       {/* Discover Chef-Hosted Events Section */}
@@ -145,6 +180,12 @@ export default function CustomerDashboardPage() {
               </CardFooter>
             </Card>
           ))}
+           {discoverChefEvents.length === 0 && (
+             <Card className="md:col-span-2 lg:col-span-3 p-6 text-center items-center justify-center flex flex-col border-dashed hover:border-primary transition-colors">
+                <CalendarSearch className="h-12 w-12 text-muted-foreground mb-3"/>
+                <p className="text-muted-foreground mb-2">No chef-hosted events posted right now.</p>
+            </Card>
+           )}
         </div>
       </section>
 
@@ -156,27 +197,32 @@ export default function CustomerDashboardPage() {
             <Link href="/customer/directory/chefs">View All Chefs <ArrowRight className="ml-1 h-4 w-4"/></Link>
           </Button>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-          {topChefs.slice(0,10).map(chef => (
-            <Card key={chef.id} className="p-4 text-center shadow-md hover:shadow-lg transition-shadow flex flex-col items-center">
-              <Image src={chef.image} alt={chef.name} width={80} height={80} className="rounded-full mx-auto mb-3" data-ai-hint={chef.dataAiHint}/>
-              <h3 className="font-semibold text-md">{chef.name}</h3>
-              <p className="text-xs text-muted-foreground truncate w-full px-2">{chef.specialties}</p>
-              <Button variant="link" size="sm" className="mt-2">View Profile</Button>
-            </Card>
-          ))}
-        </div>
+        {loadingChefs ? (
+           <div className="flex justify-center items-center h-40">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="ml-2">Loading chefs...</p>
+          </div>
+        ) : featuredChefs.length > 0 ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            {featuredChefs.map(chef => (
+              <Card key={chef.id} className="p-4 text-center shadow-md hover:shadow-lg transition-shadow flex flex-col items-center">
+                <Image 
+                  src={chef.profilePictureUrl || "https://placehold.co/100x100.png"} 
+                  alt={chef.name} 
+                  width={80} height={80} 
+                  className="rounded-full mx-auto mb-3 object-cover" 
+                  data-ai-hint={chef.name.split(" ")[0].toLowerCase() + " portrait"}
+                />
+                <h3 className="font-semibold text-md">{chef.name}</h3>
+                <p className="text-xs text-muted-foreground truncate w-full px-2">{chef.specialties?.join(', ')}</p>
+                <Button variant="link" size="sm" className="mt-2">View Profile</Button>
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <p className="text-muted-foreground text-center">No featured chefs available at the moment.</p>
+        )}
       </section>
     </div>
   );
-}
-
-// Added dataAiHint to Menu interface in types, need to update that file too.
-// This will be done in a subsequent step if not already present.
-// For now, MenuCard doesn't use dataAiHint.
-// I'll add it to the Menu interface manually.
-declare module '@/types' {
-    interface Menu {
-        dataAiHint?: string;
-    }
 }
