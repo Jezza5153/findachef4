@@ -32,9 +32,9 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { useAuth } from '@/context/AuthContext'; // Import useAuth
-import { auth } from '@/lib/firebase'; // Import auth for signOut
-import { signOut } from 'firebase/auth'; // Import signOut
+import { useAuth } from '@/context/AuthContext';
+import { auth } from '@/lib/firebase';
+import { signOut } from 'firebase/auth';
 
 
 export interface NavItem {
@@ -47,53 +47,36 @@ export interface NavItem {
 interface DashboardLayoutProps {
   children: React.ReactNode;
   navItems: NavItem[];
-  userName?: string; // This prop can be deprecated if AuthContext provides name
-  userRole?: string; // This prop can be deprecated
-  userAvatarUrl?: string; // This prop can be deprecated
 }
 
 export function DashboardLayout({
   children,
   navItems,
-  userAvatarUrl, // Keep for now if not in AuthContext yet
 }: DashboardLayoutProps) {
   const pathname = usePathname();
   const router = useRouter();
   const { toast } = useToast();
-  const { user } = useAuth(); // Get user from AuthContext
+  const { user, userProfile, isChef } = useAuth();
 
   const [currentUserName, setCurrentUserName] = useState("User");
-  const [currentUserRole, setCurrentUserRole] = useState("Role");
+  const [currentUserRoleDisplay, setCurrentUserRoleDisplay] = useState("Role");
 
 
   useEffect(() => {
-    if (user) {
+    if (userProfile) {
+      setCurrentUserName(userProfile.name || user?.displayName || user?.email?.split('@')[0] || "User");
+      setCurrentUserRoleDisplay(userProfile.role === 'chef' ? 'Professional Chef' : 'Valued Customer');
+    } else if (user) { // Fallback if profile is still loading but user exists
       setCurrentUserName(user.displayName || user.email?.split('@')[0] || "User");
-      // Role still comes from localStorage until Firestore profiles are implemented
-      const storedRole = localStorage.getItem('userRole');
-      if (storedRole) {
-        setCurrentUserRole(storedRole === 'chef' ? 'Professional Chef' : 'Valued Customer');
-      } else {
-        setCurrentUserRole(user.email?.includes('chef@') ? 'Professional Chef' : 'Valued Customer'); // Fallback logic
-      }
-    } else {
-      // Attempt to get from localStorage if no Firebase user (e.g. during initial load phase before context updates)
-      const storedName = localStorage.getItem('userName');
-      const storedRole = localStorage.getItem('userRole');
-      if (storedName) setCurrentUserName(storedName);
-      if (storedRole) setCurrentUserRole(storedRole === 'chef' ? 'Professional Chef' : 'Valued Customer');
+      // Role might not be available yet, could show loading or generic role
     }
-  }, [user, pathname]); // Re-run if user changes or path changes (for initial setup)
+  }, [user, userProfile]);
 
   const handleLogout = async () => {
     try {
-      await signOut(auth); // Sign out from Firebase
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('userName');
-        localStorage.removeItem('userRole');
-        localStorage.removeItem('isChefApproved');
-        localStorage.removeItem('isChefSubscribed');
-      }
+      await signOut(auth);
+      // AuthContext will handle clearing user and userProfile states
+      // No need to clear localStorage manually anymore if AuthContext is source of truth
       toast({
         title: 'Logged Out',
         description: 'You have been successfully logged out.',
@@ -108,6 +91,8 @@ export function DashboardLayout({
       });
     }
   };
+
+  const profileLink = isChef ? '/chef/dashboard/profile' : '/customer/dashboard/profile';
 
   return (
     <SidebarProvider defaultOpen>
@@ -142,17 +127,17 @@ export function DashboardLayout({
           <SidebarFooter className="p-4 mt-auto border-t">
             <div className="group-data-[collapsible=icon]:hidden flex items-center space-x-3">
               <Avatar>
-                <AvatarImage src={user?.photoURL || userAvatarUrl || "https://placehold.co/40x40.png"} alt={currentUserName} data-ai-hint="person avatar" />
+                <AvatarImage src={user?.photoURL || "https://placehold.co/40x40.png"} alt={currentUserName} data-ai-hint="person avatar" />
                 <AvatarFallback>{currentUserName.substring(0, 2).toUpperCase()}</AvatarFallback>
               </Avatar>
               <div>
                 <p className="text-sm font-medium text-sidebar-foreground">{currentUserName}</p>
-                <p className="text-xs text-sidebar-foreground/70">{currentUserRole}</p>
+                <p className="text-xs text-sidebar-foreground/70">{currentUserRoleDisplay}</p>
               </div>
             </div>
             <div className="hidden group-data-[collapsible=icon]:flex justify-center">
                <Avatar>
-                <AvatarImage src={user?.photoURL || userAvatarUrl || "https://placehold.co/40x40.png"} alt={currentUserName} data-ai-hint="person avatar" />
+                <AvatarImage src={user?.photoURL || "https://placehold.co/40x40.png"} alt={currentUserName} data-ai-hint="person avatar" />
                 <AvatarFallback>{currentUserName.substring(0, 1).toUpperCase()}</AvatarFallback>
               </Avatar>
             </div>
@@ -199,7 +184,7 @@ export function DashboardLayout({
               </Button>
 
               <Button variant="ghost" size="icon" aria-label="Profile" asChild>
-                <Link href={currentUserRole?.toLowerCase().includes('chef') ? '/chef/dashboard/profile' : '/customer/dashboard/profile'}>
+                <Link href={profileLink}>
                     <User className="h-5 w-5" />
                 </Link>
               </Button>

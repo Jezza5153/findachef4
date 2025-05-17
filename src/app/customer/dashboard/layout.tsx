@@ -24,54 +24,42 @@ export default function CustomerDashboardLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const { user, loading: authLoading } = useAuth();
+  const { user, userProfile, loading: authLoading, isCustomer } = useAuth();
   const { toast } = useToast();
-  const [roleChecked, setRoleChecked] = useState(false);
+  const [statusChecked, setStatusChecked] = useState(false);
 
   useEffect(() => {
     if (authLoading) {
-      // Still waiting for Firebase to determine authentication state
-      return;
+      return; // Wait for Firebase auth state to resolve
     }
 
     if (!user) {
-      // No Firebase user, redirect to login
       router.push('/login');
-      setRoleChecked(true); // No further checks needed
       return;
     }
 
-    // Firebase user exists, now check role from localStorage (temporary)
-    const userRole = localStorage.getItem('userRole');
-    if (userRole && userRole !== 'customer') {
+    if (!isCustomer) {
       toast({
         title: 'Access Denied',
         description: 'This dashboard is for customers.',
         variant: 'destructive',
       });
-      router.push('/login'); 
+      router.push('/login'); // Or perhaps to chef dashboard if role is chef
+      return;
     }
-    setRoleChecked(true); // Role check complete
+    
+    setStatusChecked(true);
 
-  }, [user, authLoading, router, toast]);
+  }, [user, authLoading, isCustomer, router, toast]);
 
-  if (authLoading || !roleChecked) {
+  if (authLoading || !statusChecked) {
     return <div className="flex h-screen items-center justify-center">Loading customer dashboard...</div>;
   }
   
-  if (!user && !authLoading && roleChecked) {
-    // This case handles if user becomes null after initial load but before redirect in useEffect
-    // This should be rare if useEffect redirect is quick
-    return <div className="flex h-screen items-center justify-center">Redirecting to login...</div>;
-  }
-
-
-  // If we reach here, user is authenticated and role check (if applicable) has passed
+  // If we reach here, user is authenticated and is a customer
   return (
     <DashboardLayout 
       navItems={customerNavItems}
-      // userName will be handled by DashboardLayout from AuthContext or localStorage
-      // userRole will be handled by DashboardLayout
     >
       {children}
     </DashboardLayout>

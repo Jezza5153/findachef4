@@ -9,8 +9,8 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { auth } from '@/lib/firebase'; // Import auth for logout
-import { signOut } from 'firebase/auth'; // Import signOut
+import { auth } from '@/lib/firebase';
+import { signOut } from 'firebase/auth';
 
 const chefNavItems: NavItem[] = [
   { href: '/chef/dashboard', label: 'Overview', icon: <LayoutDashboard />, matchExact: true },
@@ -31,51 +31,40 @@ export default function ChefDashboardLayout({
 }) {
   const router = useRouter();
   const { toast } = useToast();
-  const { user, loading: authLoading } = useAuth();
+  const { user, userProfile, loading: authLoading, isChef, isChefApproved } = useAuth();
   
-  const [chefStatusLoading, setChefStatusLoading] = useState(true);
-  const [isApproved, setIsApproved] = useState<boolean>(false); // Default to false
+  const [statusChecked, setStatusChecked] = useState(false);
 
   useEffect(() => {
     if (authLoading) {
-      // Still waiting for Firebase to determine authentication state
-      return;
+      return; // Wait for Firebase auth state to resolve
     }
 
     if (!user) {
-      // No Firebase user, redirect to login
       router.push('/login');
-      setChefStatusLoading(false); // No further checks needed
       return;
     }
 
-    // Firebase user exists, now check role and approval from localStorage (temporary)
-    const userRole = localStorage.getItem('userRole');
-    if (userRole !== 'chef') {
+    if (!isChef) {
       toast({
           title: 'Access Denied',
           description: 'You must be logged in as a chef to access this page.',
           variant: 'destructive',
       });
-      router.push('/login');
-      setChefStatusLoading(false);
+      router.push('/login'); // Or perhaps to customer dashboard if role is customer
       return;
     }
-
-    const chefApprovedStatus = localStorage.getItem('isChefApproved');
-    setIsApproved(chefApprovedStatus === 'true');
-    setChefStatusLoading(false); // All checks complete
     
-  }, [user, authLoading, router, toast]);
+    // At this point, user is authenticated and is a chef
+    setStatusChecked(true);
 
-  if (authLoading || chefStatusLoading) {
+  }, [user, authLoading, isChef, router, toast]);
+
+  if (authLoading || !statusChecked) {
     return <div className="flex h-screen items-center justify-center">Loading chef dashboard...</div>;
   }
-
-  // At this point, if user is null or role is not chef, a redirect should have occurred.
-  // If isApproved is false, show the pending approval card.
   
-  if (!isApproved) {
+  if (!isChefApproved && isChef) { // Check if user is a chef but not approved
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background p-4">
         <Card className="w-full max-w-md text-center shadow-lg">
@@ -94,13 +83,8 @@ export default function ChefDashboardLayout({
               If you have any questions, please contact support.
             </p>
              <Button onClick={async () => {
-                await signOut(auth); // Sign out from Firebase
-                if (typeof window !== 'undefined') {
-                    localStorage.removeItem('userName');
-                    localStorage.removeItem('userRole');
-                    localStorage.removeItem('isChefApproved');
-                    localStorage.removeItem('isChefSubscribed');
-                }
+                await signOut(auth);
+                // localStorage items for user role etc. will be cleared naturally as AuthContext updates on logout
                 router.push('/login'); 
              }}>
                 Back to Login
@@ -111,12 +95,10 @@ export default function ChefDashboardLayout({
     );
   }
 
-  // If we reach here, user is an authenticated and approved chef
+  // If we reach here, user is an authenticated, chef, and approved
   return (
     <DashboardLayout 
       navItems={chefNavItems}
-      // userName will be handled by DashboardLayout from AuthContext or localStorage
-      // userRole will be handled by DashboardLayout
     >
       {children}
     </DashboardLayout>

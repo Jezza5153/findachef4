@@ -20,9 +20,10 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth, db } from '@/lib/firebase'; // Import db
-import { doc, getDoc } from 'firebase/firestore'; // Import Firestore functions
+import { auth, db } from '@/lib/firebase';
+import { doc, getDoc } from 'firebase/firestore';
 import { useState } from 'react';
+import type { ChefProfile } from '@/types'; // Import ChefProfile type
 
 const loginSchema = z.object({
   email: z.string().email({ message: 'Invalid email address.' }),
@@ -55,53 +56,29 @@ export default function LoginPage() {
         description: 'Fetching your profile...',
       });
 
-      // Fetch user profile from Firestore
-      let userRole = 'customer'; // Default role
-      let isChefApproved = false;
-      let isChefSubscribed = false;
-      let userName = user.displayName || data.email.split('@')[0] || 'User';
+      // AuthContext will handle fetching profile and determining redirection
+      // based on the profile data from Firestore.
+      // The redirection will occur in the dashboard layouts based on AuthContext state.
+      
+      // For now, we'll do a simple default redirect.
+      // The dashboard layouts will then check the role from AuthContext (which fetches from Firestore).
 
+      // Attempt to fetch Firestore profile to determine role for initial redirect hint
+      // This is a bit redundant as AuthContext will do it, but helps direct immediately.
+      let roleForRedirect = 'customer'; // Default
       if (user) {
         const userDocRef = doc(db, "users", user.uid);
         const userDoc = await getDoc(userDocRef);
-
         if (userDoc.exists()) {
           const userData = userDoc.data();
-          userRole = userData.role || 'customer';
-          isChefApproved = userData.isApproved || false;
-          isChefSubscribed = userData.isSubscribed || false;
-          userName = userData.name || userName; // Prefer name from Firestore if available
-          toast({
-            title: 'Profile Loaded',
-            description: `Welcome back, ${userName}!`,
-          });
-        } else {
-          // Fallback for users without a Firestore profile (e.g. early customers or if creation failed)
-          // This part can be refined based on how customer profiles are created
-          toast({
-            title: 'Profile Note',
-            description: 'Setting up your session. Complete your profile if prompted.',
-            variant: 'default' 
-          });
-          // Infer role from email as a temporary fallback if no Firestore doc
-          if (data.email.toLowerCase().includes('chef@')) {
-            userRole = 'chef';
-          }
+          roleForRedirect = userData.role || 'customer';
         }
       }
-      
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('userName', userName);
-        localStorage.setItem('userRole', userRole);
-        if (userRole === 'chef') {
-          localStorage.setItem('isChefApproved', String(isChefApproved));
-          localStorage.setItem('isChefSubscribed', String(isChefSubscribed));
-          router.push('/chef/dashboard');
-        } else {
-          localStorage.removeItem('isChefApproved');
-          localStorage.removeItem('isChefSubscribed');
-          router.push('/customer/dashboard');
-        }
+
+      if (roleForRedirect === 'chef') {
+        router.push('/chef/dashboard');
+      } else {
+        router.push('/customer/dashboard');
       }
 
     } catch (error: any) {
