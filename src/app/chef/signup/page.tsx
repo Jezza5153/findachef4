@@ -26,8 +26,9 @@ import Image from 'next/image';
 import { ChefHat, UserPlus, UploadCloud, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
 import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
-import { auth, storage } from '@/lib/firebase'; // Import storage
-import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage'; // Storage imports
+import { auth, storage, db } from '@/lib/firebase'; // Import db
+import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore'; // Import Firestore functions
 import { useRouter } from 'next/navigation';
 
 
@@ -101,7 +102,7 @@ export default function ChefSignupPage() {
   };
 
   const onSubmit = async (data: ChefSignupFormValues) => {
-    if (!isResumeUploaded) {
+    if (!isResumeUploaded || !resumeParsedData) {
       toast({
         title: 'Resume Required',
         description: 'Please upload and parse your resume before submitting.',
@@ -117,53 +118,53 @@ export default function ChefSignupPage() {
 
       let profilePictureUrl = '';
 
-      // Upload profile picture if provided
       if (data.profilePicture) {
         const file = data.profilePicture;
         const fileExtension = file.name.split('.').pop();
         const profilePicRef = storageRef(storage, `users/${user.uid}/profilePicture.${fileExtension}`);
         
         try {
+          toast({ title: "Uploading Profile Picture...", description: "Please wait." });
           const uploadTaskSnapshot = await uploadBytesResumable(profilePicRef, file);
           profilePictureUrl = await getDownloadURL(uploadTaskSnapshot.ref);
           await updateProfile(user, { displayName: data.name, photoURL: profilePictureUrl });
-           toast({ title: "Profile Picture Uploaded", description: "Your profile picture has been saved." });
+          toast({ title: "Profile Picture Uploaded", description: "Your profile picture has been saved." });
         } catch (uploadError) {
           console.error("Profile picture upload error:", uploadError);
-          toast({ title: "Profile Picture Upload Failed", description: "Could not upload profile picture. Please try updating it from your profile later.", variant: "destructive" });
-          // Still update display name even if photo upload fails
+          toast({ title: "Profile Picture Upload Failed", description: "Could not upload profile picture. It can be updated later.", variant: "destructive" });
           await updateProfile(user, { displayName: data.name });
         }
       } else {
-        // Update display name if no photo
         await updateProfile(user, { displayName: data.name });
       }
 
-      // TODO: Save additional chef profile data to Firestore here
-      // This would include: uid, email, name, abn, bio, specialties (as array),
-      // resumeParsedData (experience, skills, education), profilePictureUrl (if uploaded),
-      // role: 'chef', isApproved: false, isSubscribed: false
-      console.log('Chef Signup Data (to be saved to Firestore):', {
+      // Save additional chef profile data to Firestore
+      const userProfile = {
         uid: user.uid,
         email: user.email,
         name: data.name,
         abn: data.abn,
         bio: data.bio,
         specialties: data.specialties.split(',').map(s => s.trim()),
-        resume: resumeParsedData,
-        profilePictureUrl: profilePictureUrl, // This will be empty if upload failed or no picture
-      });
+        resumeData: {
+            experience: resumeParsedData.experience || "",
+            skills: resumeParsedData.skills || [],
+            education: resumeParsedData.education || "",
+        },
+        profilePictureUrl: profilePictureUrl,
+        role: 'chef',
+        isApproved: false, // Chefs start as unapproved
+        isSubscribed: false, // Chefs start as unsubscribed
+        createdAt: serverTimestamp(),
+      };
+
+      await setDoc(doc(db, "users", user.uid), userProfile);
       
       toast({
         title: 'Signup Successful!',
-        description: 'Your chef account has been created. You will be redirected to login. Your account will require admin approval.',
+        description: 'Your chef account has been created and profile saved. You will be redirected to login. Your account requires admin approval.',
+        duration: 7000,
       });
-      // Set localStorage flags for redirection logic (temporary until Firestore profiles)
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('userRole', 'chef');
-        localStorage.setItem('isChefApproved', 'false'); // Chef accounts start as unapproved
-        localStorage.setItem('isChefSubscribed', 'false');
-      }
       
       form.reset();
       setResumeParsedData(null);
@@ -175,6 +176,8 @@ export default function ChefSignupPage() {
       let errorMessage = 'Failed to create account.';
       if (error.code === 'auth/email-already-in-use') {
         errorMessage = 'This email address is already in use.';
+      } else if (error.code) {
+        errorMessage = `An error occurred: ${error.message}`;
       }
       toast({
         title: 'Signup Failed',
@@ -276,7 +279,7 @@ export default function ChefSignupPage() {
               <FormField
                   control={form.control}
                   name="profilePicture"
-                  render={({ field }) => ( // field prop is not directly used for file input value here
+                  render={({ field }) => ( 
                     <FormItem>
                       <FormLabel>Profile Picture</FormLabel>
                       <FormControl>

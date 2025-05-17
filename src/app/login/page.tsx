@@ -20,7 +20,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import { auth, db } from '@/lib/firebase'; // Import db
+import { doc, getDoc } from 'firebase/firestore'; // Import Firestore functions
 import { useState } from 'react';
 
 const loginSchema = z.object({
@@ -51,29 +52,52 @@ export default function LoginPage() {
       
       toast({
         title: 'Login Successful',
-        description: 'Welcome back!',
+        description: 'Fetching your profile...',
       });
 
-      // Temporary: Set localStorage for role-based redirection until Firestore profiles are used
-      // In a real app, fetch role from Firestore based on user.uid
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('userName', user.displayName || data.email.split('@')[0] || 'User');
-        if (data.email.toLowerCase().includes('chef@')) {
-          localStorage.setItem('userRole', 'chef');
-          // Simulate chef approval status for demo. In real app, this comes from Firestore.
-          // For testing an unapproved chef, set this to 'false'.
-          // For testing an approved but unsubscribed chef, set 'isChefApproved' to 'true' and 'isChefSubscribed' to 'false'.
-          // For testing an approved and subscribed chef:
-          if (data.email.toLowerCase() === 'approvedchef@example.com') {
-            localStorage.setItem('isChefApproved', 'true');
-            localStorage.setItem('isChefSubscribed', 'true');
-          } else {
-            localStorage.setItem('isChefApproved', 'false'); 
-            localStorage.setItem('isChefSubscribed', 'false');
+      // Fetch user profile from Firestore
+      let userRole = 'customer'; // Default role
+      let isChefApproved = false;
+      let isChefSubscribed = false;
+      let userName = user.displayName || data.email.split('@')[0] || 'User';
+
+      if (user) {
+        const userDocRef = doc(db, "users", user.uid);
+        const userDoc = await getDoc(userDocRef);
+
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          userRole = userData.role || 'customer';
+          isChefApproved = userData.isApproved || false;
+          isChefSubscribed = userData.isSubscribed || false;
+          userName = userData.name || userName; // Prefer name from Firestore if available
+          toast({
+            title: 'Profile Loaded',
+            description: `Welcome back, ${userName}!`,
+          });
+        } else {
+          // Fallback for users without a Firestore profile (e.g. early customers or if creation failed)
+          // This part can be refined based on how customer profiles are created
+          toast({
+            title: 'Profile Note',
+            description: 'Setting up your session. Complete your profile if prompted.',
+            variant: 'default' 
+          });
+          // Infer role from email as a temporary fallback if no Firestore doc
+          if (data.email.toLowerCase().includes('chef@')) {
+            userRole = 'chef';
           }
+        }
+      }
+      
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('userName', userName);
+        localStorage.setItem('userRole', userRole);
+        if (userRole === 'chef') {
+          localStorage.setItem('isChefApproved', String(isChefApproved));
+          localStorage.setItem('isChefSubscribed', String(isChefSubscribed));
           router.push('/chef/dashboard');
         } else {
-          localStorage.setItem('userRole', 'customer');
           localStorage.removeItem('isChefApproved');
           localStorage.removeItem('isChefSubscribed');
           router.push('/customer/dashboard');
@@ -120,7 +144,7 @@ export default function LoginPage() {
                   <FormItem>
                     <FormLabel>Email Address</FormLabel>
                     <FormControl>
-                      <Input type="email" placeholder="you@example.com (e.g., chef@example.com or customer@example.com)" {...field} />
+                      <Input type="email" placeholder="you@example.com" {...field} />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
