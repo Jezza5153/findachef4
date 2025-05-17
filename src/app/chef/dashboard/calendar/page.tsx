@@ -10,16 +10,6 @@ import { format, parseISO, isSameDay, startOfDay } from 'date-fns';
 import { CalendarDays, Users, DollarSign, MapPin, Utensils, Info, Sun, ChefHat, AlertTriangle, CheckCircle, Clock, QrCode, Ban, Loader2, InfoIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, updateDoc, Timestamp, collection, query, orderBy, onSnapshot } from 'firebase/firestore';
@@ -169,7 +159,7 @@ export default function ChefCalendarPage() {
   if (isLoadingCalendarData) {
      return (
       <div className="flex justify-center items-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary" data-ai-hint="loading spinner" />
         <p className="ml-2">Loading calendar data...</p>
       </div>
     );
@@ -179,7 +169,7 @@ export default function ChefCalendarPage() {
     <div className="space-y-8">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-3xl font-bold flex items-center">
-          <CalendarDays className="mr-3 h-8 w-8 text-primary" /> My Calendar & Events
+          <CalendarDays className="mr-3 h-8 w-8 text-primary" data-ai-hint="calendar icon" /> My Calendar & Events
         </h1>
         <div className="flex flex-col sm:flex-row gap-2">
           <Button onClick={handleGoogleCalendarSync} variant="outline" className="text-sm">
@@ -344,3 +334,6 @@ export default function ChefCalendarPage() {
     </div>
   );
 }
+
+
+    
