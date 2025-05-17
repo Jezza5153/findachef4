@@ -172,8 +172,8 @@ export interface CustomerProfile {
 export type CostType = 'Ingredient' | 'Equipment' | 'Tax' | 'BAS' | 'Travel' | 'Other';
 
 export interface Receipt {
-  id: string;
-  fileName?: string; 
+  id: string; // Firestore document ID
+  fileName?: string; // Original file name, might be less relevant if we use data URI for initial processing
   vendor: string;
   date: any; // Firestore Timestamp
   totalAmount: number;
@@ -181,10 +181,10 @@ export interface Receipt {
   assignedToMenuId?: string;
   costType: CostType;
   notes?: string;
-  chefId?: string; 
+  chefId: string; // UID of the chef who owns this receipt
+  imageUrl?: string; // URL of the uploaded receipt image in Firebase Storage
   createdAt?: any; // Firestore Timestamp
   updatedAt?: any; // Firestore Timestamp
-  imageUrl?: string; 
 }
 
 // Tax Advice Flow Types

@@ -3,7 +3,7 @@
 
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useForm, useForm as useTaxForm } from 'react-hook-form'; // Aliased useForm for tax advice
+import { useForm, useForm as useTaxForm } from 'react-hook-form';
 import * as z from 'zod';
 import { Button } from '@/components/ui/button';
 import {
@@ -48,11 +48,15 @@ import { PlusCircle, Trash2, FileText, Edit3, UploadCloud, CalendarIcon, Downloa
 import Image from 'next/image';
 import { receiptParserFlow } from '@/ai/flows/receipt-parser-flow'; 
 import { getTaxAdvice } from '@/ai/flows/tax-advice-flow';
+import { useAuth } from '@/context/AuthContext';
+import { db, storage } from '@/lib/firebase';
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where, serverTimestamp, Timestamp, orderBy } from 'firebase/firestore';
+import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 
 const costTypes: CostType[] = ['Ingredient', 'Equipment', 'Tax', 'BAS', 'Travel', 'Other'];
 
 const receiptFormSchema = z.object({
-  file: z.any().optional(),
+  // File is handled by capturedImageDataUri, not directly in Zod schema for form submit
   vendor: z.string().min(1, { message: 'Vendor name is required.' }),
   date: z.date({ required_error: 'Receipt date is required.' }),
   totalAmount: z.coerce.number().min(0.01, { message: 'Total amount must be greater than 0.' }),
@@ -70,20 +74,17 @@ const taxAdviceFormSchema = z.object({
 });
 type TaxAdviceFormValues = z.infer<typeof taxAdviceFormSchema>;
 
-
-const initialReceipts: Receipt[] = [
-  { id: 'r1', fileName:'supermart_receipt.pdf', vendor: 'SuperMart', date: new Date(2024, 6, 15), totalAmount: 125.50, costType: 'Ingredient', assignedToEventId: 'event1', notes: 'Groceries for Corporate Lunch' },
-  { id: 'r2', fileName:'kitchen_co_invoice.jpg', vendor: 'Kitchen Supplies Co.', date: new Date(2024, 6, 10), totalAmount: 75.00, costType: 'Equipment', notes: 'New set of knives' },
-  { id: 'r3', fileName:'fuel_july14.png', vendor: 'Fuel Station', date: new Date(2024, 6, 14), totalAmount: 30.00, costType: 'Travel', assignedToEventId: 'event1' },
-];
-
 export default function ReceiptsPage() {
-  const [receipts, setReceipts] = useState<Receipt[]>(initialReceipts);
+  const { user } = useAuth();
+  const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [editingReceipt, setEditingReceipt] = useState<Receipt | null>(null);
   const [isCameraDialogOpen, setIsCameraDialogOpen] = useState(false);
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [capturedImageDataUri, setCapturedImageDataUri] = useState<string | null>(null);
+  const [fileNameForForm, setFileNameForForm] = useState<string | null>(null); // For displaying original filename
   const [isPreviewCapture, setIsPreviewCapture] = useState(false);
   const [isParsingReceipt, setIsParsingReceipt] = useState(false);
   const [isTaxAdviceDialogOpen, setIsTaxAdviceDialogOpen] = useState(false);
@@ -100,12 +101,12 @@ export default function ReceiptsPage() {
     resolver: zodResolver(receiptFormSchema),
     defaultValues: {
       vendor: '',
+      date: new Date(),
       totalAmount: 0,
       assignedToEventId: '',
       assignedToMenuId: '',
       costType: undefined,
       notes: '',
-      file: null,
     },
   });
 
@@ -116,6 +117,36 @@ export default function ReceiptsPage() {
         query: '',
     },
   });
+
+  useEffect(() => {
+    const fetchReceipts = async () => {
+      if (!user) {
+        setIsLoading(false);
+        return;
+      }
+      setIsLoading(true);
+      try {
+        const receiptsCollectionRef = collection(db, "users", user.uid, "receipts");
+        const q = query(receiptsCollectionRef, orderBy("date", "desc"));
+        const querySnapshot = await getDocs(q);
+        const fetchedReceipts = querySnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            date: (data.date as Timestamp).toDate(), // Convert Firestore Timestamp to Date
+          } as Receipt;
+        });
+        setReceipts(fetchedReceipts);
+      } catch (error) {
+        console.error("Error fetching receipts:", error);
+        toast({ title: "Error", description: "Could not fetch your receipts.", variant: "destructive" });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchReceipts();
+  }, [user, toast]);
 
   useEffect(() => {
     if (isCameraDialogOpen && hasCameraPermission === null) { 
@@ -147,13 +178,18 @@ export default function ReceiptsPage() {
 
   const openUploadDialog = (receiptToEdit: Receipt | null = null) => {
     setEditingReceipt(receiptToEdit);
-    setCapturedImageDataUri(null); 
+    setCapturedImageDataUri(receiptToEdit?.imageUrl || null);
+    setFileNameForForm(receiptToEdit?.fileName || null);
     setIsPreviewCapture(false);
     if (receiptToEdit) {
       form.reset({
-        ...receiptToEdit,
+        vendor: receiptToEdit.vendor,
         date: receiptToEdit.date ? new Date(receiptToEdit.date) : new Date(),
-        file: receiptToEdit.fileName ? { name: receiptToEdit.fileName } : null, 
+        totalAmount: receiptToEdit.totalAmount,
+        assignedToEventId: receiptToEdit.assignedToEventId || '',
+        assignedToMenuId: receiptToEdit.assignedToMenuId || '',
+        costType: receiptToEdit.costType,
+        notes: receiptToEdit.notes || '',
       });
     } else {
       form.reset({
@@ -164,7 +200,6 @@ export default function ReceiptsPage() {
         assignedToMenuId: '',
         costType: undefined,
         notes: '',
-        file: null,
       });
     }
     setIsUploadDialogOpen(true);
@@ -181,26 +216,29 @@ export default function ReceiptsPage() {
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
         const dataUri = canvas.toDataURL('image/jpeg');
         setCapturedImageDataUri(dataUri);
+        setFileNameForForm(`cam_capture_${Date.now()}.jpg`);
         setIsPreviewCapture(true);
       }
     }
   };
 
   const handleUseCapturedImage = () => {
-    form.setValue('file', { name: `cam_capture_${Date.now()}.jpg` }); 
     setIsCameraDialogOpen(false);
-    setIsPreviewCapture(false); 
+    // capturedImageDataUri and fileNameForForm are already set
   };
 
   const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      form.setValue('file', file);
+      setFileNameForForm(file.name);
       const reader = new FileReader();
       reader.onloadend = () => {
         setCapturedImageDataUri(reader.result as string);
       };
       reader.readAsDataURL(file);
+    } else {
+      setFileNameForForm(null);
+      setCapturedImageDataUri(null);
     }
   };
   
@@ -217,7 +255,6 @@ export default function ReceiptsPage() {
         if (result.vendor) form.setValue('vendor', result.vendor);
         if (result.date) {
            try {
-            // Attempt to parse date, tolerant of YYYY-MM-DD or YYYY/MM/DD
             const parsedDate = new Date(result.date.replace(/-/g, '/')); 
             if (!isNaN(parsedDate.getTime())) {
                  form.setValue('date', parsedDate);
@@ -244,35 +281,115 @@ export default function ReceiptsPage() {
     }
   };
 
-  const onSubmitReceipt = (data: ReceiptFormValues) => {
-    const receiptFileName = (data.file instanceof File) ? data.file.name : editingReceipt?.fileName || `receipt_${Date.now()}.pdf`;
-
-
-    if (editingReceipt) {
-      setReceipts(receipts.map(r => r.id === editingReceipt.id ? { ...editingReceipt, ...data, fileName: receiptFileName, date: data.date as Date } : r));
-      toast({ title: 'Receipt Updated', description: `Receipt from "${data.vendor}" has been updated.` });
-    } else {
-      const newReceipt: Receipt = {
-        id: String(Date.now()),
-        ...data,
-        date: data.date as Date,
-        fileName: receiptFileName,
-      };
-      setReceipts([...receipts, newReceipt]);
-      toast({ title: 'Receipt Added', description: `Receipt from "${data.vendor}" has been added.` });
+  // Helper function to convert data URI to Blob
+  const dataURIToBlob = (dataURI: string) => {
+    const byteString = atob(dataURI.split(',')[1]);
+    const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0];
+    const ab = new ArrayBuffer(byteString.length);
+    const ia = new Uint8Array(ab);
+    for (let i = 0; i < byteString.length; i++) {
+        ia[i] = byteString.charCodeAt(i);
     }
-    form.reset();
-    setEditingReceipt(null);
-    setIsUploadDialogOpen(false);
-    setCapturedImageDataUri(null);
-    if (fileInputRef.current) fileInputRef.current.value = ""; 
+    return new Blob([ab], { type: mimeString });
   };
 
-  const handleDeleteReceipt = (receiptId: string) => {
+  const onSubmitReceipt = async (data: ReceiptFormValues) => {
+    if (!user) {
+      toast({ title: "Error", description: "You must be logged in.", variant: "destructive" });
+      return;
+    }
+    setIsSaving(true);
+    let imageUrl = editingReceipt?.imageUrl || '';
+    const originalFileName = fileNameForForm || (editingReceipt?.fileName) || `receipt_${Date.now()}.jpg`;
+
+    try {
+      if (capturedImageDataUri && (!editingReceipt || capturedImageDataUri !== editingReceipt.imageUrl)) {
+        // New image or changed image
+        if (editingReceipt?.imageUrl) {
+          try {
+            const oldImageRef = storageRef(storage, editingReceipt.imageUrl);
+            await deleteObject(oldImageRef).catch(e => console.warn("Old image not found or could not be deleted for receipt:", e));
+          } catch (e) { console.warn("Error deleting old receipt image:", e); }
+        }
+
+        const blob = dataURIToBlob(capturedImageDataUri);
+        const imagePath = `users/${user.uid}/receipts/${editingReceipt?.id || doc(collection(db, 'temp')).id}/${originalFileName}`;
+        const imageStorageRef = storageRef(storage, imagePath);
+        
+        toast({ title: "Uploading receipt image...", description: "Please wait." });
+        const uploadTask = uploadBytesResumable(imageStorageRef, blob);
+        await new Promise<void>((resolve, reject) => {
+          uploadTask.on('state_changed', null, 
+            (error) => { console.error("Receipt image upload error:", error); reject(error); },
+            async () => {
+              imageUrl = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve();
+            }
+          );
+        });
+      }
+
+      const receiptDataToSave = {
+        ...data,
+        chefId: user.uid,
+        date: Timestamp.fromDate(data.date),
+        imageUrl: imageUrl,
+        fileName: originalFileName,
+        updatedAt: serverTimestamp(),
+      };
+
+      if (editingReceipt) {
+        const receiptDocRef = doc(db, "users", user.uid, "receipts", editingReceipt.id);
+        await updateDoc(receiptDocRef, receiptDataToSave);
+        setReceipts(receipts.map(r => r.id === editingReceipt.id ? { ...editingReceipt, ...receiptDataToSave, date: data.date } : r));
+        toast({ title: 'Receipt Updated', description: `Receipt from "${data.vendor}" has been updated.` });
+      } else {
+        const finalData = { ...receiptDataToSave, createdAt: serverTimestamp() };
+        const docRef = await addDoc(collection(db, "users", user.uid, "receipts"), finalData);
+        setReceipts([{ ...finalData, id: docRef.id, date: data.date }, ...receipts].sort((a,b) => b.date.getTime() - a.date.getTime()));
+        toast({ title: 'Receipt Added', description: `Receipt from "${data.vendor}" has been added.` });
+      }
+      
+      form.reset();
+      setEditingReceipt(null);
+      setIsUploadDialogOpen(false);
+      setCapturedImageDataUri(null);
+      setFileNameForForm(null);
+      if (fileInputRef.current) fileInputRef.current.value = ""; 
+
+    } catch (error) {
+      console.error('Error saving receipt:', error);
+      toast({ title: 'Save Failed', description: 'Could not save your receipt. Please try again.', variant: 'destructive' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteReceipt = async (receiptId: string) => {
+    if (!user) return;
     const receiptToDelete = receipts.find(r => r.id === receiptId);
+    if (!receiptToDelete) return;
+
     if (window.confirm(`Are you sure you want to delete the receipt from "${receiptToDelete?.vendor}"?`)) {
-      setReceipts(receipts.filter(r => r.id !== receiptId));
-      toast({ title: 'Receipt Deleted', description: `Receipt from "${receiptToDelete?.vendor}" removed.`, variant: 'destructive' });
+      setIsSaving(true);
+      try {
+        if (receiptToDelete.imageUrl) {
+          try {
+            const imageRef = storageRef(storage, receiptToDelete.imageUrl);
+            await deleteObject(imageRef);
+          } catch (e) {
+            console.warn("Could not delete receipt image from storage:", e);
+          }
+        }
+        await deleteDoc(doc(db, "users", user.uid, "receipts", receiptId));
+        setReceipts(receipts.filter(r => r.id !== receiptId));
+        toast({ title: 'Receipt Deleted', description: `Receipt from "${receiptToDelete?.vendor}" removed.`, variant: 'destructive' });
+      } catch (error) {
+        console.error("Error deleting receipt:", error);
+        toast({ title: "Delete Error", description: "Could not delete receipt.", variant: "destructive" });
+      } finally {
+        setIsSaving(false);
+      }
     }
   };
   
@@ -303,6 +420,15 @@ export default function ReceiptsPage() {
     }
   };
 
+  if (isLoading) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="ml-2">Loading receipts...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -310,7 +436,7 @@ export default function ReceiptsPage() {
           <FileText className="mr-3 h-8 w-8 text-primary" data-ai-hint="document file"/> Receipts & Cost Management
         </h1>
         <div className="flex space-x-2">
-            <Button onClick={() => openUploadDialog()}>
+            <Button onClick={() => openUploadDialog()} disabled={isSaving}>
                 <PlusCircle className="mr-2 h-5 w-5" /> Add New Receipt
             </Button>
             <Button variant="outline" onClick={() => { taxForm.reset(); setTaxAdviceResponse(null); setIsTaxAdviceDialogOpen(true);}}>
@@ -319,11 +445,12 @@ export default function ReceiptsPage() {
         </div>
       </div>
 
-      {/* Main Receipt Dialog */}
       <Dialog open={isUploadDialogOpen} onOpenChange={(isOpen) => {
+          if (isSaving && isOpen) return;
           setIsUploadDialogOpen(isOpen);
           if (!isOpen) {
             setCapturedImageDataUri(null); 
+            setFileNameForForm(null);
             setIsPreviewCapture(false);
             if (fileInputRef.current) fileInputRef.current.value = "";
           }
@@ -351,17 +478,17 @@ export default function ReceiptsPage() {
                         ref={fileInputRef}
                       />
                 </div>
-                 {capturedImageDataUri && form.getValues('file') && (
+                 {capturedImageDataUri && (
                     <div className="mt-2 text-center">
                         <Image src={capturedImageDataUri} alt="Receipt preview" width={150} height={200} className="rounded-md object-contain mx-auto border" data-ai-hint="receipt document" />
-                        <p className="text-xs text-muted-foreground mt-1">Preview of: {(form.getValues('file') instanceof File ? (form.getValues('file') as File).name : 'Captured Image')}</p>
+                        {fileNameForForm && <p className="text-xs text-muted-foreground mt-1">Preview of: {fileNameForForm}</p>}
                     </div>
                 )}
                 <FormDescription>Max 5MB. PDF, JPG, PNG, WEBP.</FormDescription>
                  <Button 
                     type="button" 
                     onClick={handleAutoFillWithAI} 
-                    disabled={!capturedImageDataUri || isParsingReceipt} 
+                    disabled={!capturedImageDataUri || isParsingReceipt || isSaving} 
                     variant="outline"
                     className="w-full mt-2"
                   >
@@ -480,9 +607,11 @@ export default function ReceiptsPage() {
               />
               <DialogFooter>
                 <DialogClose asChild>
-                  <Button type="button" variant="outline">Cancel</Button>
+                  <Button type="button" variant="outline" disabled={isSaving}>Cancel</Button>
                 </DialogClose>
-                <Button type="submit" disabled={isParsingReceipt}>{editingReceipt ? 'Save Changes' : 'Add Receipt'}</Button>
+                <Button type="submit" disabled={isSaving || isParsingReceipt}>
+                  {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : (editingReceipt ? 'Save Changes' : 'Add Receipt')}
+                </Button>
               </DialogFooter>
             </form>
           </Form>
@@ -517,7 +646,7 @@ export default function ReceiptsPage() {
               </>
             ) : (
               <>
-                <Button type="button" variant="outline" onClick={() => {setIsPreviewCapture(false); setCapturedImageDataUri(null);}}>Retake</Button>
+                <Button type="button" variant="outline" onClick={() => {setIsPreviewCapture(false); setCapturedImageDataUri(null); setFileNameForForm(null);}}>Retake</Button>
                 <Button type="button" onClick={handleUseCapturedImage}>Use This Image</Button>
               </>
             )}
@@ -608,14 +737,15 @@ export default function ReceiptsPage() {
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground truncate max-w-[200px]">
                       {receipt.fileName && <div className="font-medium text-foreground">{receipt.fileName}</div>}
+                      {receipt.imageUrl && <a href={receipt.imageUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline">(View Image)</a>}
                       {receipt.notes && <div className="italic">{receipt.notes}</div>}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="icon" onClick={() => openUploadDialog(receipt)} className="mr-1">
+                      <Button variant="ghost" size="icon" onClick={() => openUploadDialog(receipt)} className="mr-1" disabled={isSaving}>
                         <Edit3 className="h-4 w-4" />
                         <span className="sr-only">Edit</span>
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={() => handleDeleteReceipt(receipt.id)} className="text-destructive hover:text-destructive">
+                      <Button variant="ghost" size="icon" onClick={() => handleDeleteReceipt(receipt.id)} className="text-destructive hover:text-destructive" disabled={isSaving}>
                         <Trash2 className="h-4 w-4" />
                         <span className="sr-only">Delete</span>
                       </Button>
@@ -625,7 +755,13 @@ export default function ReceiptsPage() {
               </TableBody>
             </Table>
           ) : (
-            <p className="text-muted-foreground text-center py-8">No receipts uploaded yet. Start by adding your first expense!</p>
+            !isLoading && <p className="text-muted-foreground text-center py-8">No receipts uploaded yet. Start by adding your first expense!</p>
+          )}
+           {isLoading && (
+            <div className="flex justify-center items-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              <p className="ml-2">Loading receipts...</p>
+            </div>
           )}
         </CardContent>
          {receipts.length > 0 && (
