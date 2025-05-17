@@ -20,15 +20,15 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ResumeUploadForm } from '@/components/resume-upload-form';
 import { useState } from 'react';
-import type { ParseResumeOutput } from '@/ai/flows/resume-parser';
+import type { ParseResumeOutput, ChefProfile } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
-import { ChefHat, UserPlus, UploadCloud, ShieldCheck } from 'lucide-react';
+import { ChefHat, UserPlus, UploadCloud, ShieldCheck, Loader2 } from 'lucide-react';
 import Link from 'next/link';
-import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
-import { auth, storage, db } from '@/lib/firebase'; // Import db
+import { createUserWithEmailAndPassword, updateProfile as updateAuthProfile } from 'firebase/auth';
+import { auth, storage, db } from '@/lib/firebase'; 
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore'; // Import Firestore functions
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore'; 
 import { useRouter } from 'next/navigation';
 
 
@@ -54,6 +54,7 @@ const chefSignupSchema = z.object({
 type ChefSignupFormValues = z.infer<typeof chefSignupSchema>;
 
 export default function ChefSignupPage() {
+  const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [resumeParsedData, setResumeParsedData] = useState<ParseResumeOutput | null>(null);
   const [isResumeUploaded, setIsResumeUploaded] = useState(false);
   const [profilePicturePreview, setProfilePicturePreview] = useState<string | null>(null);
@@ -75,14 +76,15 @@ export default function ChefSignupPage() {
     },
   });
 
-  const handleResumeParsed = (data: ParseResumeOutput) => {
-    setResumeParsedData(data);
+  const handleResumeParsed = (data: { parsedData: ParseResumeOutput; file: File }) => {
+    setResumeParsedData(data.parsedData);
+    setResumeFile(data.file);
     setIsResumeUploaded(true);
-    if (data.experience && form.getValues('bio') === '') {
-        form.setValue('bio', data.experience.substring(0,500));
+    if (data.parsedData.experience && form.getValues('bio') === '') {
+        form.setValue('bio', data.parsedData.experience.substring(0,500));
     }
-    if (data.skills && data.skills.length > 0 && form.getValues('specialties') === '') {
-        form.setValue('specialties', data.skills.join(', '));
+    if (data.parsedData.skills && data.parsedData.skills.length > 0 && form.getValues('specialties') === '') {
+        form.setValue('specialties', data.parsedData.skills.join(', '));
     }
   };
 
@@ -102,7 +104,7 @@ export default function ChefSignupPage() {
   };
 
   const onSubmit = async (data: ChefSignupFormValues) => {
-    if (!isResumeUploaded || !resumeParsedData) {
+    if (!isResumeUploaded || !resumeParsedData || !resumeFile) {
       toast({
         title: 'Resume Required',
         description: 'Please upload and parse your resume before submitting.',
@@ -117,57 +119,76 @@ export default function ChefSignupPage() {
       const user = userCredential.user;
 
       let profilePictureUrl = '';
+      let resumeFileUrl = '';
 
+      // 1. Upload Profile Picture (if provided)
       if (data.profilePicture) {
         const file = data.profilePicture;
         const fileExtension = file.name.split('.').pop();
         const profilePicRef = storageRef(storage, `users/${user.uid}/profilePicture.${fileExtension}`);
         
         try {
-          toast({ title: "Uploading Profile Picture...", description: "Please wait." });
+          toast({ title: "Uploading Profile Picture...", description: "Please wait.", duration: 2000 });
           const uploadTaskSnapshot = await uploadBytesResumable(profilePicRef, file);
           profilePictureUrl = await getDownloadURL(uploadTaskSnapshot.ref);
-          await updateProfile(user, { displayName: data.name, photoURL: profilePictureUrl });
-          toast({ title: "Profile Picture Uploaded", description: "Your profile picture has been saved." });
         } catch (uploadError) {
           console.error("Profile picture upload error:", uploadError);
           toast({ title: "Profile Picture Upload Failed", description: "Could not upload profile picture. It can be updated later.", variant: "destructive" });
-          await updateProfile(user, { displayName: data.name });
         }
-      } else {
-        await updateProfile(user, { displayName: data.name });
+      }
+      
+      // 2. Upload Resume File
+      try {
+        toast({ title: "Uploading Resume...", description: "Please wait.", duration: 2000 });
+        const resumeStorageRefPath = `users/${user.uid}/resume.pdf`; // Standardize to PDF, ensure conversion if other formats were allowed
+        const resumeStorageRef = storageRef(storage, resumeStorageRefPath);
+        const resumeUploadTask = await uploadBytesResumable(resumeStorageRef, resumeFile);
+        resumeFileUrl = await getDownloadURL(resumeUploadTask.ref);
+      } catch (resumeUploadError) {
+          console.error("Resume upload error:", resumeUploadError);
+          toast({ title: "Resume Upload Failed", description: "Could not upload your resume file. It can be updated later.", variant: "destructive" });
       }
 
-      // Save additional chef profile data to Firestore
-      const userProfile = {
-        uid: user.uid,
-        email: user.email,
+
+      // 3. Update Firebase Auth Profile
+      await updateAuthProfile(user, { 
+        displayName: data.name, 
+        photoURL: profilePictureUrl || null 
+      });
+
+      // 4. Save additional chef profile data to Firestore
+      const userProfileData: ChefProfile = {
+        id: user.uid,
+        email: user.email || '',
         name: data.name,
         abn: data.abn,
         bio: data.bio,
-        specialties: data.specialties.split(',').map(s => s.trim()),
-        resumeData: {
-            experience: resumeParsedData.experience || "",
-            skills: resumeParsedData.skills || [],
-            education: resumeParsedData.education || "",
-        },
-        profilePictureUrl: profilePictureUrl,
+        specialties: data.specialties.split(',').map(s => s.trim()).filter(s => s),
+        experienceSummary: resumeParsedData.experience || "",
+        skills: resumeParsedData.skills || [],
+        education: resumeParsedData.education || "",
+        profilePictureUrl: profilePictureUrl || '',
+        resumeFileUrl: resumeFileUrl || '',
         role: 'chef',
-        isApproved: false, // Chefs start as unapproved
-        isSubscribed: false, // Chefs start as unsubscribed
+        isApproved: false, 
+        isSubscribed: false, 
+        trustScore: 3.0, // Initial default trust score
+        trustScoreBasis: "New chef - awaiting activity",
         createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       };
 
-      await setDoc(doc(db, "users", user.uid), userProfile);
+      await setDoc(doc(db, "users", user.uid), userProfileData);
       
       toast({
         title: 'Signup Successful!',
-        description: 'Your chef account has been created and profile saved. You will be redirected to login. Your account requires admin approval.',
+        description: 'Your chef account has been created. You will be redirected to login. Your account requires admin approval.',
         duration: 7000,
       });
       
       form.reset();
       setResumeParsedData(null);
+      setResumeFile(null);
       setIsResumeUploaded(false);
       setProfilePicturePreview(null);
       router.push('/login'); 
@@ -202,7 +223,10 @@ export default function ChefSignupPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-8">
-          <ResumeUploadForm onResumeParsed={handleResumeParsed} initialData={resumeParsedData ?? undefined} />
+          <ResumeUploadForm 
+            onResumeParsed={handleResumeParsed} 
+            initialData={resumeParsedData ?? undefined} 
+          />
 
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
@@ -369,7 +393,7 @@ export default function ChefSignupPage() {
               />
               
               <Button type="submit" className="w-full text-lg py-3" size="lg" disabled={!isResumeUploaded || isLoading || form.formState.isSubmitting}>
-                {isLoading ? 'Creating Account...' : <><UserPlus className="mr-2 h-5 w-5" /> Create Chef Account</>}
+                {isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <><UserPlus className="mr-2 h-5 w-5" /> Create Chef Account</>}
               </Button>
               {!isResumeUploaded && (
                 <p className="text-sm text-destructive text-center">Please upload and parse your resume above to enable account creation.</p>

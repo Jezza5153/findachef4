@@ -2,7 +2,7 @@
 'use client';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { CalendarClock, MessageCircleMore, ShieldCheck } from 'lucide-react';
+import { CalendarClock, MessageCircleMore, ShieldCheck, Loader2, ListChecks, Clock4 } from 'lucide-react';
 import {
   ChartContainer,
   ChartTooltip,
@@ -15,9 +15,14 @@ import type { ChartConfig } from "@/components/ui/chart"
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, Timestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, Timestamp, orderBy, limit } from 'firebase/firestore';
+import type { ActivityItem, ChefProfile } from '@/types';
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
+import { formatDistanceToNow } from 'date-fns';
 
-const menuEngagementData = [
+
+const menuEngagementData = [ // This will remain mock data for now
   { menu: "Menu A", views: 150, requests: 15 },
   { menu: "Menu B", views: 120, requests: 22 },
   { menu: "Menu C", views: 90, requests: 8 },
@@ -37,101 +42,114 @@ const chartConfig: ChartConfig = {
 
 
 export default function ChefDashboardPage() {
-  const { user } = useAuth();
+  const { user, userProfile } = useAuth();
   const [upcomingEventsCount, setUpcomingEventsCount] = useState<number | null>(null);
   const [loadingEvents, setLoadingEvents] = useState(true);
+  const [recentActivityItems, setRecentActivityItems] = useState<ActivityItem[]>([]);
+  const [loadingActivity, setLoadingActivity] = useState(true);
 
   // Placeholder for booking requests count - real implementation needs backend logic
+  // to determine which requests are relevant/new for this specific chef.
+  // This might involve querying a 'proposals' or 'requests' collection where the chef is involved.
   const bookingRequestsCount = 5; // Static placeholder
   const bookingRequestsChange = "+2 from last week"; // Static placeholder
 
-  // Placeholder for trust score - real implementation needs backend logic
-  const trustScore = "4.8/5"; // Static placeholder
-  const trustScoreDescription = "Based on reviews & platform activity"; // Static placeholder
-
-  // Placeholder for recent activity - real implementation needs a feed system
-  const recentActivity = [
-    { description: "New booking request for \"Italian Feast\" menu.", time: "2 hours ago" },
-    { description: "\"Summer BBQ Special\" menu published.", time: "1 day ago" },
-    { description: "Message from Jane Doe regarding birthday party.", time: "3 days ago" },
-  ];
-
   useEffect(() => {
-    const fetchUpcomingEventsCount = async () => {
+    const fetchDashboardData = async () => {
       if (!user) {
         setLoadingEvents(false);
+        setLoadingActivity(false);
         return;
       }
+
+      // Fetch Upcoming Events Count
       setLoadingEvents(true);
       try {
-        const today = Timestamp.fromDate(new Date(new Date().setHours(0, 0, 0, 0))); // Start of today
+        const today = Timestamp.fromDate(new Date(new Date().setHours(0, 0, 0, 0)));
         const eventsCollectionRef = collection(db, `users/${user.uid}/calendarEvents`);
-        // Assuming event.date is stored as a string 'YYYY-MM-DD' or Firestore Timestamp
-        // For string dates, direct comparison 'event.date >= todayISOString' is needed
-        // For Firestore Timestamps, 'where("date", ">=", today)' should work if 'date' is the field name
-        
-        // Adjusting query based on how dates are stored in calendarEvents
-        // If 'date' in calendarEvents is a string 'YYYY-MM-DD', this query needs adjustment
-        // For this example, assuming 'date' is a Firestore Timestamp representing the event start
         const q = query(
           eventsCollectionRef,
           where("status", "==", "Confirmed"),
-          // If 'date' is a Timestamp field for the event's date:
           where("date", ">=", today) 
-          // If 'date' is a string 'YYYY-MM-DD', you might need to fetch all confirmed events
-          // and filter client-side, or structure your data/queries differently.
-          // For now, this assumes 'date' can be compared with a Timestamp.
         );
-        
         const querySnapshot = await getDocs(q);
-        
-        // If 'date' is a string, and you fetched all confirmed, filter here:
-        // const todayStr = new Date().toISOString().split('T')[0];
-        // const count = querySnapshot.docs.filter(doc => doc.data().date >= todayStr).length;
-        // setUpcomingEventsCount(count);
-
         setUpcomingEventsCount(querySnapshot.size);
-
       } catch (error) {
         console.error("Error fetching upcoming events count:", error);
-        setUpcomingEventsCount(0); // Default to 0 on error
+        setUpcomingEventsCount(0);
       } finally {
         setLoadingEvents(false);
       }
+
+      // Fetch Recent Activity
+      setLoadingActivity(true);
+      try {
+        const activityCollectionRef = collection(db, `users/${user.uid}/activities`);
+        const activityQuery = query(activityCollectionRef, orderBy("timestamp", "desc"), limit(5));
+        const activitySnapshot = await getDocs(activityQuery);
+        const activities = activitySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ActivityItem));
+        setRecentActivityItems(activities);
+      } catch (error) {
+        console.error("Error fetching recent activity:", error);
+        setRecentActivityItems([]);
+      } finally {
+        setLoadingActivity(false);
+      }
     };
 
-    fetchUpcomingEventsCount();
+    fetchDashboardData();
   }, [user]);
+
+  const chefProfile = userProfile as ChefProfile | null;
 
   return (
     <div className="space-y-8">
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-2">
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3"> {/* Adjusted for 3 cards in a row */}
         <Card className="shadow-md">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Booking Requests</CardTitle>
-            <MessageCircleMore className="h-5 w-5 text-muted-foreground" />
+            <MessageCircleMore className="h-5 w-5 text-muted-foreground" data-ai-hint="message chat" />
           </CardHeader>
           <CardContent>
-            {/* Booking requests count is a placeholder. Real data would require more complex backend logic 
-                to determine which requests are relevant/new for this specific chef. */}
+            {/* This remains a placeholder as its logic is complex */}
             <div className="text-2xl font-bold">{bookingRequestsCount}</div>
             <p className="text-xs text-muted-foreground">{bookingRequestsChange}</p>
+            <p className="text-xs text-muted-foreground mt-1">(Placeholder - real data requires backend integration for request status)</p>
           </CardContent>
         </Card>
         <Card className="shadow-md">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Upcoming Confirmed Events</CardTitle>
-            <CalendarClock className="h-5 w-5 text-muted-foreground" />
+            <CalendarClock className="h-5 w-5 text-muted-foreground" data-ai-hint="calendar event" />
           </CardHeader>
           <CardContent>
             {loadingEvents ? (
-              <div className="text-2xl font-bold">Loading...</div>
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
             ) : (
               <div className="text-2xl font-bold">{upcomingEventsCount ?? 0}</div>
             )}
             <p className="text-xs text-muted-foreground">
               {loadingEvents ? "Fetching data..." : `Events confirmed and upcoming.`}
             </p>
+          </CardContent>
+        </Card>
+         <Card className="shadow-md">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Trust Score</CardTitle>
+            <ShieldCheck className="h-5 w-5 text-muted-foreground" data-ai-hint="shield security" />
+          </CardHeader>
+          <CardContent>
+            {chefProfile?.trustScore !== undefined ? (
+              <>
+                <div className="text-2xl font-bold">{chefProfile.trustScore.toFixed(1)}/5</div>
+                <p className="text-xs text-muted-foreground">{chefProfile.trustScoreBasis || "Based on platform activity"}</p>
+              </>
+            ) : (
+              <>
+                <div className="text-2xl font-bold">N/A</div>
+                <p className="text-xs text-muted-foreground">Awaiting activity to calculate score.</p>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -154,37 +172,47 @@ export default function ChefDashboardPage() {
                 <Bar dataKey="requests" fill="var(--color-requests)" radius={4} />
               </RechartsBarChart>
             </ChartContainer>
+             <p className="text-xs text-muted-foreground mt-2 text-center">(Placeholder - real data requires advanced tracking)</p>
           </CardContent>
         </Card>
+       
         <Card className="shadow-md">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Trust Score</CardTitle>
-            <ShieldCheck className="h-5 w-5 text-muted-foreground" />
+          <CardHeader>
+            <CardTitle className="flex items-center"><ListChecks className="mr-2 h-5 w-5" /> Recent Activity</CardTitle>
           </CardHeader>
           <CardContent>
-            {/* Trust score is a placeholder. Real calculation/fetching needs backend logic. */}
-            <div className="text-2xl font-bold">{trustScore}</div>
-            <p className="text-xs text-muted-foreground">{trustScoreDescription}</p>
+            {loadingActivity ? (
+              <div className="flex justify-center items-center h-32">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              </div>
+            ) : recentActivityItems.length > 0 ? (
+              <ul className="space-y-3">
+                {recentActivityItems.map((activity) => (
+                  <li key={activity.id} className="flex items-start justify-between text-sm pb-2 border-b border-dashed last:border-b-0">
+                    <div>
+                      {activity.linkTo ? (
+                        <Button variant="link" asChild className="p-0 h-auto text-left">
+                          <Link href={activity.linkTo} className="hover:underline">
+                            {activity.description}
+                          </Link>
+                        </Button>
+                      ) : (
+                        <span>{activity.description}</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground whitespace-nowrap ml-2">
+                      <Clock4 className="h-3 w-3 inline-block mr-1"/>
+                      {activity.timestamp ? formatDistanceToNow(activity.timestamp.toDate(), { addSuffix: true }) : 'Just now'}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-8">No recent activity to display.</p>
+            )}
           </CardContent>
         </Card>
       </div>
-
-       <Card className="shadow-md">
-        <CardHeader>
-          <CardTitle>Recent Activity</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {/* Recent activity is placeholder. Real implementation requires a feed/notification system. */}
-          <ul className="space-y-3">
-            {recentActivity.map((activity, index) => (
-              <li key={index} className="flex items-center justify-between text-sm">
-                <div>{activity.description}</div>
-                <div className="text-xs text-muted-foreground">{activity.time}</div>
-              </li>
-            ))}
-          </ul>
-        </CardContent>
-      </Card>
     </div>
   );
 }
