@@ -63,6 +63,10 @@ export interface ChefProfile {
   trustScoreBasis?: string;
   teamId?: string; // ID of the team the chef belongs to
   teamName?: string; // Display name of the team
+  hasCompletedFirstCoOp?: boolean;
+  collaboratorIds?: string[];
+  outgoingCollaborationRequests?: string[];
+  incomingCollaborationRequests?: string[];
 }
 
 export interface CustomerRequest {
@@ -74,8 +78,10 @@ export interface CustomerRequest {
   eventDate: any; // Firestore Timestamp
   notes?: string;
   customerId: string; // UID of the customer making the request
-  status?: 'new' | 'pending_proposals' | 'viewing_proposals' | 'booked' | 'cancelled';
+  status?: 'new' | 'awaiting_customer_response' | 'discussion' | 'booked' | 'cancelled_by_customer' | 'declined_by_chef';
   createdAt?: any; // Firestore Timestamp
+  updatedAt?: any; // Firestore Timestamp for status changes
+  respondingChefIds?: string[]; // Array of chef UIDs who have responded
 }
 
 export interface Testimonial {
@@ -118,7 +124,7 @@ export interface CalendarEvent {
   location?: string;
   notes?: string;
   coChefs?: string[];
-  status: 'Confirmed' | 'Pending' | 'Cancelled' | 'WallEvent'; // Added 'WallEvent' for chef-posted events
+  status: 'Confirmed' | 'Pending' | 'Cancelled' | 'WallEvent';
   weather?: string; // Placeholder
   toolsNeeded?: string[]; // Placeholder
   createdAt?: any; // Firestore Timestamp
