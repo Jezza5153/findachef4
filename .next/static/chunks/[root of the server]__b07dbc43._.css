@@ -2543,12 +2543,34 @@ body {
   animation-timing-function: linear;
 }
 
+.file\:mr-4::file-selector-button {
+  margin-right: 1rem;
+}
+
+.file\:rounded-full::file-selector-button {
+  border-radius: 9999px;
+}
+
 .file\:border-0::file-selector-button {
   border-width: 0;
 }
 
 .file\:bg-transparent::file-selector-button {
   background-color: #0000;
+}
+
+.file\:bg-primary\/10::file-selector-button {
+  background-color: hsl(var(--primary) / .1);
+}
+
+.file\:px-4::file-selector-button {
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+.file\:py-2::file-selector-button {
+  padding-top: .5rem;
+  padding-bottom: .5rem;
 }
 
 .file\:text-sm::file-selector-button {
@@ -2560,8 +2582,16 @@ body {
   font-weight: 500;
 }
 
+.file\:font-semibold::file-selector-button {
+  font-weight: 600;
+}
+
 .file\:text-foreground::file-selector-button {
   color: hsl(var(--foreground));
+}
+
+.file\:text-primary::file-selector-button {
+  color: hsl(var(--primary));
 }
 
 .placeholder\:text-muted-foreground::placeholder {
@@ -2707,6 +2737,10 @@ body {
   --tw-shadow: 0 20px 25px -5px #0000001a, 0 8px 10px -6px #0000001a;
   --tw-shadow-colored: 0 20px 25px -5px var(--tw-shadow-color), 0 8px 10px -6px var(--tw-shadow-color);
   box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+}
+
+.hover\:file\:bg-primary\/20::file-selector-button:hover {
+  background-color: hsl(var(--primary) / .2);
 }
 
 .hover\:after\:bg-sidebar-border:hover:after {

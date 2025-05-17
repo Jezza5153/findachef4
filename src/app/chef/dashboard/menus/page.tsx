@@ -24,8 +24,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { MenuCard } from '@/components/menu-card';
 import type { Menu, Option } from '@/types';
 import { useToast } from '@/hooks/use-toast';
-import { PlusCircle, Edit, Trash2, NotebookText, Eye, EyeOff, ShoppingCart, AlertCircle, Sparkles } from 'lucide-react';
+import { PlusCircle, Edit, Trash2, NotebookText, Eye, EyeOff, ShoppingCart, AlertCircle, Sparkles, UploadCloud, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { useAuth } from '@/context/AuthContext';
+import { db, storage } from '@/lib/firebase';
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where, serverTimestamp, Timestamp, setDoc } from 'firebase/firestore';
+import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
+import Image from 'next/image';
 
 
 const dietaryOptions: Option[] = [
@@ -45,58 +50,28 @@ const menuFormSchema = z.object({
   costPrice: z.coerce.number().min(0, { message: 'Cost price must be positive.'}).optional(),
   dietaryInfo: z.array(z.string()).optional(),
   isPublic: z.boolean().default(false),
-  imageUrl: z.string().url({message: "Please enter a valid image URL."}).optional().or(z.literal('')),
+  // imageUrl is now derived from file upload, so it's not directly in form schema for user input
+  menuImageFile: z.instanceof(File).optional()
+    .refine(file => !file || file.size <= 2 * 1024 * 1024, `Max image size is 2MB.`)
+    .refine(file => !file || ['image/jpeg', 'image/png', 'image/webp'].includes(file.type), `Only JPG, PNG, WEBP files are allowed.`),
+  dataAiHint: z.string().optional(),
 });
 
 type MenuFormValues = z.infer<typeof menuFormSchema>;
 
-const initialMenus: Menu[] = [
-  {
-    id: '1',
-    title: 'Classic Italian Feast',
-    description: 'A delightful journey through Italy with classic pasta, antipasti, and dessert. Perfect for family gatherings.',
-    cuisine: 'Italian',
-    pricePerHead: 75,
-    pax: 10,
-    dietaryInfo: ['Vegetarian Option Available'],
-    isPublic: true,
-    chefId: 'chef123',
-    chefName: 'Chef Julia',
-    imageUrl: 'https://placehold.co/600x400.png',
-    costPrice: 30,
-    dataAiHint: 'italian food',
-  },
-  {
-    id: '2',
-    title: 'Modern French Dinner',
-    description: 'Exquisite French cuisine with a modern twist. Features seasonal ingredients and artistic presentation.',
-    cuisine: 'French',
-    pricePerHead: 120,
-    pax: 6,
-    dietaryInfo: ['Gluten-Free Option'],
-    isPublic: false,
-    chefId: 'chef123',
-    chefName: 'Chef Julia',
-    imageUrl: 'https://placehold.co/600x400.png',
-    costPrice: 55,
-    dataAiHint: 'french food',
-  },
-];
 
 export default function MenuManagementPage() {
-  const [menus, setMenus] = useState<Menu[]>(initialMenus);
+  const { user, userProfile, isChefSubscribed } = useAuth();
+  const [menus, setMenus] = useState<Menu[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingMenu, setEditingMenu] = useState<Menu | null>(null);
-  const [isChefSubscribed, setIsChefSubscribed] = useState<boolean>(false);
+  
+  const [menuImageFile, setMenuImageFile] = useState<File | null>(null);
+  const [menuImagePreview, setMenuImagePreview] = useState<string | null>(null);
+
   const { toast } = useToast();
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const subscriptionStatus = localStorage.getItem('isChefSubscribed');
-      setIsChefSubscribed(subscriptionStatus === 'true');
-    }
-  }, []);
-
 
   const form = useForm<MenuFormValues>({
     resolver: zodResolver(menuFormSchema),
@@ -107,30 +82,134 @@ export default function MenuManagementPage() {
       pricePerHead: 0,
       dietaryInfo: [],
       isPublic: false,
-      imageUrl: '',
+      menuImageFile: undefined,
       pax: undefined,
       costPrice: undefined,
+      dataAiHint: '',
     },
   });
 
-  const onSubmit = (data: MenuFormValues) => {
-    if (editingMenu) {
-      setMenus(menus.map(menu => menu.id === editingMenu.id ? { ...editingMenu, ...data, dietaryInfo: data.dietaryInfo || [] } : menu));
-      toast({ title: 'Menu Updated', description: `"${data.title}" has been successfully updated.` });
-    } else {
-      const newMenu: Menu = {
-        id: String(Date.now()),
-        ...data,
-        dietaryInfo: data.dietaryInfo || [],
-        chefId: 'chef123',
-        chefName: 'Chef Julia'
+  useEffect(() => {
+    const fetchMenus = async () => {
+      if (!user) {
+        setIsLoading(false);
+        return;
+      }
+      setIsLoading(true);
+      try {
+        const menusCollectionRef = collection(db, "menus");
+        const q = query(menusCollectionRef, where("chefId", "==", user.uid), orderBy("createdAt", "desc"));
+        const querySnapshot = await getDocs(q);
+        const fetchedMenus = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Menu));
+        setMenus(fetchedMenus);
+      } catch (error) {
+        console.error("Error fetching menus:", error);
+        toast({ title: "Error", description: "Could not fetch your menus.", variant: "destructive" });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchMenus();
+  }, [user, toast]);
+
+  const handleMenuImageFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      form.setValue('menuImageFile', file, { shouldValidate: true });
+      setMenuImageFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setMenuImagePreview(reader.result as string);
       };
-      setMenus([...menus, newMenu]);
-      toast({ title: 'Menu Created', description: `"${data.title}" has been successfully created.` });
+      reader.readAsDataURL(file);
+    } else {
+      form.setValue('menuImageFile', undefined);
+      setMenuImageFile(null);
+      setMenuImagePreview(editingMenu?.imageUrl || null); // Revert to existing image if file is cleared
     }
-    form.reset();
-    setEditingMenu(null);
-    setIsDialogOpen(false);
+  };
+
+  const onSubmit = async (data: MenuFormValues) => {
+    if (!user || !userProfile) {
+      toast({ title: "Authentication Error", description: "You must be logged in to manage menus.", variant: "destructive" });
+      return;
+    }
+    setIsSaving(true);
+
+    let imageUrl = editingMenu?.imageUrl || ''; // Keep existing image URL if not changed
+
+    try {
+      if (menuImageFile) {
+        // If there was an old image for an existing menu, delete it first
+        if (editingMenu && editingMenu.imageUrl) {
+          try {
+            const oldImageRef = storageRef(storage, editingMenu.imageUrl);
+            await deleteObject(oldImageRef).catch(e => console.warn("Old image not found or could not be deleted:", e));
+          } catch (e) {
+            console.warn("Error deleting old menu image:", e); // Non-critical, proceed with upload
+          }
+        }
+        
+        const menuIdForPath = editingMenu?.id || doc(collection(db, 'menus')).id; // Generate ID if new
+        const fileExtension = menuImageFile.name.split('.').pop();
+        const imagePath = `users/${user.uid}/menus/${menuIdForPath}/image.${fileExtension}`;
+        const imageStorageRef = storageRef(storage, imagePath);
+        
+        toast({ title: "Uploading image...", description: "Please wait." });
+        const uploadTask = uploadBytesResumable(imageStorageRef, menuImageFile);
+        await new Promise<void>((resolve, reject) => {
+          uploadTask.on('state_changed', 
+            null, // Optional: handle progress
+            (error) => { console.error("Menu image upload error:", error); reject(error); },
+            async () => {
+              imageUrl = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve();
+            }
+          );
+        });
+      }
+
+      const menuDataToSave: Omit<Menu, 'id' | 'createdAt' | 'updatedAt'> & { chefId: string, chefName: string, imageUrl?: string, updatedAt: Timestamp, createdAt?: Timestamp } = {
+        title: data.title,
+        description: data.description,
+        cuisine: data.cuisine,
+        pricePerHead: data.pricePerHead,
+        pax: data.pax,
+        costPrice: data.costPrice,
+        dietaryInfo: data.dietaryInfo || [],
+        isPublic: data.isPublic,
+        imageUrl: imageUrl,
+        dataAiHint: data.dataAiHint,
+        chefId: user.uid,
+        chefName: userProfile.name || user.displayName || "Chef",
+        updatedAt: Timestamp.now(),
+      };
+
+      if (editingMenu) {
+        const menuDocRef = doc(db, "menus", editingMenu.id);
+        await updateDoc(menuDocRef, menuDataToSave);
+        setMenus(menus.map(menu => menu.id === editingMenu.id ? { ...menu, ...menuDataToSave, id: editingMenu.id, createdAt: menu.createdAt } as Menu : menu));
+        toast({ title: 'Menu Updated', description: `"${data.title}" has been successfully updated.` });
+      } else {
+        menuDataToSave.createdAt = Timestamp.now();
+        const newMenuDocRef = doc(collection(db, "menus")); // Generate new ID
+        await setDoc(newMenuDocRef, menuDataToSave);
+        setMenus([{ ...menuDataToSave, id: newMenuDocRef.id } as Menu, ...menus]);
+        toast({ title: 'Menu Created', description: `"${data.title}" has been successfully created.` });
+      }
+      
+      form.reset();
+      setEditingMenu(null);
+      setIsDialogOpen(false);
+      setMenuImageFile(null);
+      setMenuImagePreview(null);
+
+    } catch (error) {
+      console.error('Error saving menu:', error);
+      toast({ title: 'Save Failed', description: 'Could not save your menu. Please try again.', variant: 'destructive' });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleEdit = (menuId: string) => {
@@ -138,29 +217,59 @@ export default function MenuManagementPage() {
     if (menuToEdit) {
       setEditingMenu(menuToEdit);
       form.reset({
-        ...menuToEdit,
+        title: menuToEdit.title,
+        description: menuToEdit.description,
+        cuisine: menuToEdit.cuisine,
         pricePerHead: menuToEdit.pricePerHead || 0,
         pax: menuToEdit.pax || undefined,
         costPrice: menuToEdit.costPrice || undefined,
-        imageUrl: menuToEdit.imageUrl || '',
+        dietaryInfo: menuToEdit.dietaryInfo || [],
+        isPublic: menuToEdit.isPublic,
+        menuImageFile: undefined, // Don't prefill file input
+        dataAiHint: menuToEdit.dataAiHint || '',
       });
+      setMenuImagePreview(menuToEdit.imageUrl || null);
+      setMenuImageFile(null);
       setIsDialogOpen(true);
     }
   };
 
-  const handleDelete = (menuId: string) => {
+  const handleDelete = async (menuId: string) => {
+    if (!user) return;
     const menuToDelete = menus.find(m => m.id === menuId);
+    if (!menuToDelete) return;
+
     if (window.confirm(`Are you sure you want to delete the menu "${menuToDelete?.title}"?`)) {
-      setMenus(menus.filter(menu => menu.id !== menuId));
-      toast({ title: 'Menu Deleted', description: `"${menuToDelete?.title}" has been deleted.`, variant: 'destructive' });
+      setIsSaving(true);
+      try {
+        // Delete image from storage if it exists
+        if (menuToDelete.imageUrl) {
+          try {
+            const imageRef = storageRef(storage, menuToDelete.imageUrl);
+            await deleteObject(imageRef);
+          } catch (e) {
+            console.warn("Could not delete menu image from storage:", e);
+            // Non-critical, proceed to delete Firestore doc
+          }
+        }
+        await deleteDoc(doc(db, "menus", menuId));
+        setMenus(menus.filter(menu => menu.id !== menuId));
+        toast({ title: 'Menu Deleted', description: `"${menuToDelete?.title}" has been deleted.`, variant: 'destructive' });
+      } catch (error) {
+        console.error("Error deleting menu:", error);
+        toast({ title: "Delete Error", description: "Could not delete menu.", variant: "destructive" });
+      } finally {
+        setIsSaving(false);
+      }
     }
   };
 
   const handleAddToShoppingList = (menuId: string) => {
     const menu = menus.find(m => m.id === menuId);
+    // In a real app, this would add ingredients from the menu to the shopping list (likely in Firestore)
     toast({
-      title: 'Added to Shopping List (Simulated)',
-      description: `Items for "${menu?.title}" have been notionally added to your shopping list.`,
+      title: 'Add to Shopping List (Placeholder)',
+      description: `Functionality to add items for "${menu?.title}" to your shopping list is coming soon.`,
     });
   };
 
@@ -172,35 +281,53 @@ export default function MenuManagementPage() {
       pricePerHead: 0,
       dietaryInfo: [],
       isPublic: false,
-      imageUrl: '',
+      menuImageFile: undefined,
       pax: undefined,
       costPrice: undefined,
+      dataAiHint: '',
     });
     setEditingMenu(null);
+    setMenuImageFile(null);
+    setMenuImagePreview(null);
     setIsDialogOpen(true);
   };
 
   const handleAiAssist = () => {
     const currentDescription = form.getValues("description");
+    // Placeholder: In future, use a Genkit flow to suggest menu details
+    // For example: const suggestions = await suggestMenuDetailsFlow({ currentDescription, title: form.getValues("title") });
+    // Then, form.setValue("description", suggestions.description); etc.
     toast({
-      title: "AI Menu Assist (Coming Soon!)",
-      description: "This feature will help you generate or enhance your menu descriptions, suggest dietary swaps, and provide cost insights. Current description: " + (currentDescription || "empty"),
-      duration: 7000,
+      title: "AI Menu Assist (Placeholder)",
+      description: "This feature will soon help generate descriptions, suggest dietary options, and more!",
+      duration: 5000,
     });
-    // Future: Open a dialog, call a Genkit flow, update form.setValue("description", aiResponse)
   };
 
+
+  if (isLoading) {
+    return <div className="flex h-screen items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /> Loading menus...</div>;
+  }
 
   return (
     <div className="space-y-8">
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold flex items-center"><NotebookText className="mr-3 h-8 w-8 text-primary"/> Manage Your Menus</h1>
-        <Button onClick={openNewMenuDialog}>
+        <Button onClick={openNewMenuDialog} disabled={isSaving}>
           <PlusCircle className="mr-2 h-5 w-5" /> Add New Menu
         </Button>
       </div>
 
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+      <Dialog open={isDialogOpen} onOpenChange={(isOpen) => {
+          if (isSaving && isOpen) return; // Prevent closing while saving
+          setIsDialogOpen(isOpen);
+          if (!isOpen) {
+            setMenuImageFile(null);
+            setMenuImagePreview(null);
+            form.reset();
+            setEditingMenu(null);
+          }
+      }}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingMenu ? 'Edit Menu' : 'Create New Menu'}</DialogTitle>
@@ -283,18 +410,44 @@ export default function MenuManagementPage() {
                   )}
                 />
               </div>
-               <FormField
+              
+              <FormField
                 control={form.control}
-                name="imageUrl"
-                render={({ field }) => (
+                name="menuImageFile"
+                render={() => ( // field not used directly for file input
                   <FormItem>
-                    <FormLabel>Menu Image URL (Optional)</FormLabel>
-                    <FormControl><Input placeholder="https://example.com/image.jpg" {...field} /></FormControl>
-                    <FormDescription>A captivating image for your menu.</FormDescription>
+                    <FormLabel>Menu Image (Optional)</FormLabel>
+                    <FormControl>
+                      <Input 
+                        type="file" 
+                        accept="image/jpeg,image/png,image/webp"
+                        onChange={handleMenuImageFileChange} 
+                        className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
+                      />
+                    </FormControl>
+                    {menuImagePreview && (
+                      <div className="mt-2">
+                        <Image src={menuImagePreview} alt="Menu image preview" width={200} height={150} className="rounded-md object-cover" />
+                      </div>
+                    )}
+                    <FormDescription>A captivating image for your menu (max 2MB, JPG/PNG/WEBP).</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
               />
+              <FormField
+                control={form.control}
+                name="dataAiHint"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Image Description Hint (for AI)</FormLabel>
+                    <FormControl><Input placeholder="e.g., italian food, pasta dish" {...field} /></FormControl>
+                    <FormDescription>One or two keywords to help AI understand the image content (max 2 words).</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
               <FormItem>
                 <FormLabel>Dietary Information (Flags)</FormLabel>
                 <Controller
@@ -334,7 +487,7 @@ export default function MenuManagementPage() {
                     <div className="space-y-0.5">
                       <FormLabel className="text-base">Publish Menu</FormLabel>
                       <FormDescription>
-                        Make this menu visible to customers.
+                        Make this menu visible to customers on the public menu listings.
                         {!isChefSubscribed && " Publishing public menus requires an active subscription."}
                       </FormDescription>
                     </div>
@@ -351,7 +504,7 @@ export default function MenuManagementPage() {
                                 }
                                 field.onChange(checked);
                               }}
-                              disabled={!isChefSubscribed && field.value} //This makes it hard to unpublish if subscription lapses
+                              disabled={!isChefSubscribed && field.value} 
                               aria-readonly={!isChefSubscribed && field.value}
                             />
                           </FormControl>
@@ -368,9 +521,11 @@ export default function MenuManagementPage() {
               />
               <DialogFooter>
                 <DialogClose asChild>
-                    <Button type="button" variant="outline">Cancel</Button>
+                    <Button type="button" variant="outline" disabled={isSaving}>Cancel</Button>
                 </DialogClose>
-                <Button type="submit">{editingMenu ? 'Save Changes' : 'Create Menu'}</Button>
+                <Button type="submit" disabled={isSaving}>
+                  {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (editingMenu ? 'Save Changes' : 'Create Menu')}
+                </Button>
               </DialogFooter>
             </form>
           </Form>
@@ -392,20 +547,24 @@ export default function MenuManagementPage() {
           ))}
         </div>
       ) : (
-        <Card className="text-center py-12">
-          <CardHeader>
-            <CardTitle>No Menus Yet</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-muted-foreground mb-4">You haven't created any menus. Get started by adding your first one!</p>
-            <Button onClick={openNewMenuDialog}>
-              <PlusCircle className="mr-2 h-5 w-5" /> Create Your First Menu
-            </Button>
-          </CardContent>
-        </Card>
+        !isLoading && (
+            <Card className="text-center py-12 border-dashed">
+                <CardHeader>
+                    <NotebookText className="mx-auto h-12 w-12 text-muted-foreground mb-3" data-ai-hint="notebook empty" />
+                    <CardTitle>No Menus Yet</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <p className="text-muted-foreground mb-4">You haven't created any menus. Get started by adding your first one!</p>
+                    <Button onClick={openNewMenuDialog}>
+                    <PlusCircle className="mr-2 h-5 w-5" /> Create Your First Menu
+                    </Button>
+                </CardContent>
+            </Card>
+        )
       )}
     </div>
   );
 }
+    
 
     
