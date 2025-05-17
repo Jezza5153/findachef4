@@ -26,7 +26,8 @@ import Image from 'next/image';
 import { ChefHat, UserPlus, UploadCloud, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
 import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import { auth, storage } from '@/lib/firebase'; // Import storage
+import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage'; // Storage imports
 import { useRouter } from 'next/navigation';
 
 
@@ -37,7 +38,7 @@ const chefSignupSchema = z.object({
   name: z.string().min(2, { message: 'Name must be at least 2 characters.' }),
   abn: z.string().min(1, {message: 'ABN is required.'}),
   bio: z.string().min(20, {message: 'Bio must be at least 20 characters.'}).max(500, {message: "Bio cannot exceed 500 characters."}),
-  specialties: z.string().min(1, { message: 'Please list at least one specialty.' }), 
+  specialties: z.string().min(1, { message: 'Please list at least one specialty.' }),
   profilePicture: z.instanceof(File).optional()
     .refine(file => !file || file.size <= 2 * 1024 * 1024, `Max file size is 2MB.`)
     .refine(file => !file || ['image/jpeg', 'image/png', 'image/webp'].includes(file.type), `Only JPG, PNG, WEBP files are allowed.`),
@@ -114,12 +115,33 @@ export default function ChefSignupPage() {
       const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password);
       const user = userCredential.user;
 
-      // Update Firebase user's display name (optional but good practice)
-      await updateProfile(user, { displayName: data.name });
+      let profilePictureUrl = '';
+
+      // Upload profile picture if provided
+      if (data.profilePicture) {
+        const file = data.profilePicture;
+        const fileExtension = file.name.split('.').pop();
+        const profilePicRef = storageRef(storage, `users/${user.uid}/profilePicture.${fileExtension}`);
+        
+        try {
+          const uploadTaskSnapshot = await uploadBytesResumable(profilePicRef, file);
+          profilePictureUrl = await getDownloadURL(uploadTaskSnapshot.ref);
+          await updateProfile(user, { displayName: data.name, photoURL: profilePictureUrl });
+           toast({ title: "Profile Picture Uploaded", description: "Your profile picture has been saved." });
+        } catch (uploadError) {
+          console.error("Profile picture upload error:", uploadError);
+          toast({ title: "Profile Picture Upload Failed", description: "Could not upload profile picture. Please try updating it from your profile later.", variant: "destructive" });
+          // Still update display name even if photo upload fails
+          await updateProfile(user, { displayName: data.name });
+        }
+      } else {
+        // Update display name if no photo
+        await updateProfile(user, { displayName: data.name });
+      }
 
       // TODO: Save additional chef profile data to Firestore here
-      // This would include: data.abn, data.bio, data.specialties, resumeParsedData, 
-      // profilePictureUrl (after uploading the picture to Firebase Storage),
+      // This would include: uid, email, name, abn, bio, specialties (as array),
+      // resumeParsedData (experience, skills, education), profilePictureUrl (if uploaded),
       // role: 'chef', isApproved: false, isSubscribed: false
       console.log('Chef Signup Data (to be saved to Firestore):', {
         uid: user.uid,
@@ -129,18 +151,25 @@ export default function ChefSignupPage() {
         bio: data.bio,
         specialties: data.specialties.split(',').map(s => s.trim()),
         resume: resumeParsedData,
-        // profilePicture: data.profilePicture (needs upload to Storage first)
+        profilePictureUrl: profilePictureUrl, // This will be empty if upload failed or no picture
       });
       
       toast({
         title: 'Signup Successful!',
         description: 'Your chef account has been created. You will be redirected to login. Your account will require admin approval.',
       });
+      // Set localStorage flags for redirection logic (temporary until Firestore profiles)
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('userRole', 'chef');
+        localStorage.setItem('isChefApproved', 'false'); // Chef accounts start as unapproved
+        localStorage.setItem('isChefSubscribed', 'false');
+      }
+      
       form.reset();
       setResumeParsedData(null);
       setIsResumeUploaded(false);
       setProfilePicturePreview(null);
-      router.push('/login'); // Redirect to login after successful signup
+      router.push('/login'); 
     } catch (error: any) {
       console.error('Signup error:', error);
       let errorMessage = 'Failed to create account.';
@@ -247,7 +276,7 @@ export default function ChefSignupPage() {
               <FormField
                   control={form.control}
                   name="profilePicture"
-                  render={({ field }) => (
+                  render={({ field }) => ( // field prop is not directly used for file input value here
                     <FormItem>
                       <FormLabel>Profile Picture</FormLabel>
                       <FormControl>
@@ -259,10 +288,10 @@ export default function ChefSignupPage() {
                               <UserPlus className="h-10 w-10" />
                             </div>
                           )}
-                          <Input 
-                            type="file" 
+                          <Input
+                            type="file"
                             accept="image/jpeg,image/png,image/webp"
-                            onChange={handleProfilePictureChange} 
+                            onChange={handleProfilePictureChange}
                             className="hidden"
                             id="profilePictureUpload"
                           />
@@ -328,7 +357,7 @@ export default function ChefSignupPage() {
                         Agreement & Policies
                       </FormLabel>
                       <FormDescription>
-                        I agree to the FindAChef <Link href="/terms" className="underline hover:text-primary">Terms of Service</Link>, <Link href="/chef-policies" className="underline hover:text-primary">Chef Program Policies</Link>, and acknowledge the <Link href="/privacy" className="underline hover:text-primary">Privacy Policy</Link>. This includes keeping all communications and payments on the platform.
+                        I agree to the FindAChef <Link href="/terms" className="underline hover:text-primary">Terms of Service</Link>, <Link href="/chef-policies" className="underline hover:text-primary">Chef Program Policies</Link>, and acknowledge the <Link href="/privacy-policy" className="underline hover:text-primary">Privacy Policy</Link>. This includes keeping all communications and payments on the platform.
                       </FormDescription>
                       <FormMessage />
                     </div>
