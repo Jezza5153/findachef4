@@ -14,7 +14,7 @@ interface MenuCardProps {
   onEdit?: (menuId: string) => void;
   onDelete?: (menuId: string) => void;
   onRequest?: (menuId: string) => void; // For customer requesting a menu
-  onAddToShoppingList?: (menuId: string) => void; // New prop
+  onAddToShoppingList?: (menu: Menu) => void; // Changed to pass full menu object
   isChefOwner?: boolean; // If the current user is the chef who owns this menu
 }
 
@@ -137,7 +137,7 @@ export function MenuCard({
               <Button variant="destructive" size="sm" onClick={() => onDelete(menu.id)} className="flex-1">Delete</Button>
             </div>
             {onAddToShoppingList && (
-              <Button variant="secondary" size="sm" onClick={() => onAddToShoppingList(menu.id)} className="w-full">
+              <Button variant="secondary" size="sm" onClick={() => onAddToShoppingList(menu)} className="w-full">
                 <ShoppingCart className="mr-2 h-4 w-4" /> Add to Shopping List
               </Button>
             )}

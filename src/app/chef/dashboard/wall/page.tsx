@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, ChangeEvent } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import * as z from 'zod';
@@ -18,19 +18,18 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import type { ChefWallEvent, CalendarEvent } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
-import { PlusCircle, Edit3, Trash2, LayoutGrid, Users, CalendarClock, DollarSign, MapPin, Globe, Lock, AlertCircle, ChefHat, Loader2, InfoIcon } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, LayoutGrid, Users, CalendarClock, DollarSign, MapPin, Globe, Lock, AlertCircle, ChefHat, Loader2, InfoIcon, UploadCloud } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/context/AuthContext';
-import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where, serverTimestamp, Timestamp, setDoc, onSnapshot } from 'firebase/firestore';
-import { format, parseISO } from 'date-fns';
+import { db, storage } from '@/lib/firebase';
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where, serverTimestamp, Timestamp, setDoc, onSnapshot, orderBy } from 'firebase/firestore';
+import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 
 const wallEventFormSchema = z.object({
   title: z.string().min(5, { message: 'Event title must be at least 5 characters.' }),
@@ -39,7 +38,7 @@ const wallEventFormSchema = z.object({
   eventDateTime: z.string().refine(val => {
     try {
       const date = new Date(val);
-      return !isNaN(date.getTime()) && date > new Date(); // Ensure date is in the future
+      return !isNaN(date.getTime()) && date > new Date(); 
     } catch {
       return false;
     }
@@ -48,8 +47,10 @@ const wallEventFormSchema = z.object({
   pricePerPerson: z.coerce.number().min(0, { message: 'Price must be a positive number or zero.' }),
   chefsInvolved: z.string().optional(), 
   tags: z.string().optional(), 
-  imageUrl: z.string().url({ message: "Please enter a valid image URL." }).optional().or(z.literal('')),
-  dataAiHint: z.string().optional(),
+  eventImageFile: z.instanceof(File).optional()
+    .refine(file => !file || file.size <= 2 * 1024 * 1024, `Max image size is 2MB.`)
+    .refine(file => !file || ['image/jpeg', 'image/png', 'image/webp'].includes(file.type), `Only JPG, PNG, WEBP files are allowed.`),
+  dataAiHint: z.string().optional().max(30, "Hint should be brief, max 2 words."),
   isPublic: z.boolean().default(true), 
 });
 
@@ -62,6 +63,10 @@ export default function ChefWallPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isPostDialogOpen, setIsPostDialogOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<ChefWallEvent | null>(null);
+  
+  const [eventImageFile, setEventImageFile] = useState<File | null>(null);
+  const [eventImagePreview, setEventImagePreview] = useState<string | null>(null);
+
   const { toast } = useToast();
 
   const form = useForm<WallEventFormValues>({
@@ -75,7 +80,7 @@ export default function ChefWallPage() {
       pricePerPerson: 50,
       chefsInvolved: '',
       tags: '',
-      imageUrl: '',
+      eventImageFile: undefined,
       dataAiHint: '',
       isPublic: true,
     },
@@ -91,7 +96,12 @@ export default function ChefWallPage() {
     const q = query(eventsCollectionRef, where("chefId", "==", user.uid), orderBy("createdAt", "desc"));
     
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const fetchedEvents = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ChefWallEvent));
+      const fetchedEvents = querySnapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        createdAt: doc.data().createdAt ? (doc.data().createdAt as Timestamp).toDate() : undefined,
+        updatedAt: doc.data().updatedAt ? (doc.data().updatedAt as Timestamp).toDate() : undefined,
+       } as ChefWallEvent));
       setWallEvents(fetchedEvents);
       setIsLoading(false);
     }, (error) => {
@@ -102,6 +112,23 @@ export default function ChefWallPage() {
 
     return () => unsubscribe();
   }, [user, toast]);
+
+  const handleEventImageFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      form.setValue('eventImageFile', file, { shouldValidate: true });
+      setEventImageFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setEventImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    } else {
+      form.setValue('eventImageFile', undefined);
+      setEventImageFile(null);
+      setEventImagePreview(editingEvent?.imageUrl || null);
+    }
+  };
 
   const onSubmitEventPost = async (data: WallEventFormValues) => {
     if (!user || !userProfile) {
@@ -115,27 +142,55 @@ export default function ChefWallPage() {
     setIsSaving(true);
 
     const eventDate = new Date(data.eventDateTime);
+    let imageUrlToSave = editingEvent?.imageUrl || '';
+    const eventIdForPath = editingEvent?.id || doc(collection(db, 'chefWallEvents')).id;
 
-    const finalEventData: Omit<ChefWallEvent, 'id' | 'createdAt' | 'updatedAt' | 'chefId' | 'chefName' | 'chefAvatarUrl'> & { chefId: string, chefName: string, chefAvatarUrl?: string } = {
-      title: data.title,
-      description: data.description,
-      maxPax: data.maxPax,
-      eventDateTime: eventDate.toISOString(), // Store as ISO string
-      location: data.location,
-      pricePerPerson: data.pricePerPerson,
-      chefsInvolved: data.chefsInvolved?.split(',').map(s => s.trim()).filter(s => s) || [],
-      tags: data.tags?.split(',').map(s => s.trim()).filter(s => s) || [],
-      imageUrl: data.imageUrl,
-      dataAiHint: data.dataAiHint,
-      isPublic: data.isPublic,
-      chefId: user.uid,
-      chefName: userProfile.name || user.displayName || "Chef",
-      chefAvatarUrl: userProfile.profilePictureUrl || user.photoURL || undefined,
-    };
-    
     try {
-      let eventId: string;
-      const calendarEventData: Omit<CalendarEvent, 'id' | 'createdAt' | 'updatedAt'> = {
+      if (eventImageFile) {
+        if (editingEvent && editingEvent.imageUrl) {
+          try {
+            const oldImageRef = storageRef(storage, editingEvent.imageUrl);
+            await deleteObject(oldImageRef).catch(e => console.warn("Old image not found or cannot be deleted for wall event:", e));
+          } catch (e) { console.warn("Error deleting old wall event image:", e); }
+        }
+        
+        const fileExtension = eventImageFile.name.split('.').pop();
+        const imagePath = `users/${user.uid}/chefWallEvents/${eventIdForPath}/eventImage.${fileExtension}`;
+        const imageStorageRef = storageRef(storage, imagePath);
+        
+        toast({ title: "Uploading image...", description: "Please wait." });
+        const uploadTask = uploadBytesResumable(imageStorageRef, eventImageFile);
+        await new Promise<void>((resolve, reject) => {
+          uploadTask.on('state_changed', null,
+            (error) => { console.error("Wall event image upload error:", error); reject(error); },
+            async () => {
+              imageUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve();
+            }
+          );
+        });
+      }
+
+      const finalEventData: Omit<ChefWallEvent, 'id' | 'createdAt' | 'updatedAt'> & { chefId: string, chefName: string, chefAvatarUrl?: string, updatedAt: Timestamp, createdAt?: Timestamp } = {
+        title: data.title,
+        description: data.description,
+        maxPax: data.maxPax,
+        eventDateTime: eventDate.toISOString(),
+        location: data.location,
+        pricePerPerson: data.pricePerPerson,
+        chefsInvolved: data.chefsInvolved?.split(',').map(s => s.trim()).filter(s => s) || [],
+        tags: data.tags?.split(',').map(s => s.trim()).filter(s => s) || [],
+        imageUrl: imageUrlToSave,
+        dataAiHint: data.dataAiHint,
+        isPublic: data.isPublic,
+        chefId: user.uid,
+        chefName: userProfile.name || user.displayName || "Chef",
+        chefAvatarUrl: userProfile.profilePictureUrl || user.photoURL || undefined,
+        updatedAt: Timestamp.now(),
+      };
+      
+      const calendarEventData: Omit<CalendarEvent, 'id' | 'createdAt' | 'updatedAt'> & {id: string} = {
+        id: eventIdForPath, // Use the same ID for calendar event
         title: finalEventData.title,
         date: Timestamp.fromDate(eventDate),
         location: finalEventData.location,
@@ -144,27 +199,26 @@ export default function ChefWallPage() {
         pricePerHead: finalEventData.pricePerPerson,
         notes: finalEventData.description,
         coChefs: finalEventData.chefsInvolved,
-        status: 'WallEvent', // Mark as a Chef Wall event
+        status: 'WallEvent',
         chefId: user.uid,
         isWallEvent: true,
       };
 
       if (editingEvent) {
-        eventId = editingEvent.id;
-        const eventDocRef = doc(db, "chefWallEvents", eventId);
-        await updateDoc(eventDocRef, { ...finalEventData, updatedAt: serverTimestamp() });
+        const eventDocRef = doc(db, "chefWallEvents", editingEvent.id);
+        await updateDoc(eventDocRef, finalEventData);
         
-        const calendarEventDocRef = doc(db, `users/${user.uid}/calendarEvents`, eventId);
+        const calendarEventDocRef = doc(db, `users/${user.uid}/calendarEvents`, editingEvent.id);
         await setDoc(calendarEventDocRef, { ...calendarEventData, updatedAt: serverTimestamp() }, { merge: true });
 
         toast({ title: 'Event Post Updated', description: `"${finalEventData.title}" has been successfully updated.` });
       } else {
-        const newDocRef = doc(collection(db, "chefWallEvents")); 
-        eventId = newDocRef.id;
-        await setDoc(newDocRef, { ...finalEventData, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+        finalEventData.createdAt = Timestamp.now();
+        const newDocRef = doc(db, "chefWallEvents", eventIdForPath); 
+        await setDoc(newDocRef, finalEventData);
         
-        const calendarEventDocRef = doc(db, `users/${user.uid}/calendarEvents`, eventId);
-        await setDoc(calendarEventDocRef, { ...calendarEventData, id: eventId, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+        const calendarEventDocRef = doc(db, `users/${user.uid}/calendarEvents`, eventIdForPath);
+        await setDoc(calendarEventDocRef, { ...calendarEventData, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
         
         toast({ title: 'Event Post Created', description: `"${finalEventData.title}" has been successfully created.` });
       }
@@ -172,6 +226,8 @@ export default function ChefWallPage() {
       form.reset();
       setEditingEvent(null);
       setIsPostDialogOpen(false);
+      setEventImageFile(null);
+      setEventImagePreview(null);
 
     } catch (error) {
       console.error('Error saving wall event:', error);
@@ -183,16 +239,24 @@ export default function ChefWallPage() {
 
   const handleEditEventPost = (eventToEdit: ChefWallEvent) => {
     setEditingEvent(eventToEdit);
-    // Format date for datetime-local input
     const eventDate = new Date(eventToEdit.eventDateTime);
     const formattedDateTime = `${eventDate.getFullYear()}-${('0' + (eventDate.getMonth() + 1)).slice(-2)}-${('0' + eventDate.getDate()).slice(-2)}T${('0' + eventDate.getHours()).slice(-2)}:${('0' + eventDate.getMinutes()).slice(-2)}`;
     
     form.reset({
-      ...eventToEdit,
+      title: eventToEdit.title,
+      description: eventToEdit.description,
+      maxPax: eventToEdit.maxPax,
       eventDateTime: formattedDateTime,
+      location: eventToEdit.location,
+      pricePerPerson: eventToEdit.pricePerPerson,
       chefsInvolved: eventToEdit.chefsInvolved?.join(', ') || '',
       tags: eventToEdit.tags?.join(', ') || '',
+      eventImageFile: undefined,
+      dataAiHint: eventToEdit.dataAiHint || '',
+      isPublic: eventToEdit.isPublic,
     });
+    setEventImagePreview(eventToEdit.imageUrl || null);
+    setEventImageFile(null);
     setIsPostDialogOpen(true);
   };
 
@@ -204,9 +268,16 @@ export default function ChefWallPage() {
     if (window.confirm(`Are you sure you want to delete the event post "${eventToDelete?.title}"? This will also remove it from your calendar.`)) {
       setIsSaving(true);
       try {
+        if (eventToDelete.imageUrl) {
+          try {
+            const imageRef = storageRef(storage, eventToDelete.imageUrl);
+            await deleteObject(imageRef);
+          } catch (e) {
+             console.warn("Could not delete wall event image from storage, it might not exist or path is incorrect:", e);
+          }
+        }
         await deleteDoc(doc(db, "chefWallEvents", eventIdToDelete));
         await deleteDoc(doc(db, `users/${user.uid}/calendarEvents`, eventIdToDelete));
-        // Note: Image deletion from Storage would be handled here if images were uploaded to Storage
         toast({ title: 'Event Post Deleted', description: `"${eventToDelete?.title}" has been deleted.`, variant: 'destructive' });
       } catch (error) {
         console.error("Error deleting event post:", error);
@@ -218,9 +289,8 @@ export default function ChefWallPage() {
   };
   
   const openNewEventDialog = () => {
-    // Get current date and time, format for datetime-local input
     const now = new Date();
-    now.setMinutes(now.getMinutes() + 1 - now.getTimezoneOffset()); // Adjust for local time and add 1 minute
+    now.setMinutes(now.getMinutes() + 1 - now.getTimezoneOffset()); 
     const defaultDateTime = now.toISOString().slice(0,16);
 
     form.reset({
@@ -232,11 +302,13 @@ export default function ChefWallPage() {
       pricePerPerson: 50,
       chefsInvolved: '',
       tags: '',
-      imageUrl: '',
+      eventImageFile: undefined,
       dataAiHint: '',
       isPublic: true,
     });
     setEditingEvent(null);
+    setEventImageFile(null);
+    setEventImagePreview(null);
     setIsPostDialogOpen(true);
   };
   
@@ -272,6 +344,8 @@ export default function ChefWallPage() {
         if (!open) {
             form.reset();
             setEditingEvent(null);
+            setEventImageFile(null);
+            setEventImagePreview(null);
         }
       }}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -334,7 +408,7 @@ export default function ChefWallPage() {
                   <FormItem>
                     <FormLabel>Event Date & Time</FormLabel>
                     <FormControl><Input type="datetime-local" {...field} /></FormControl>
-                    <FormDescription>Be specific (YYYY-MM-DD HH:MM). Must be a future date.</FormDescription>
+                    <FormDescription>Be specific. Must be a future date.</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -347,6 +421,42 @@ export default function ChefWallPage() {
                     <FormLabel>Location</FormLabel>
                     <FormControl><Input placeholder="e.g., My Studio, City Park, Client's Address (TBD)" {...field} /></FormControl>
                     <FormDescription>Specify address or general location.</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+               <FormField
+                control={form.control}
+                name="eventImageFile"
+                render={() => (
+                  <FormItem>
+                    <FormLabel>Event Image (Optional)</FormLabel>
+                    <FormControl>
+                      <Input 
+                        type="file" 
+                        accept="image/jpeg,image/png,image/webp"
+                        onChange={handleEventImageFileChange} 
+                        className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
+                      />
+                    </FormControl>
+                    {eventImagePreview && (
+                      <div className="mt-2">
+                        <Image src={eventImagePreview} alt="Event image preview" width={200} height={150} className="rounded-md object-cover" data-ai-hint="event food crowd" />
+                      </div>
+                    )}
+                    <FormDescription>A captivating image for your event (max 2MB, JPG/PNG/WEBP).</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="dataAiHint"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Image Description Hint (for AI)</FormLabel>
+                    <FormControl><Input placeholder="e.g., outdoor cooking, fine dining" {...field} /></FormControl>
+                    <FormDescription>One or two keywords to help AI understand image content (max 2 words).</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -377,31 +487,6 @@ export default function ChefWallPage() {
               />
               <FormField
                 control={form.control}
-                name="imageUrl"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Event Image URL (Optional)</FormLabel>
-                    <FormControl><Input placeholder="https://example.com/event_image.jpg" {...field} /></FormControl>
-                    <FormDescription>A captivating image for your event post. (Direct upload coming soon)</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="dataAiHint"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Image Description Hint (for AI)</FormLabel>
-                    <FormControl><Input placeholder="e.g., outdoor cooking, fine dining" {...field} /></FormControl>
-                    <FormDescription>One or two keywords to help AI understand the image content (max 2 words).</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
-              <FormField
-                control={form.control}
                 name="isPublic"
                 render={({ field }) => (
                   <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4 shadow-sm">
@@ -409,7 +494,8 @@ export default function ChefWallPage() {
                       <FormLabel className="text-base">Event Visibility</FormLabel>
                       <FormDescription>
                         {field.value ? "Public: Visible to all customers on the Customer Wall." : "Private: Invite-only or for your records."}
-                        {field.value && !isChefSubscribed && " Public visibility requires an active subscription."}
+                        {(!isChefSubscribed && field.value) && " Public visibility requires an active subscription."}
+                        {(!isChefSubscribed && !field.value) && " Publishing public events requires an active subscription."}
                       </FormDescription>
                     </div>
                      <TooltipProvider>
@@ -421,17 +507,15 @@ export default function ChefWallPage() {
                               onCheckedChange={(checked) => {
                                 if (checked && !isChefSubscribed) {
                                   toast({ title: "Subscription Required", description: "You need an active subscription to make events public.", variant: "destructive"});
-                                  // form.setValue('isPublic', false); // Revert if not subscribed - optional, or let validation handle
                                   return; 
                                 }
                                 field.onChange(checked);
                               }}
-                              // Disable if trying to set to public without subscription
                               disabled={isSaving || (field.value && !isChefSubscribed)} 
                             />
                           </FormControl>
                         </TooltipTrigger>
-                        {field.value && !isChefSubscribed && (
+                        {!isChefSubscribed && (
                           <TooltipContent>
                             <p className="flex items-center"><AlertCircle className="mr-2 h-4 w-4" />Subscription required to make event public.</p>
                           </TooltipContent>
@@ -458,7 +542,7 @@ export default function ChefWallPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {wallEvents.map(event => (
             <Card key={event.id} className="shadow-lg flex flex-col overflow-hidden">
-              {event.imageUrl && (
+              {event.imageUrl ? (
                 <Image 
                     src={event.imageUrl} 
                     alt={event.title} 
@@ -468,8 +552,11 @@ export default function ChefWallPage() {
                     data-ai-hint={event.dataAiHint || "event food"}
                     onError={(e) => { (e.target as HTMLImageElement).src = "https://placehold.co/600x300.png?text=Image+Error"; }}
                 />
+              ) : (
+                <div className="w-full h-48 bg-muted flex items-center justify-center text-muted-foreground">
+                  <LayoutGrid className="h-16 w-16 opacity-50" data-ai-hint="event placeholder" />
+                </div>
               )}
-              {!event.imageUrl && <div className="w-full h-48 bg-muted flex items-center justify-center text-muted-foreground"><InfoIcon className="h-8 w-8"/></div>}
               <CardHeader>
                 <div className="flex justify-between items-start">
                     <CardTitle className="text-xl">{event.title}</CardTitle>

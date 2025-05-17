@@ -22,7 +22,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { MenuCard } from '@/components/menu-card';
-import type { Menu, Option } from '@/types';
+import type { Menu, Option, ShoppingListItem } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { PlusCircle, Edit, Trash2, NotebookText, Eye, EyeOff, ShoppingCart, AlertCircle, Sparkles, UploadCloud, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -50,11 +50,10 @@ const menuFormSchema = z.object({
   costPrice: z.coerce.number().min(0, { message: 'Cost price must be positive.'}).optional(),
   dietaryInfo: z.array(z.string()).optional(),
   isPublic: z.boolean().default(false),
-  // imageUrl is now derived from file upload, so it's not directly in form schema for user input
   menuImageFile: z.instanceof(File).optional()
     .refine(file => !file || file.size <= 2 * 1024 * 1024, `Max image size is 2MB.`)
     .refine(file => !file || ['image/jpeg', 'image/png', 'image/webp'].includes(file.type), `Only JPG, PNG, WEBP files are allowed.`),
-  dataAiHint: z.string().optional(),
+  dataAiHint: z.string().optional().max(30, "Hint should be brief, max 2 words."),
 });
 
 type MenuFormValues = z.infer<typeof menuFormSchema>;
@@ -90,26 +89,31 @@ export default function MenuManagementPage() {
   });
 
   useEffect(() => {
-    const fetchMenus = async () => {
-      if (!user) {
-        setIsLoading(false);
-        return;
-      }
-      setIsLoading(true);
-      try {
-        const menusCollectionRef = collection(db, "menus");
-        const q = query(menusCollectionRef, where("chefId", "==", user.uid), orderBy("createdAt", "desc"));
-        const querySnapshot = await getDocs(q);
-        const fetchedMenus = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Menu));
-        setMenus(fetchedMenus);
-      } catch (error) {
-        console.error("Error fetching menus:", error);
-        toast({ title: "Error", description: "Could not fetch your menus.", variant: "destructive" });
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchMenus();
+    if (!user) {
+      setIsLoading(false);
+      return;
+    }
+    setIsLoading(true);
+    const menusCollectionRef = collection(db, "menus");
+    const q = query(menusCollectionRef, where("chefId", "==", user.uid), orderBy("createdAt", "desc"));
+    
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      const fetchedMenus = querySnapshot.docs.map(doc => ({ 
+        id: doc.id, 
+        ...doc.data(),
+        // Ensure timestamps are converted if they exist
+        createdAt: doc.data().createdAt ? (doc.data().createdAt as Timestamp).toDate() : undefined,
+        updatedAt: doc.data().updatedAt ? (doc.data().updatedAt as Timestamp).toDate() : undefined,
+      } as Menu));
+      setMenus(fetchedMenus);
+      setIsLoading(false);
+    }, (error) => {
+      console.error("Error fetching menus:", error);
+      toast({ title: "Error", description: "Could not fetch your menus.", variant: "destructive" });
+      setIsLoading(false);
+    });
+    
+    return () => unsubscribe(); // Unsubscribe when component unmounts
   }, [user, toast]);
 
   const handleMenuImageFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -125,7 +129,7 @@ export default function MenuManagementPage() {
     } else {
       form.setValue('menuImageFile', undefined);
       setMenuImageFile(null);
-      setMenuImagePreview(editingMenu?.imageUrl || null); // Revert to existing image if file is cleared
+      setMenuImagePreview(editingMenu?.imageUrl || null); 
     }
   };
 
@@ -136,21 +140,21 @@ export default function MenuManagementPage() {
     }
     setIsSaving(true);
 
-    let imageUrl = editingMenu?.imageUrl || ''; // Keep existing image URL if not changed
+    let imageUrlToSave = editingMenu?.imageUrl || ''; 
 
     try {
+      const menuIdForPath = editingMenu?.id || doc(collection(db, 'menus')).id;
+
       if (menuImageFile) {
-        // If there was an old image for an existing menu, delete it first
         if (editingMenu && editingMenu.imageUrl) {
           try {
             const oldImageRef = storageRef(storage, editingMenu.imageUrl);
-            await deleteObject(oldImageRef).catch(e => console.warn("Old image not found or could not be deleted:", e));
+            await deleteObject(oldImageRef).catch(e => console.warn("Old image not found or could not be deleted for menu:", e));
           } catch (e) {
-            console.warn("Error deleting old menu image:", e); // Non-critical, proceed with upload
+            console.warn("Error deleting old menu image:", e);
           }
         }
         
-        const menuIdForPath = editingMenu?.id || doc(collection(db, 'menus')).id; // Generate ID if new
         const fileExtension = menuImageFile.name.split('.').pop();
         const imagePath = `users/${user.uid}/menus/${menuIdForPath}/image.${fileExtension}`;
         const imageStorageRef = storageRef(storage, imagePath);
@@ -159,17 +163,17 @@ export default function MenuManagementPage() {
         const uploadTask = uploadBytesResumable(imageStorageRef, menuImageFile);
         await new Promise<void>((resolve, reject) => {
           uploadTask.on('state_changed', 
-            null, // Optional: handle progress
+            null, 
             (error) => { console.error("Menu image upload error:", error); reject(error); },
             async () => {
-              imageUrl = await getDownloadURL(uploadTask.snapshot.ref);
+              imageUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
               resolve();
             }
           );
         });
       }
 
-      const menuDataToSave: Omit<Menu, 'id' | 'createdAt' | 'updatedAt'> & { chefId: string, chefName: string, imageUrl?: string, updatedAt: Timestamp, createdAt?: Timestamp } = {
+      const menuDataToSave = {
         title: data.title,
         description: data.description,
         cuisine: data.cuisine,
@@ -178,23 +182,23 @@ export default function MenuManagementPage() {
         costPrice: data.costPrice,
         dietaryInfo: data.dietaryInfo || [],
         isPublic: data.isPublic,
-        imageUrl: imageUrl,
+        imageUrl: imageUrlToSave,
         dataAiHint: data.dataAiHint,
         chefId: user.uid,
         chefName: userProfile.name || user.displayName || "Chef",
-        updatedAt: Timestamp.now(),
+        chefProfilePictureUrl: userProfile.profilePictureUrl || user.photoURL || undefined,
+        updatedAt: serverTimestamp(),
       };
 
       if (editingMenu) {
         const menuDocRef = doc(db, "menus", editingMenu.id);
         await updateDoc(menuDocRef, menuDataToSave);
-        setMenus(menus.map(menu => menu.id === editingMenu.id ? { ...menu, ...menuDataToSave, id: editingMenu.id, createdAt: menu.createdAt } as Menu : menu));
+        // No need to manually update local state due to onSnapshot
         toast({ title: 'Menu Updated', description: `"${data.title}" has been successfully updated.` });
       } else {
-        menuDataToSave.createdAt = Timestamp.now();
-        const newMenuDocRef = doc(collection(db, "menus")); // Generate new ID
-        await setDoc(newMenuDocRef, menuDataToSave);
-        setMenus([{ ...menuDataToSave, id: newMenuDocRef.id } as Menu, ...menus]);
+        const newMenuDocRef = doc(collection(db, "menus")); 
+        await setDoc(newMenuDocRef, { ...menuDataToSave, id: newMenuDocRef.id, createdAt: serverTimestamp() });
+        // No need to manually update local state due to onSnapshot
         toast({ title: 'Menu Created', description: `"${data.title}" has been successfully created.` });
       }
       
@@ -225,7 +229,7 @@ export default function MenuManagementPage() {
         costPrice: menuToEdit.costPrice || undefined,
         dietaryInfo: menuToEdit.dietaryInfo || [],
         isPublic: menuToEdit.isPublic,
-        menuImageFile: undefined, // Don't prefill file input
+        menuImageFile: undefined, 
         dataAiHint: menuToEdit.dataAiHint || '',
       });
       setMenuImagePreview(menuToEdit.imageUrl || null);
@@ -242,18 +246,16 @@ export default function MenuManagementPage() {
     if (window.confirm(`Are you sure you want to delete the menu "${menuToDelete?.title}"?`)) {
       setIsSaving(true);
       try {
-        // Delete image from storage if it exists
         if (menuToDelete.imageUrl) {
           try {
             const imageRef = storageRef(storage, menuToDelete.imageUrl);
             await deleteObject(imageRef);
           } catch (e) {
             console.warn("Could not delete menu image from storage:", e);
-            // Non-critical, proceed to delete Firestore doc
           }
         }
         await deleteDoc(doc(db, "menus", menuId));
-        setMenus(menus.filter(menu => menu.id !== menuId));
+        // No need to manually update local state due to onSnapshot
         toast({ title: 'Menu Deleted', description: `"${menuToDelete?.title}" has been deleted.`, variant: 'destructive' });
       } catch (error) {
         console.error("Error deleting menu:", error);
@@ -264,13 +266,38 @@ export default function MenuManagementPage() {
     }
   };
 
-  const handleAddToShoppingList = (menuId: string) => {
-    const menu = menus.find(m => m.id === menuId);
-    // In a real app, this would add ingredients from the menu to the shopping list (likely in Firestore)
-    toast({
-      title: 'Add to Shopping List (Placeholder)',
-      description: `Functionality to add items for "${menu?.title}" to your shopping list is coming soon.`,
-    });
+  const handleAddToShoppingList = async (menu: Menu) => {
+    if (!user) {
+      toast({ title: "Not Logged In", description: "Please log in to add items to your shopping list.", variant: "destructive"});
+      return;
+    }
+    
+    const newItem: Omit<ShoppingListItem, 'id' | 'createdAt' | 'updatedAt'> = {
+      name: `Ingredients for ${menu.title}`,
+      quantity: 1, // Default quantity
+      unit: 'Lot', // Default unit
+      estimatedCost: menu.costPrice || 0, // Use menu cost price as estimate or default to 0
+      notes: `For menu: ${menu.title} (ID: ${menu.id})`,
+      purchased: false,
+      chefId: user.uid,
+      menuId: menu.id,
+    };
+
+    try {
+      const shoppingListCollectionRef = collection(db, `users/${user.uid}/shoppingListItems`);
+      await addDoc(shoppingListCollectionRef, { ...newItem, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      toast({
+        title: 'Added to Shopping List',
+        description: `"${newItem.name}" added to your shopping list.`,
+      });
+    } catch (error) {
+      console.error("Error adding to shopping list:", error);
+      toast({
+        title: 'Error',
+        description: 'Could not add item to shopping list.',
+        variant: 'destructive',
+      });
+    }
   };
 
   const openNewMenuDialog = () => {
@@ -294,9 +321,6 @@ export default function MenuManagementPage() {
 
   const handleAiAssist = () => {
     const currentDescription = form.getValues("description");
-    // Placeholder: In future, use a Genkit flow to suggest menu details
-    // For example: const suggestions = await suggestMenuDetailsFlow({ currentDescription, title: form.getValues("title") });
-    // Then, form.setValue("description", suggestions.description); etc.
     toast({
       title: "AI Menu Assist (Placeholder)",
       description: "This feature will soon help generate descriptions, suggest dietary options, and more!",
@@ -319,7 +343,7 @@ export default function MenuManagementPage() {
       </div>
 
       <Dialog open={isDialogOpen} onOpenChange={(isOpen) => {
-          if (isSaving && isOpen) return; // Prevent closing while saving
+          if (isSaving && isOpen) return; 
           setIsDialogOpen(isOpen);
           if (!isOpen) {
             setMenuImageFile(null);
@@ -414,7 +438,7 @@ export default function MenuManagementPage() {
               <FormField
                 control={form.control}
                 name="menuImageFile"
-                render={() => ( // field not used directly for file input
+                render={() => ( 
                   <FormItem>
                     <FormLabel>Menu Image (Optional)</FormLabel>
                     <FormControl>
@@ -427,7 +451,7 @@ export default function MenuManagementPage() {
                     </FormControl>
                     {menuImagePreview && (
                       <div className="mt-2">
-                        <Image src={menuImagePreview} alt="Menu image preview" width={200} height={150} className="rounded-md object-cover" />
+                        <Image src={menuImagePreview} alt="Menu image preview" width={200} height={150} className="rounded-md object-cover" data-ai-hint="menu food"/>
                       </div>
                     )}
                     <FormDescription>A captivating image for your menu (max 2MB, JPG/PNG/WEBP).</FormDescription>
@@ -488,7 +512,8 @@ export default function MenuManagementPage() {
                       <FormLabel className="text-base">Publish Menu</FormLabel>
                       <FormDescription>
                         Make this menu visible to customers on the public menu listings.
-                        {!isChefSubscribed && " Publishing public menus requires an active subscription."}
+                        {(!isChefSubscribed && field.value) && " Public visibility requires an active subscription."}
+                        {(!isChefSubscribed && !field.value) && " Publishing public menus requires an active subscription."}
                       </FormDescription>
                     </div>
                     <TooltipProvider>
@@ -500,12 +525,11 @@ export default function MenuManagementPage() {
                               onCheckedChange={(checked) => {
                                 if (checked && !isChefSubscribed) {
                                     toast({ title: "Subscription Required", description: "You need an active subscription to publish menus publicly.", variant: "destructive"});
-                                    return;
+                                    return; // Prevent toggle if trying to publish without subscription
                                 }
                                 field.onChange(checked);
                               }}
-                              disabled={!isChefSubscribed && field.value} 
-                              aria-readonly={!isChefSubscribed && field.value}
+                              disabled={isSaving || (field.value && !isChefSubscribed)} // Disable if trying to publish without sub OR if already public & no sub (shouldn't happen)
                             />
                           </FormControl>
                         </TooltipTrigger>
@@ -523,7 +547,7 @@ export default function MenuManagementPage() {
                 <DialogClose asChild>
                     <Button type="button" variant="outline" disabled={isSaving}>Cancel</Button>
                 </DialogClose>
-                <Button type="submit" disabled={isSaving}>
+                <Button type="submit" disabled={isSaving || (form.getValues("isPublic") && !isChefSubscribed) }>
                   {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (editingMenu ? 'Save Changes' : 'Create Menu')}
                 </Button>
               </DialogFooter>
@@ -538,9 +562,9 @@ export default function MenuManagementPage() {
             <MenuCard
               key={menu.id}
               menu={menu}
-              onEdit={handleEdit}
-              onDelete={handleDelete}
-              onAddToShoppingList={handleAddToShoppingList}
+              onEdit={() => handleEdit(menu.id)}
+              onDelete={() => handleDelete(menu.id)}
+              onAddToShoppingList={() => handleAddToShoppingList(menu)}
               isChefOwner={true}
               showChefDetails={false}
             />
@@ -565,6 +589,3 @@ export default function MenuManagementPage() {
     </div>
   );
 }
-    
-
-    
