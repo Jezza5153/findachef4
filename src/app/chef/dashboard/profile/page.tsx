@@ -22,7 +22,7 @@ import { useState, useEffect } from 'react';
 import type { ParseResumeOutput, ChefProfile as ChefProfileType } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
-import { UserCircle, Save, Edit3, Briefcase, Lightbulb, UploadCloud, GraduationCap, Images, Download, Trash2, Loader2 } from 'lucide-react';
+import { UserCircle, Save, Edit3, Briefcase, Lightbulb, UploadCloud, GraduationCap, Images, Download, Trash2, Loader2, Users } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,28 +36,9 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { updateProfile as updateAuthProfile } from 'firebase/auth';
-
-// Mock current chef data - will be replaced by fetched data
-const initialChefData: ChefProfileType = {
-  id: '', // Will be set from auth user
-  name: '',
-  email: '',
-  tagline: '',
-  bio: '',
-  specialties: [],
-  profilePictureUrl: '',
-  experienceSummary: "",
-  education: "",
-  skills: [],
-  portfolioItem1Url: '',
-  portfolioItem1Caption: '',
-  portfolioItem2Url: '',
-  portfolioItem2Caption: '',
-  resumeFileUrl: '',
-};
 
 const chefProfileSchema = z.object({
   name: z.string().min(2, { message: 'Name must be at least 2 characters.' }),
@@ -65,7 +46,7 @@ const chefProfileSchema = z.object({
   tagline: z.string().max(100, "Tagline cannot exceed 100 characters.").optional(),
   bio: z.string().min(20, {message: 'Bio must be at least 20 characters.'}).max(500, {message: "Bio cannot exceed 500 characters."}),
   specialties: z.string().min(1, { message: 'Please list at least one specialty.' }), // Comma-separated
-  profilePictureFile: z.instanceof(File).optional() // For new file upload
+  profilePictureFile: z.instanceof(File).optional()
     .refine(file => !file || file.size <= 2 * 1024 * 1024, `Max file size is 2MB.`)
     .refine(file => !file || ['image/jpeg', 'image/png', 'image/webp'].includes(file.type), `Only JPG, PNG, WEBP files are allowed.`),
   experienceSummary: z.string().optional(),
@@ -75,85 +56,84 @@ const chefProfileSchema = z.object({
   portfolioItem1Caption: z.string().max(150, "Caption for item 1 cannot exceed 150 characters.").optional(),
   portfolioItem2Url: z.string().url({ message: "Invalid URL for portfolio item 2." }).optional().or(z.literal('')),
   portfolioItem2Caption: z.string().max(150, "Caption for item 2 cannot exceed 150 characters.").optional(),
-  // resumeFileUrl is managed via file upload, not a direct form field for URL input
+  teamName: z.string().optional(), // For display, not editable by chef directly here
 });
 
 type ChefProfileFormValues = z.infer<typeof chefProfileSchema>;
 
 export default function ChefProfilePage() {
-  const { user, loading: authLoading } = useAuth();
-  const [chefData, setChefData] = useState<ChefProfileType>(initialChefData);
+  const { user, userProfile, loading: authLoading } = useAuth();
+  const [chefData, setChefData] = useState<ChefProfileType | null>(null);
   const [profilePicturePreview, setProfilePicturePreview] = useState<string | null>(null);
   const [newProfilePictureFile, setNewProfilePictureFile] = useState<File | null>(null);
   const [newResumeFile, setNewResumeFile] = useState<File | null>(null);
+  const [resumeParsedDataForSave, setResumeParsedDataForSave] = useState<ParseResumeOutput | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
 
   const form = useForm<ChefProfileFormValues>({
     resolver: zodResolver(chefProfileSchema),
-    defaultValues: initialChefData,
+    defaultValues: {
+      name: '',
+      email: '',
+      tagline: '',
+      bio: '',
+      specialties: '',
+      experienceSummary: "",
+      education: "",
+      skills: [],
+      portfolioItem1Url: '',
+      portfolioItem1Caption: '',
+      portfolioItem2Url: '',
+      portfolioItem2Caption: '',
+      teamName: '',
+    },
   });
 
   useEffect(() => {
-    const fetchChefProfile = async () => {
-      if (user) {
-        setIsLoading(true);
-        const userDocRef = doc(db, "users", user.uid);
-        try {
-          const docSnap = await getDoc(userDocRef);
-          if (docSnap.exists()) {
-            const data = docSnap.data() as ChefProfileType;
-            setChefData(data);
-            form.reset({
-              name: data.name || '',
-              email: data.email || user.email || '',
-              tagline: data.tagline || '',
-              bio: data.bio || '',
-              specialties: data.specialties?.join(', ') || '',
-              experienceSummary: data.experienceSummary || '',
-              education: data.education || '',
-              skills: data.skills?.join(', ') || '',
-              portfolioItem1Url: data.portfolioItem1Url || '',
-              portfolioItem1Caption: data.portfolioItem1Caption || '',
-              portfolioItem2Url: data.portfolioItem2Url || '',
-              portfolioItem2Caption: data.portfolioItem2Caption || '',
-            });
-            setProfilePicturePreview(data.profilePictureUrl || user.photoURL || null);
-          } else {
-            // Profile doesn't exist, initialize form with auth data if available
-            form.reset({
-              name: user.displayName || '',
-              email: user.email || '',
-            });
-            setProfilePicturePreview(user.photoURL || null);
-            toast({ title: "Welcome!", description: "Please complete your chef profile.", variant: "default" });
-          }
-        } catch (error) {
-          console.error("Error fetching chef profile:", error);
-          toast({ title: "Error", description: "Could not load your profile.", variant: "destructive" });
-        } finally {
-          setIsLoading(false);
-        }
-      }
-    };
-
     if (!authLoading && user) {
-      fetchChefProfile();
+      if (userProfile) {
+        const currentProfile = userProfile as ChefProfileType;
+        setChefData(currentProfile);
+        form.reset({
+          name: currentProfile.name || '',
+          email: currentProfile.email || user.email || '',
+          tagline: currentProfile.tagline || '',
+          bio: currentProfile.bio || '',
+          specialties: currentProfile.specialties?.join(', ') || '',
+          experienceSummary: currentProfile.experienceSummary || '',
+          education: currentProfile.education || '',
+          skills: currentProfile.skills?.join(', ') || '',
+          portfolioItem1Url: currentProfile.portfolioItem1Url || '',
+          portfolioItem1Caption: currentProfile.portfolioItem1Caption || '',
+          portfolioItem2Url: currentProfile.portfolioItem2Url || '',
+          portfolioItem2Caption: currentProfile.portfolioItem2Caption || '',
+          teamName: currentProfile.teamName || '',
+        });
+        setProfilePicturePreview(currentProfile.profilePictureUrl || user.photoURL || null);
+        setIsLoading(false);
+      } else {
+        // This case might occur if AuthContext hasn't loaded userProfile yet,
+        // or if it's a new user and profile creation in signup failed or is pending.
+        // For now, we keep loading or show a message.
+        console.log("User authenticated, but userProfile is not yet available in AuthContext.");
+        // To prevent errors, you might want to show a loading state until userProfile is definitively loaded or explicitly null
+      }
     } else if (!authLoading && !user) {
-      // Should be handled by layout redirect, but good to be safe
-      setIsLoading(false);
+      setIsLoading(false); // Not logged in, page should be protected by layout
     }
-  }, [user, authLoading, form, toast]);
+  }, [user, userProfile, authLoading, form, toast]);
 
 
   const handleResumeProcessed = (data: { parsedData: ParseResumeOutput; file: File }) => {
+    setResumeParsedDataForSave(data.parsedData); // Store full parsed data for saving
     form.setValue('experienceSummary', data.parsedData.experience || '', { shouldValidate: true });
     form.setValue('skills', data.parsedData.skills?.join(', ') || '', { shouldValidate: true });
     if (data.parsedData.education) {
       form.setValue('education', data.parsedData.education, { shouldValidate: true });
     }
-    setNewResumeFile(data.file); // Stage the new resume file for upload
+    setNewResumeFile(data.file);
     toast({
         title: "Resume Processed",
         description: "Resume details populated. Save profile to upload the new file."
@@ -163,7 +143,7 @@ export default function ChefProfilePage() {
   const handleProfilePictureChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      form.setValue('profilePictureFile', file, {shouldValidate: true}); // Validate file
+      form.setValue('profilePictureFile', file, {shouldValidate: true});
       const reader = new FileReader();
       reader.onloadend = () => {
         setProfilePicturePreview(reader.result as string);
@@ -173,29 +153,36 @@ export default function ChefProfilePage() {
     }
   };
 
-  const onSubmit = async (data: ChefProfileFormValues) => {
+  const onSubmit = async (formData: ChefProfileFormValues) => {
     if (!user) {
       toast({ title: "Error", description: "You must be logged in to update your profile.", variant: "destructive" });
       return;
     }
     setIsSaving(true);
 
-    let profilePicUrl = chefData.profilePictureUrl || user.photoURL; // Keep existing if no new one
-    let resumeUrl = chefData.resumeFileUrl; // Keep existing if no new one
+    let profilePicUrlToSave = chefData?.profilePictureUrl || user.photoURL || '';
+    let resumeUrlToSave = chefData?.resumeFileUrl || '';
 
     try {
       // 1. Upload new profile picture if one is staged
       if (newProfilePictureFile) {
+        if (profilePicUrlToSave) { // Delete old one if exists
+            try {
+                const oldImageRef = storageRef(storage, profilePicUrlToSave);
+                await deleteObject(oldImageRef).catch(e => console.warn("Old profile pic not found or cannot be deleted:", e));
+            } catch (e) {console.warn("Error deleting old profile picture",e);}
+        }
         const fileExtension = newProfilePictureFile.name.split('.').pop();
-        const profilePicRef = storageRef(storage, `users/${user.uid}/profilePicture.${fileExtension}`);
-        const uploadTask = uploadBytesResumable(profilePicRef, newProfilePictureFile);
+        const profilePicPath = `users/${user.uid}/profilePicture.${fileExtension}`;
+        const profilePicStorageRef = storageRef(storage, profilePicPath);
+        const uploadTask = uploadBytesResumable(profilePicStorageRef, newProfilePictureFile);
         
         await new Promise<void>((resolve, reject) => {
           uploadTask.on('state_changed', 
-            (snapshot) => { /* Optional: handle progress */ },
+            null,
             (error) => { console.error("Profile pic upload error", error); reject(error); },
             async () => {
-              profilePicUrl = await getDownloadURL(uploadTask.snapshot.ref);
+              profilePicUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
               resolve();
             }
           );
@@ -204,16 +191,22 @@ export default function ChefProfilePage() {
 
       // 2. Upload new resume file if one is staged
       if (newResumeFile) {
-        // Assuming PDF, can add more robust extension handling
-        const resumeRef = storageRef(storage, `users/${user.uid}/resume.pdf`); 
-        const resumeUploadTask = uploadBytesResumable(resumeRef, newResumeFile);
+        if (resumeUrlToSave) { // Delete old one if exists
+            try {
+                const oldResumeRef = storageRef(storage, resumeUrlToSave);
+                await deleteObject(oldResumeRef).catch(e => console.warn("Old resume not found or cannot be deleted:", e));
+            } catch (e) {console.warn("Error deleting old resume file",e);}
+        }
+        const resumePath = `users/${user.uid}/resume.${newResumeFile.name.split('.').pop() || 'pdf'}`;
+        const resumeStorageRef = storageRef(storage, resumePath);
+        const resumeUploadTask = uploadBytesResumable(resumeStorageRef, newResumeFile);
 
         await new Promise<void>((resolve, reject) => {
           resumeUploadTask.on('state_changed',
-            (snapshot) => { /* Optional: handle progress */ },
+            null,
             (error) => { console.error("Resume upload error", error); reject(error); },
             async () => {
-              resumeUrl = await getDownloadURL(resumeUploadTask.snapshot.ref);
+              resumeUrlToSave = await getDownloadURL(resumeUploadTask.snapshot.ref);
               resolve();
             }
           );
@@ -222,41 +215,39 @@ export default function ChefProfilePage() {
 
       // 3. Prepare data for Firestore
       const updatedProfileData: Partial<ChefProfileType> = {
-        name: data.name,
-        // email: data.email, // Email usually shouldn't be changed directly here
-        tagline: data.tagline,
-        bio: data.bio,
-        specialties: data.specialties.split(',').map(s => s.trim()).filter(s => s),
-        profilePictureUrl: profilePicUrl,
-        experienceSummary: data.experienceSummary,
-        education: data.education,
-        skills: data.skills?.split(',').map(s => s.trim()).filter(s => s) || [],
-        portfolioItem1Url: data.portfolioItem1Url,
-        portfolioItem1Caption: data.portfolioItem1Caption,
-        portfolioItem2Url: data.portfolioItem2Url,
-        portfolioItem2Caption: data.portfolioItem2Caption,
-        resumeFileUrl: resumeUrl,
-        id: user.uid, // Ensure ID is present
-        email: user.email || data.email, // Ensure email is present
+        name: formData.name,
+        tagline: formData.tagline,
+        bio: formData.bio,
+        specialties: formData.specialties.split(',').map(s => s.trim()).filter(s => s),
+        profilePictureUrl: profilePicUrlToSave,
+        experienceSummary: resumeParsedDataForSave?.experience || formData.experienceSummary,
+        education: resumeParsedDataForSave?.education || formData.education,
+        skills: resumeParsedDataForSave?.skills || formData.skills?.split(',').map(s => s.trim()).filter(s => s) || [],
+        portfolioItem1Url: formData.portfolioItem1Url,
+        portfolioItem1Caption: formData.portfolioItem1Caption,
+        portfolioItem2Url: formData.portfolioItem2Url,
+        portfolioItem2Caption: formData.portfolioItem2Caption,
+        resumeFileUrl: resumeUrlToSave,
+        updatedAt: serverTimestamp(),
+        // teamId and teamName are not directly editable by the chef here
       };
 
       // 4. Save profile to Firestore
       const userDocRef = doc(db, "users", user.uid);
-      await setDoc(userDocRef, updatedProfileData, { merge: true }); // Use setDoc with merge to create or update
+      await updateDoc(userDocRef, updatedProfileData); 
 
       // 5. Update Firebase Auth user profile (displayName, photoURL)
-      if (user.displayName !== data.name || (profilePicUrl && user.photoURL !== profilePicUrl)) {
+      if (user.displayName !== formData.name || (profilePicUrlToSave && user.photoURL !== profilePicUrlToSave)) {
         await updateAuthProfile(user, {
-          displayName: data.name,
-          photoURL: profilePicUrl,
+          displayName: formData.name,
+          photoURL: profilePicUrlToSave,
         });
       }
       
-      // 6. Update local state and form
-      setChefData(prev => ({ ...prev, ...updatedProfileData } as ChefProfileType));
-      setNewProfilePictureFile(null); // Clear staged file
-      setNewResumeFile(null); // Clear staged file
-      // form.reset(updatedProfileData); // Reset form with new values, might be redundant if setChefData triggers re-render
+      setChefData(prev => ({ ...prev, ...updatedProfileData, id: user.uid, email: user.email! } as ChefProfileType));
+      setNewProfilePictureFile(null); 
+      setNewResumeFile(null);
+      setResumeParsedDataForSave(null);
 
       toast({
         title: 'Profile Updated Successfully',
@@ -286,8 +277,8 @@ export default function ChefProfilePage() {
   if (isLoading || authLoading) {
     return <div className="flex h-screen items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /> Loading Profile...</div>;
   }
-  if (!user) {
-     return <div className="flex h-screen items-center justify-center">Please log in to view your profile.</div>;
+  if (!user || !chefData) { // Ensure chefData is loaded
+     return <div className="flex h-screen items-center justify-center">Please log in to view your profile or profile data is unavailable.</div>;
   }
 
   return (
@@ -303,18 +294,18 @@ export default function ChefProfilePage() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
                 <div className="md:col-span-1 flex flex-col items-center">
                   <Image
-                    src={profilePicturePreview || "https://placehold.co/150x150.png"}
+                    src={profilePicturePreview || "https://placehold.co/150x150.png?text=Chef"}
                     alt={form.getValues('name') || "Chef"}
                     width={150}
                     height={150}
                     className="rounded-full object-cover shadow-md mb-4"
                     data-ai-hint="chef portrait"
-                    key={profilePicturePreview} // Force re-render if URL changes
+                    key={profilePicturePreview} 
                   />
                    <FormField
                       control={form.control}
-                      name="profilePictureFile" // Control the file input
-                      render={() => ( // field prop not directly used for input type file custom handler
+                      name="profilePictureFile" 
+                      render={() => ( 
                         <FormItem className="w-full">
                           <FormControl>
                             <>
@@ -416,6 +407,26 @@ export default function ChefProfilePage() {
                   </FormItem>
                 )}
               />
+              
+              {/* Team Affiliation Placeholder */}
+              <div className="pt-4 border-t">
+                <h3 className="text-lg font-semibold mb-3 flex items-center"><Users className="mr-2 h-5 w-5 text-primary" data-ai-hint="team users" /> Team Affiliation</h3>
+                 <FormField
+                    control={form.control}
+                    name="teamName"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Current Team/Brand</FormLabel>
+                        <FormControl>
+                          <Input {...field} readOnly disabled placeholder="Not part of a team" />
+                        </FormControl>
+                         <FormDescription>Team features (joining, creating, managing) are coming soon.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+              </div>
+
 
               <div className="pt-4 border-t">
                 <h3 className="text-lg font-semibold mb-3 flex items-center"><GraduationCap className="mr-2 h-5 w-5 text-primary" data-ai-hint="education cap" /> Education</h3>
@@ -490,19 +501,18 @@ export default function ChefProfilePage() {
                     size="sm"
                     className="w-full sm:w-auto mb-4"
                     onClick={() => {
-                        if (chefData.resumeFileUrl) {
+                        if (chefData?.resumeFileUrl) {
                         window.open(chefData.resumeFileUrl, '_blank');
                         } else {
                         toast({ title: "Resume Not Available", description: "No resume file URL is currently set for download.", variant: "destructive" });
                         }
                     }}
-                    disabled={!chefData.resumeFileUrl || isSaving}
+                    disabled={!chefData?.resumeFileUrl || isSaving}
                     >
                     <Download className="mr-2 h-4 w-4" /> Download Current Resume
                 </Button>
                 <ResumeUploadForm
                     onResumeParsed={handleResumeProcessed}
-                    // initialData is for display within the form, not used to prefill parent form
                 />
               </div>
 

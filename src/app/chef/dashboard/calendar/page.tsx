@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Badge } from '@/components/ui/badge';
 import type { CalendarEvent, ChefProfile } from '@/types';
 import { format, parseISO, isSameDay, startOfDay } from 'date-fns';
-import { CalendarDays, Users, DollarSign, MapPin, Utensils, Info, Sun, ChefHat, AlertTriangle, CheckCircle, Clock, QrCode, Ban, Loader2 } from 'lucide-react';
+import { CalendarDays, Users, DollarSign, MapPin, Utensils, Info, Sun, ChefHat, AlertTriangle, CheckCircle, Clock, QrCode, Ban, Loader2, InfoIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -22,130 +22,80 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, updateDoc, Timestamp } from 'firebase/firestore';
-
-// Mock initial events - will be replaced by Firestore data eventually
-const MOCK_EVENTS: CalendarEvent[] = [
-  {
-    id: 'event1',
-    chefId: 'mockChef', // Add chefId
-    date: new Date(new Date().setDate(new Date().getDate() + 2)).toISOString().split('T')[0], 
-    title: 'Corporate Lunch Catering',
-    customerName: 'Tech Solutions Inc.',
-    pax: 50,
-    menuName: 'Gourmet Sandwich Platter',
-    pricePerHead: 35,
-    location: '123 Business Park, Suite 100',
-    notes: 'Ensure vegetarian options are clearly marked. 2 gluten-free meals needed.',
-    coChefs: ['Chef John Doe', 'Chef Assistant Jane'],
-    status: 'Confirmed',
-    weather: 'Sunny, 22°C (Weather data is a placeholder)',
-    toolsNeeded: ['Serving platters', 'Chafing dishes', 'Cooler boxes (Placeholder)'],
-  },
-  {
-    id: 'event2',
-    chefId: 'mockChef',
-    date: new Date(new Date().setDate(new Date().getDate() + 7)).toISOString().split('T')[0], 
-    title: 'Anniversary Dinner for Two',
-    customerName: 'Mr. & Mrs. Smith',
-    pax: 2,
-    menuName: 'Luxury Seafood Menu',
-    pricePerHead: 150,
-    location: 'Client\'s Residence - 456 Ocean View Dr.',
-    notes: 'Surprise dessert with "Happy Anniversary" message.',
-    status: 'Confirmed',
-    weather: 'Clear night, 18°C (Weather data is a placeholder)',
-    coChefs: [],
-  },
-   {
-    id: 'event3',
-    chefId: 'mockChef',
-    date: new Date(new Date().setDate(new Date().getDate() + 7)).toISOString().split('T')[0], 
-    title: 'Kids Birthday Party',
-    customerName: 'Jane Doe (for Leo)',
-    pax: 15,
-    menuName: 'Fun & Healthy Kids Menu',
-    pricePerHead: 25,
-    location: 'Community Park Pavilion',
-    notes: 'Nut-free. Include a small birthday cake.',
-    status: 'Pending',
-    coChefs: [],
-  },
-   {
-    id: 'event4',
-    chefId: 'mockChef',
-    date: new Date(new Date().setDate(new Date().getDate() + 10)).toISOString().split('T')[0], 
-    title: 'Private Cooking Class',
-    customerName: 'Maria Rodriguez',
-    pax: 4,
-    menuName: 'Italian Pasta Making',
-    pricePerHead: 75,
-    location: 'Chef\'s Studio',
-    notes: 'Focus on hands-on experience. All ingredients provided by chef.',
-    status: 'Confirmed',
-    toolsNeeded: ['Pasta machine', 'Aprons', 'Ingredients checklist (Placeholder)'],
-    coChefs: ['Chef Luigi'],
-  },
-  {
-    id: 'event5',
-    chefId: 'mockChef',
-    date: new Date(new Date().setDate(new Date().getDate() + 12)).toISOString().split('T')[0],
-    title: 'Cancelled Event Example',
-    customerName: 'Old Booking',
-    pax: 10,
-    menuName: 'Standard Buffet',
-    pricePerHead: 40,
-    location: 'Previous Venue',
-    status: 'Cancelled',
-    coChefs: [],
-  },
-];
-
+import { doc, getDoc, updateDoc, Timestamp, collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 
 export default function ChefCalendarPage() {
-  const { user } = useAuth();
+  const { user, userProfile } = useAuth();
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
-  const [allEvents, setAllEvents] = useState<CalendarEvent[]>(MOCK_EVENTS); // Stays mock for now
+  const [allEvents, setAllEvents] = useState<CalendarEvent[]>([]); 
   const [blockedDates, setBlockedDates] = useState<Date[]>([]);
-  const [isLoadingBlockedDates, setIsLoadingBlockedDates] = useState(true);
+  const [isLoadingCalendarData, setIsLoadingCalendarData] = useState(true);
   const { toast } = useToast();
 
   useEffect(() => {
-    const fetchBlockedDates = async () => {
-      if (!user) {
-        setIsLoadingBlockedDates(false);
-        return;
-      }
-      setIsLoadingBlockedDates(true);
-      try {
-        const userDocRef = doc(db, "users", user.uid);
-        const docSnap = await getDoc(userDocRef);
-        if (docSnap.exists()) {
-          const userData = docSnap.data() as ChefProfile;
-          if (userData.blockedDates) {
-            setBlockedDates(userData.blockedDates.map(isoString => parseISO(isoString)));
-          } else {
-            setBlockedDates([]);
-          }
+    if (!user) {
+      setIsLoadingCalendarData(false);
+      return;
+    }
+
+    setIsLoadingCalendarData(true);
+    let unsubscribeUserProfile: (() => void) | undefined;
+    let unsubscribeCalendarEvents: (() => void) | undefined;
+
+    // Fetch blocked dates from user profile and listen for updates
+    const userDocRef = doc(db, "users", user.uid);
+    unsubscribeUserProfile = onSnapshot(userDocRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const userData = docSnap.data() as ChefProfile;
+        if (userData.blockedDates) {
+          setBlockedDates(userData.blockedDates.map(isoString => parseISO(isoString)));
+        } else {
+          setBlockedDates([]);
         }
-      } catch (error) {
-        console.error("Error fetching blocked dates:", error);
-        toast({ title: "Error", description: "Could not fetch blocked dates.", variant: "destructive" });
-      } finally {
-        setIsLoadingBlockedDates(false);
       }
+      // Consider setIsLoading to false only after both subscriptions are active or have failed
+    }, (error) => {
+      console.error("Error fetching user profile for blocked dates:", error);
+      toast({ title: "Error", description: "Could not fetch blocked dates.", variant: "destructive" });
+    });
+
+    // Fetch calendar events and listen for updates
+    const eventsCollectionRef = collection(db, `users/${user.uid}/calendarEvents`);
+    const q = query(eventsCollectionRef, orderBy("date", "asc")); // Order by date
+    
+    unsubscribeCalendarEvents = onSnapshot(q, (querySnapshot) => {
+      const fetchedEvents = querySnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          date: (data.date as Timestamp).toDate(), // Convert Firestore Timestamp to Date
+        } as CalendarEvent;
+      });
+      setAllEvents(fetchedEvents);
+      setIsLoadingCalendarData(false); // Set loading to false after events are fetched
+    }, (error) => {
+      console.error("Error fetching calendar events:", error);
+      toast({ title: "Error", description: "Could not fetch calendar events.", variant: "destructive" });
+      setIsLoadingCalendarData(false);
+    });
+    
+    return () => {
+      if (unsubscribeUserProfile) unsubscribeUserProfile();
+      if (unsubscribeCalendarEvents) unsubscribeCalendarEvents();
     };
-    fetchBlockedDates();
+
   }, [user, toast]);
 
   const eventsForSelectedDate = useMemo(() => {
     if (!selectedDate) return [];
-    return allEvents.filter(event => isSameDay(parseISO(event.date), selectedDate));
+    return allEvents.filter(event => isSameDay(event.date, selectedDate));
   }, [selectedDate, allEvents]);
 
   const isDateBlocked = useMemo(() => {
     if (!selectedDate) return false;
-    return blockedDates.some(blockedDate => isSameDay(blockedDate, selectedDate));
+    const checkDate = startOfDay(selectedDate);
+    return blockedDates.some(blockedDate => isSameDay(blockedDate, checkDate));
   }, [selectedDate, blockedDates]);
 
   const getStatusBadgeVariant = (status: CalendarEvent['status']) => {
@@ -153,6 +103,7 @@ export default function ChefCalendarPage() {
       case 'Confirmed': return 'default';
       case 'Pending': return 'secondary';
       case 'Cancelled': return 'destructive';
+      case 'WallEvent': return 'outline';
       default: return 'outline';
     }
   };
@@ -162,6 +113,7 @@ export default function ChefCalendarPage() {
       case 'Confirmed': return <CheckCircle className="h-4 w-4 mr-1.5 text-green-600" />;
       case 'Pending': return <Clock className="h-4 w-4 mr-1.5 text-yellow-600" />;
       case 'Cancelled': return <AlertTriangle className="h-4 w-4 mr-1.5 text-red-600" />;
+      case 'WallEvent': return <InfoIcon className="h-4 w-4 mr-1.5 text-blue-500" />;
       default: return <Info className="h-4 w-4 mr-1.5" />;
     }
   };
@@ -176,7 +128,7 @@ export default function ChefCalendarPage() {
   const handleProcessCompletion = (eventId: string) => {
     toast({
         title: "Process Event Completion (Placeholder)",
-        description: `Action for event ${eventId} (e.g., QR Scan) initiated. This would trigger backend processes for fund release.`,
+        description: `Action for event ${eventId} (e.g., QR Scan) initiated. This would trigger backend processes for fund release of the remaining 50%.`,
         duration: 7000,
     });
   };
@@ -189,20 +141,21 @@ export default function ChefCalendarPage() {
     const dateToToggle = startOfDay(selectedDate);
     const alreadyBlocked = blockedDates.some(d => isSameDay(d, dateToToggle));
     let newBlockedDatesIso: string[];
-    let newBlockedDates: Date[];
-
+    
     if (alreadyBlocked) {
-      newBlockedDates = blockedDates.filter(d => !isSameDay(d, dateToToggle));
-      newBlockedDatesIso = newBlockedDates.map(d => d.toISOString().split('T')[0]);
+      newBlockedDatesIso = blockedDates
+        .filter(d => !isSameDay(d, dateToToggle))
+        .map(d => d.toISOString().split('T')[0]);
     } else {
-      newBlockedDates = [...blockedDates, dateToToggle];
-      newBlockedDatesIso = newBlockedDates.map(d => d.toISOString().split('T')[0]);
+      newBlockedDatesIso = [...blockedDates, dateToToggle]
+        .map(d => d.toISOString().split('T')[0])
+        .sort(); // Keep sorted for consistency
     }
     
     try {
       const userDocRef = doc(db, "users", user.uid);
       await updateDoc(userDocRef, { blockedDates: newBlockedDatesIso });
-      setBlockedDates(newBlockedDates);
+      // No need to call setBlockedDates here, onSnapshot will update it
       toast({ 
         title: alreadyBlocked ? "Date Unblocked" : "Date Blocked", 
         description: `${format(dateToToggle, 'PPP')} is now ${alreadyBlocked ? 'available' : 'marked as unavailable.'}` 
@@ -213,7 +166,7 @@ export default function ChefCalendarPage() {
     }
   };
 
-  if (isLoadingBlockedDates) {
+  if (isLoadingCalendarData) {
      return (
       <div className="flex justify-center items-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -228,14 +181,13 @@ export default function ChefCalendarPage() {
         <h1 className="text-3xl font-bold flex items-center">
           <CalendarDays className="mr-3 h-8 w-8 text-primary" /> My Calendar & Events
         </h1>
-        <Button
-            onClick={handleGoogleCalendarSync}
-            variant="outline"
-            className="text-sm"
-        >
-            <svg className="fill-current w-4 h-4 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 3h-1V1h-2v2H7V1H5v2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 18H4V8h16v13z"/><path fill="none" d="M0 0h24v24H0z"/></svg>
-            <span>Sync with Google Calendar</span>
-        </Button>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <Button onClick={handleGoogleCalendarSync} variant="outline" className="text-sm">
+              <svg className="fill-current w-4 h-4 mr-2" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 3h-1V1h-2v2H7V1H5v2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 18H4V8h16v13z"/><path fill="none" d="M0 0h24v24H0z"/></svg>
+              <span>Sync with Google Calendar</span>
+          </Button>
+          <p className="text-xs text-muted-foreground mt-2 sm:mt-0 self-center">Shared/Team calendars are coming soon!</p>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -249,7 +201,7 @@ export default function ChefCalendarPage() {
               selected={selectedDate}
               onSelect={setSelectedDate}
               className="rounded-md border"
-              disabled={(date) => date < new Date(new Date().setDate(new Date().getDate() - 365)) || date > new Date(new Date().setDate(new Date().getDate() + 365*2))} 
+              disabled={(date) => date < startOfDay(new Date(new Date().setDate(new Date().getDate() - 365))) || date > new Date(new Date().setDate(new Date().getDate() + 365*2))} 
               modifiers={{ blocked: blockedDates }}
               modifiersStyles={{ 
                 blocked: { 
@@ -271,10 +223,10 @@ export default function ChefCalendarPage() {
         <div className="lg:col-span-2 space-y-6">
           <h2 className="text-2xl font-semibold">
             Events for: {selectedDate ? format(selectedDate, 'PPP') : 'No date selected'}
-            {isDateBlocked && <Badge variant="destructive" className="ml-2">Date Blocked</Badge>}
+            {selectedDate && isDateBlocked && <Badge variant="destructive" className="ml-2">Date Blocked</Badge>}
           </h2>
 
-          {isDateBlocked && eventsForSelectedDate.length === 0 && (
+          {selectedDate && isDateBlocked && eventsForSelectedDate.length === 0 && (
             <Card className="text-center py-12 border-dashed border-destructive/50 bg-destructive/5">
               <CardContent>
                 <Ban className="mx-auto h-12 w-12 text-destructive mb-3" data-ai-hint="blocked warning" />
@@ -289,14 +241,15 @@ export default function ChefCalendarPage() {
               <Card key={event.id} className={`shadow-lg border-l-4 ${
                 event.status === 'Confirmed' ? 'border-green-500' :
                 event.status === 'Pending' ? 'border-yellow-500' :
-                event.status === 'Cancelled' ? 'border-red-500' : 'border-gray-300'
+                event.status === 'Cancelled' ? 'border-red-500' : 
+                event.status === 'WallEvent' ? 'border-blue-500' : 'border-gray-300'
               }`}>
                 <CardHeader>
                   <div className="flex justify-between items-start">
                     <CardTitle className="text-xl">{event.title}</CardTitle>
                     <Badge variant={getStatusBadgeVariant(event.status)} className="flex items-center">
                       {getStatusIcon(event.status)}
-                      {event.status}
+                      {event.status === 'WallEvent' ? 'My Wall Event' : event.status}
                     </Badge>
                   </div>
                   {event.customerName && <CardDescription>For: {event.customerName}</CardDescription>}
@@ -347,7 +300,7 @@ export default function ChefCalendarPage() {
                   )}
                 </CardContent>
                 <CardFooter className="flex flex-col items-start space-y-2 pt-4 border-t">
-                    {event.status === 'Confirmed' && (
+                    {event.status === 'Confirmed' && !event.isWallEvent && ( // Only show QR for confirmed client bookings
                         <>
                             <p className="text-xs text-muted-foreground">
                                 <strong>Event Completion:</strong> At the event, the customer will provide a QR code. Scan it to confirm completion and initiate the release of the remaining 50% of your funds. Remember to upload all related receipts.
@@ -358,7 +311,7 @@ export default function ChefCalendarPage() {
                             </Button>
                         </>
                     )}
-                    {(event.status === 'Confirmed' || event.status === 'Pending') && (
+                    {(event.status === 'Confirmed' || event.status === 'Pending' || event.status === 'WallEvent') && (
                          <Button variant="link" size="sm" className="p-0 h-auto text-xs text-blue-500 hover:underline">View/Edit Details (Placeholder)</Button>
                     )}
                     {event.status === 'Cancelled' && (
@@ -368,16 +321,24 @@ export default function ChefCalendarPage() {
               </Card>
             ))
           ) : (
-            !isDateBlocked && (
+            selectedDate && !isDateBlocked && (
                 <Card className="text-center py-12 border-dashed">
                 <CardContent>
                     <CalendarDays className="mx-auto h-12 w-12 text-muted-foreground mb-3" data-ai-hint="calendar empty" />
                     <p className="text-muted-foreground">No events scheduled for this day.</p>
-                    <p className="text-xs text-muted-foreground mt-1">Select another date to view events.</p>
+                    <p className="text-xs text-muted-foreground mt-1">Select another date to view events or manage your availability.</p>
                 </CardContent>
                 </Card>
             )
           )}
+           {!selectedDate && (
+                <Card className="text-center py-12 border-dashed">
+                    <CardContent>
+                        <CalendarDays className="mx-auto h-12 w-12 text-muted-foreground mb-3" data-ai-hint="calendar select"/>
+                        <p className="text-muted-foreground">Please select a date to view events or manage availability.</p>
+                    </CardContent>
+                </Card>
+           )}
         </div>
       </div>
     </div>

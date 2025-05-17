@@ -7,15 +7,15 @@ export interface Menu {
   pricePerHead: number;
   dietaryInfo: string[]; // e.g., ["Vegetarian", "Gluten-Free"]
   isPublic: boolean;
-  chefId: string; 
+  chefId: string;
   chefName?: string;
-  chefProfilePictureUrl?: string; 
-  pax?: number; 
-  costPrice?: number; 
-  imageUrl?: string; 
-  dataAiHint?: string; 
-  averageRating?: number; 
-  numberOfRatings?: number; 
+  chefProfilePictureUrl?: string;
+  pax?: number;
+  costPrice?: number;
+  imageUrl?: string;
+  dataAiHint?: string;
+  averageRating?: number;
+  numberOfRatings?: number;
   createdAt?: any; // Firestore Timestamp
   updatedAt?: any; // Firestore Timestamp
 }
@@ -24,6 +24,16 @@ export interface ParseResumeOutput {
   experience: string;
   skills: string[];
   education?: string;
+}
+
+export interface Team {
+  id: string;
+  name: string;
+  ownerChefId: string;
+  memberChefIds: string[];
+  brandName?: string;
+  createdAt?: any;
+  updatedAt?: any;
 }
 
 export interface ChefProfile {
@@ -51,6 +61,8 @@ export interface ChefProfile {
   blockedDates?: string[]; // Array of ISO date strings
   trustScore?: number;
   trustScoreBasis?: string;
+  teamId?: string; // ID of the team the chef belongs to
+  teamName?: string; // Display name of the team
 }
 
 export interface CustomerRequest {
@@ -60,8 +72,8 @@ export interface CustomerRequest {
   cuisinePreference: string;
   pax: number;
   eventDate: any; // Firestore Timestamp
-  notes?: string; 
-  customerId: string;
+  notes?: string;
+  customerId: string; // UID of the customer making the request
   status?: 'new' | 'pending_proposals' | 'viewing_proposals' | 'booked' | 'cancelled';
   createdAt?: any; // Firestore Timestamp
 }
@@ -88,15 +100,15 @@ export interface ShoppingListItem {
   estimatedCost: number;
   notes?: string;
   purchased: boolean;
-  menuId?: string; 
-  eventId?: string; 
+  menuId?: string;
+  eventId?: string;
   createdAt?: any; // Firestore Timestamp
   updatedAt?: any; // Firestore Timestamp
 }
 
 export interface CalendarEvent {
   id: string; // Firestore document ID
-  chefId: string; 
+  chefId: string;
   date: any; // Firestore Timestamp (or string YYYY-MM-DD if not querying by range)
   title: string;
   customerName?: string;
@@ -104,13 +116,15 @@ export interface CalendarEvent {
   menuName: string;
   pricePerHead: number;
   location?: string;
-  notes?: string; 
+  notes?: string;
   coChefs?: string[];
-  status: 'Confirmed' | 'Pending' | 'Cancelled';
+  status: 'Confirmed' | 'Pending' | 'Cancelled' | 'WallEvent'; // Added 'WallEvent' for chef-posted events
   weather?: string; // Placeholder
   toolsNeeded?: string[]; // Placeholder
   createdAt?: any; // Firestore Timestamp
   updatedAt?: any; // Firestore Timestamp
+  teamId?: string; // Optional: if the event is associated with a team
+  isWallEvent?: boolean; // Flag to distinguish Chef Wall events
 }
 
 export interface ChefWallEvent {
@@ -121,16 +135,17 @@ export interface ChefWallEvent {
   eventDateTime: string; // Or Firestore Timestamp
   location: string;
   pricePerPerson: number;
-  chefsInvolved: string[]; 
-  tags: string[]; 
+  chefsInvolved: string[];
+  tags: string[];
   imageUrl?: string;
   isPublic: boolean;
-  chefId: string; 
-  chefName: string; 
-  chefAvatarUrl?: string; 
+  chefId: string;
+  chefName: string;
+  chefAvatarUrl?: string;
   dataAiHint?: string;
   createdAt?: any; // Firestore Timestamp
   updatedAt?: any; // Firestore Timestamp
+  teamId?: string; // Optional: if the event is posted by a team
 }
 
 export interface CustomerWallPost {
@@ -139,12 +154,12 @@ export interface CustomerWallPost {
   customerAvatarUrl?: string;
   eventType: string;
   numberOfPeople: number;
-  budget: string; 
+  budget: string;
   cuisinePreferences: string;
-  desiredDates: string; 
+  desiredDates: string;
   extraNotes?: string;
-  isPublic: boolean; 
-  postedAt: string; 
+  isPublic: boolean;
+  postedAt: string;
   dataAiHint?: string;
 }
 
@@ -154,13 +169,13 @@ export interface CustomerProfile {
   email: string;
   phone?: string;
   profilePictureUrl?: string;
-  kitchenEquipment?: string[]; 
+  kitchenEquipment?: string[];
   addressDetails?: string;
   defaultEventType?: string;
   defaultPax?: number;
-  defaultBudget?: string; 
+  defaultBudget?: string;
   defaultBudgetAmount?: number;
-  defaultFrequency?: string; 
+  defaultFrequency?: string;
   defaultTheme?: string;
   defaultDietaryNotes?: string;
   defaultExtraComments?: string;
@@ -173,7 +188,7 @@ export type CostType = 'Ingredient' | 'Equipment' | 'Tax' | 'BAS' | 'Travel' | '
 
 export interface Receipt {
   id: string; // Firestore document ID
-  fileName?: string; // Original file name, might be less relevant if we use data URI for initial processing
+  fileName?: string;
   vendor: string;
   date: any; // Firestore Timestamp
   totalAmount: number;
