@@ -1683,6 +1683,10 @@ body {
   border-color: rgb(59 130 246 / var(--tw-border-opacity, 1));
 }
 
+.border-blue-500\/30 {
+  border-color: #3b82f64d;
+}
+
 .border-l-transparent {
   border-left-color: #0000;
 }
@@ -1800,6 +1804,10 @@ body {
 
 .bg-background\/90 {
   background-color: hsl(var(--background) / .9);
+}
+
+.bg-blue-500\/10 {
+  background-color: #3b82f61a;
 }
 
 .bg-gradient-to-br {
@@ -2118,6 +2126,10 @@ body {
 
 .font-semibold {
   font-weight: 600;
+}
+
+.capitalize {
+  text-transform: capitalize;
 }
 
 .italic {

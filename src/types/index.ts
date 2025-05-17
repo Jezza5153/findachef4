@@ -71,7 +71,7 @@ export interface ChefProfile {
   isSubscribed?: boolean;
   createdAt?: any;
   updatedAt?: any;
-  blockedDates?: string[];
+  blockedDates?: string[]; // Array of ISO date strings
   trustScore?: number;
   trustScoreBasis?: string;
   teamId?: string;
@@ -88,12 +88,12 @@ export interface CustomerRequest {
   budget: number;
   cuisinePreference: string;
   pax: number;
-  eventDate: any;
+  eventDate: any; // Firestore Timestamp
   notes?: string;
   customerId: string;
   status?: 'new' | 'awaiting_customer_response' | 'proposal_sent' | 'chef_declined' | 'chef_accepted' | 'customer_confirmed' | 'booked' | 'cancelled_by_customer';
-  createdAt?: any;
-  updatedAt?: any;
+  createdAt?: any; // Firestore Timestamp
+  updatedAt?: any; // Firestore Timestamp
   respondingChefIds?: string[];
   activeProposal?: {
     menuId: string;
@@ -102,7 +102,7 @@ export interface CustomerRequest {
     chefId: string;
     chefName: string;
     notes?: string;
-    proposedAt: any;
+    proposedAt: any; // Firestore Timestamp
   };
 }
 
@@ -147,7 +147,7 @@ export interface ShoppingListItem {
 export interface CalendarEvent {
   id: string;
   chefId: string;
-  date: any;
+  date: any; // Firestore Timestamp
   title: string;
   customerName?: string;
   pax: number;
@@ -170,7 +170,7 @@ export interface ChefWallEvent {
   title: string;
   description: string;
   maxPax: number;
-  eventDateTime: string;
+  eventDateTime: string; // ISO String
   location: string;
   pricePerPerson: number;
   chefsInvolved: string[];
@@ -211,8 +211,8 @@ export interface CustomerProfile {
   addressDetails?: string;
   defaultEventType?: string;
   defaultPax?: number;
-  defaultBudget?: string;
-  defaultBudgetAmount?: number;
+  defaultBudget?: string; // This was potentially a duplicate or for text display
+  defaultBudgetAmount?: number; // Main numeric budget
   defaultFrequency?: string;
   defaultTheme?: string;
   defaultDietaryNotes?: string;
@@ -228,7 +228,7 @@ export interface Receipt {
   id: string;
   fileName?: string;
   vendor: string;
-  date: any;
+  date: any; // Firestore Timestamp
   totalAmount: number;
   assignedToEventId?: string;
   assignedToMenuId?: string;
@@ -252,10 +252,10 @@ export interface TaxAdviceOutput {
 
 export interface ActivityItem {
   id: string;
-  type: string;
+  type: string; // e.g., 'new_booking_request', 'menu_published', 'new_message'
   description: string;
-  timestamp: any;
-  linkTo?: string;
+  timestamp: any; // Firestore Timestamp
+  linkTo?: string; // e.g., /chef/dashboard/requests/XYZ
   isRead?: boolean;
 }
 
@@ -280,4 +280,29 @@ export interface ReceiptParserOutput {
   date?: string; // YYYY-MM-DD
   totalAmount?: number;
   suggestedCostType?: CostType;
+}
+
+export interface Booking {
+  id: string;
+  customerId: string;
+  customerName?: string; // Denormalized for easier display
+  chefId: string;
+  chefName?: string; // Denormalized
+  chefAvatarUrl?: string; // Denormalized
+  eventId?: string; // If booked from a ChefWallEvent
+  menuId?: string; // If a specific menu was booked
+  menuTitle?: string; // Denormalized
+  requestId?: string; // If booked from a CustomerRequest
+  eventTitle: string; // Could be from menu title, event title, or request type
+  eventDate: any; // Firestore Timestamp
+  pax: number;
+  pricePerHead?: number; // If applicable
+  totalPrice: number;
+  status: 'pending_chef_acceptance' | 'confirmed' | 'completed' | 'cancelled_by_customer' | 'cancelled_by_chef' | 'payment_failed';
+  createdAt: any; // Firestore Timestamp
+  updatedAt?: any; // Firestore Timestamp
+  customerNotes?: string;
+  chefNotes?: string;
+  location?: string;
+  qrCodeScannedAt?: any; // Firestore Timestamp for event completion
 }
