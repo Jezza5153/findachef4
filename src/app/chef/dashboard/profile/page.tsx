@@ -82,7 +82,7 @@ export default function ChefProfilePage() {
       specialties: '',
       experienceSummary: "",
       education: "",
-      skills: [],
+      skills: "", // Initialize as string for input field
       portfolioItem1Url: '',
       portfolioItem1Caption: '',
       portfolioItem2Url: '',
@@ -92,38 +92,52 @@ export default function ChefProfilePage() {
   });
 
   useEffect(() => {
-    if (!authLoading && user) {
-      if (userProfile) {
-        const currentProfile = userProfile as ChefProfileType;
-        setChefData(currentProfile);
-        form.reset({
-          name: currentProfile.name || '',
-          email: currentProfile.email || user.email || '',
-          tagline: currentProfile.tagline || '',
-          bio: currentProfile.bio || '',
-          specialties: currentProfile.specialties?.join(', ') || '',
-          experienceSummary: currentProfile.experienceSummary || '',
-          education: currentProfile.education || '',
-          skills: currentProfile.skills?.join(', ') || '',
-          portfolioItem1Url: currentProfile.portfolioItem1Url || '',
-          portfolioItem1Caption: currentProfile.portfolioItem1Caption || '',
-          portfolioItem2Url: currentProfile.portfolioItem2Url || '',
-          portfolioItem2Caption: currentProfile.portfolioItem2Caption || '',
-          teamName: currentProfile.teamName || '',
-        });
-        setProfilePicturePreview(currentProfile.profilePictureUrl || user.photoURL || null);
-        setIsLoading(false);
-      } else {
-        // This case might occur if AuthContext hasn't loaded userProfile yet,
-        // or if it's a new user and profile creation in signup failed or is pending.
-        // For now, we keep loading or show a message.
-        console.log("User authenticated, but userProfile is not yet available in AuthContext.");
-        // To prevent errors, you might want to show a loading state until userProfile is definitively loaded or explicitly null
+    const fetchProfile = async () => {
+      if (!authLoading && user) {
+        setIsLoading(true);
+        try {
+          const userDocRef = doc(db, "users", user.uid);
+          const docSnap = await getDoc(userDocRef);
+          if (docSnap.exists()) {
+            const currentProfile = docSnap.data() as ChefProfileType;
+            setChefData(currentProfile);
+            form.reset({
+              name: currentProfile.name || '',
+              email: currentProfile.email || user.email || '',
+              tagline: currentProfile.tagline || '',
+              bio: currentProfile.bio || '',
+              specialties: currentProfile.specialties?.join(', ') || '',
+              experienceSummary: currentProfile.experienceSummary || '',
+              education: currentProfile.education || '',
+              skills: currentProfile.skills?.join(', ') || '',
+              portfolioItem1Url: currentProfile.portfolioItem1Url || '',
+              portfolioItem1Caption: currentProfile.portfolioItem1Caption || '',
+              portfolioItem2Url: currentProfile.portfolioItem2Url || '',
+              portfolioItem2Caption: currentProfile.portfolioItem2Caption || '',
+              teamName: currentProfile.teamName || '',
+            });
+            setProfilePicturePreview(currentProfile.profilePictureUrl || user.photoURL || null);
+          } else {
+            toast({ title: "Profile Not Found", description: "Could not load your profile data.", variant: "destructive"});
+            // Initialize with defaults if no profile found for some reason
+            form.reset({
+              name: user.displayName || '',
+              email: user.email || '',
+            });
+            setProfilePicturePreview(user.photoURL || null);
+          }
+        } catch (error) {
+          console.error("Error fetching profile:", error);
+          toast({ title: "Error", description: "Failed to load profile data.", variant: "destructive"});
+        } finally {
+          setIsLoading(false);
+        }
+      } else if (!authLoading && !user) {
+        setIsLoading(false); // Not logged in
       }
-    } else if (!authLoading && !user) {
-      setIsLoading(false); // Not logged in, page should be protected by layout
-    }
-  }, [user, userProfile, authLoading, form, toast]);
+    };
+    fetchProfile();
+  }, [user, authLoading, form, toast]);
 
 
   const handleResumeProcessed = (data: { parsedData: ParseResumeOutput; file: File }) => {
@@ -166,7 +180,7 @@ export default function ChefProfilePage() {
     try {
       // 1. Upload new profile picture if one is staged
       if (newProfilePictureFile) {
-        if (profilePicUrlToSave) { // Delete old one if exists
+        if (profilePicUrlToSave && profilePicUrlToSave.startsWith('https://firebasestorage.googleapis.com')) { // Delete old one if exists and is a Firebase Storage URL
             try {
                 const oldImageRef = storageRef(storage, profilePicUrlToSave);
                 await deleteObject(oldImageRef).catch(e => console.warn("Old profile pic not found or cannot be deleted:", e));
@@ -191,13 +205,14 @@ export default function ChefProfilePage() {
 
       // 2. Upload new resume file if one is staged
       if (newResumeFile) {
-        if (resumeUrlToSave) { // Delete old one if exists
+        if (resumeUrlToSave && resumeUrlToSave.startsWith('https://firebasestorage.googleapis.com')) { // Delete old one if exists and is a Firebase Storage URL
             try {
                 const oldResumeRef = storageRef(storage, resumeUrlToSave);
                 await deleteObject(oldResumeRef).catch(e => console.warn("Old resume not found or cannot be deleted:", e));
             } catch (e) {console.warn("Error deleting old resume file",e);}
         }
-        const resumePath = `users/${user.uid}/resume.${newResumeFile.name.split('.').pop() || 'pdf'}`;
+        const resumeFileExtension = newResumeFile.name.split('.').pop() || 'pdf';
+        const resumePath = `users/${user.uid}/resume.${resumeFileExtension}`;
         const resumeStorageRef = storageRef(storage, resumePath);
         const resumeUploadTask = uploadBytesResumable(resumeStorageRef, newResumeFile);
 
@@ -216,6 +231,7 @@ export default function ChefProfilePage() {
       // 3. Prepare data for Firestore
       const updatedProfileData: Partial<ChefProfileType> = {
         name: formData.name,
+        email: user.email, // Email should be from auth user, not form
         tagline: formData.tagline,
         bio: formData.bio,
         specialties: formData.specialties.split(',').map(s => s.trim()).filter(s => s),
@@ -229,11 +245,16 @@ export default function ChefProfilePage() {
         portfolioItem2Caption: formData.portfolioItem2Caption,
         resumeFileUrl: resumeUrlToSave,
         updatedAt: serverTimestamp(),
-        // teamId and teamName are not directly editable by the chef here
+        // teamName is typically managed by an admin or a separate team management interface, not directly editable here.
+        // We can ensure chefData.teamName is preserved if it exists
+        ...(chefData?.teamName && { teamName: chefData.teamName }),
+        ...(chefData?.teamId && { teamId: chefData.teamId }),
       };
 
       // 4. Save profile to Firestore
       const userDocRef = doc(db, "users", user.uid);
+      // Use setDoc with merge:true if creating for the first time, or updateDoc if sure it exists.
+      // Since signup creates a doc, updateDoc is fine, but setDoc({ ... }, { merge: true }) is safer if creation could fail.
       await updateDoc(userDocRef, updatedProfileData); 
 
       // 5. Update Firebase Auth user profile (displayName, photoURL)
@@ -275,11 +296,12 @@ export default function ChefProfilePage() {
   };
 
   if (isLoading || authLoading) {
-    return <div className="flex h-screen items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /> Loading Profile...</div>;
+    return <div className="flex h-screen items-center justify-center"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading Profile...</div>;
   }
-  if (!user || !chefData) { // Ensure chefData is loaded
-     return <div className="flex h-screen items-center justify-center">Please log in to view your profile or profile data is unavailable.</div>;
+  if (!user) { 
+     return <div className="flex h-screen items-center justify-center">Please log in to view your profile.</div>;
   }
+  // ChefData might still be null briefly if Firestore fetch is slightly delayed after auth, form will show defaults.
 
   return (
     <div className="space-y-8">
@@ -416,11 +438,11 @@ export default function ChefProfilePage() {
                     name="teamName"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Current Team/Brand</FormLabel>
+                        <FormLabel>Current Chef Alliance / Collaboration Group</FormLabel>
                         <FormControl>
-                          <Input {...field} readOnly disabled placeholder="Not part of a team" />
+                          <Input {...field} readOnly disabled placeholder="Not part of an alliance" />
                         </FormControl>
-                         <FormDescription>Team features (joining, creating, managing) are coming soon.</FormDescription>
+                         <FormDescription>Indicate if you're part of a regular Chef Alliance or Collaboration Group. This helps in co-hosting and showcasing joint event types. (Full alliance management features are planned for the future).</FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -513,6 +535,7 @@ export default function ChefProfilePage() {
                 </Button>
                 <ResumeUploadForm
                     onResumeParsed={handleResumeProcessed}
+                    initialData={resumeParsedDataForSave || undefined}
                 />
               </div>
 
@@ -562,7 +585,7 @@ export default function ChefProfilePage() {
               </div>
 
               <div className="pt-6 border-t flex flex-col sm:flex-row items-center justify-center">
-                <Button type="submit" size="lg" className="w-full sm:w-auto" disabled={isSaving}>
+                <Button type="submit" size="lg" className="w-full sm:w-auto" disabled={isSaving || isLoading}>
                   {isSaving ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Save className="mr-2 h-5 w-5" />}
                   {isSaving ? 'Saving...' : 'Save Profile Changes'}
                 </Button>
@@ -598,3 +621,5 @@ export default function ChefProfilePage() {
     </div>
   );
 }
+
+    
