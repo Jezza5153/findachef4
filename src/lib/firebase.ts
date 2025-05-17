@@ -23,6 +23,7 @@ if (!getApps().length) {
   app = getApps()[0];
 }
 
+// Example for later:
 // const auth = getAuth(app);
 // const firestore = getFirestore(app);
 
