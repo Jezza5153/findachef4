@@ -19,6 +19,9 @@ import { LogIn } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
+import { signInWithEmailAndPassword } from 'firebase/auth';
+import { auth } from '@/lib/firebase';
+import { useState } from 'react';
 
 const loginSchema = z.object({
   email: z.string().email({ message: 'Invalid email address.' }),
@@ -30,6 +33,7 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 export default function LoginPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const [isLoading, setIsLoading] = useState(false);
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -39,38 +43,58 @@ export default function LoginPage() {
     },
   });
 
-  const handleLogin = (data: LoginFormValues) => {
-    console.log('Login attempt:', data);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('isLoggedIn', 'true');
-      localStorage.setItem('userName', data.email.split('@')[0] || 'User');
+  const handleLogin = async (data: LoginFormValues) => {
+    setIsLoading(true);
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, data.email, data.password);
+      const user = userCredential.user;
+      
+      toast({
+        title: 'Login Successful',
+        description: 'Welcome back!',
+      });
 
-      // Simulate role-based login and initial chef status
-      if (data.email.toLowerCase().includes('chef@')) {
-        localStorage.setItem('userRole', 'chef');
-        localStorage.setItem('isChefApproved', 'false'); // Simulate needs approval
-        localStorage.setItem('isChefSubscribed', 'false'); // Simulate not subscribed
-        toast({
-          title: 'Chef Login (Simulated)',
-          description: 'Welcome, Chef! Your account status will be checked.',
-        });
-        // For testing approved chef:
-        // if (data.email.toLowerCase().includes('approvedchef@')) {
-        //   localStorage.setItem('isChefApproved', 'true');
-        //   localStorage.setItem('isChefSubscribed', 'true'); // Or false to test subscription
-        // }
-        router.push('/chef/dashboard');
-      } else {
-        localStorage.setItem('userRole', 'customer');
-        // Clear any lingering chef-specific flags for customer logins
-        localStorage.removeItem('isChefApproved');
-        localStorage.removeItem('isChefSubscribed');
-        toast({
-          title: 'Login Successful',
-          description: 'Welcome back!',
-        });
-        router.push('/customer/dashboard');
+      // Temporary: Set localStorage for role-based redirection until Firestore profiles are used
+      // In a real app, fetch role from Firestore based on user.uid
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('userName', user.displayName || data.email.split('@')[0] || 'User');
+        if (data.email.toLowerCase().includes('chef@')) {
+          localStorage.setItem('userRole', 'chef');
+          // Simulate chef approval status for demo. In real app, this comes from Firestore.
+          // For testing an unapproved chef, set this to 'false'.
+          // For testing an approved but unsubscribed chef, set 'isChefApproved' to 'true' and 'isChefSubscribed' to 'false'.
+          // For testing an approved and subscribed chef:
+          if (data.email.toLowerCase() === 'approvedchef@example.com') {
+            localStorage.setItem('isChefApproved', 'true');
+            localStorage.setItem('isChefSubscribed', 'true');
+          } else {
+            localStorage.setItem('isChefApproved', 'false'); 
+            localStorage.setItem('isChefSubscribed', 'false');
+          }
+          router.push('/chef/dashboard');
+        } else {
+          localStorage.setItem('userRole', 'customer');
+          localStorage.removeItem('isChefApproved');
+          localStorage.removeItem('isChefSubscribed');
+          router.push('/customer/dashboard');
+        }
       }
+
+    } catch (error: any) {
+      console.error('Login error:', error);
+      let errorMessage = 'Failed to login. Please check your credentials.';
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+        errorMessage = 'Invalid email or password.';
+      } else if (error.code === 'auth/too-many-requests') {
+        errorMessage = 'Too many login attempts. Please try again later.';
+      }
+      toast({
+        title: 'Login Failed',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -115,8 +139,8 @@ export default function LoginPage() {
                   </FormItem>
                 )}
               />
-              <Button type="submit" className="w-full text-lg py-3" size="lg" disabled={form.formState.isSubmitting}>
-                <LogIn className="mr-2 h-5 w-5" /> Login
+              <Button type="submit" className="w-full text-lg py-3" size="lg" disabled={isLoading || form.formState.isSubmitting}>
+                {isLoading ? 'Logging in...' : <><LogIn className="mr-2 h-5 w-5" /> Login</>}
               </Button>
             </form>
           </Form>

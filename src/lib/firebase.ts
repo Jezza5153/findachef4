@@ -1,8 +1,6 @@
 
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
-// Add imports for other Firebase services as needed, e.g.,
-// import { getAuth } from "firebase/auth";
-// import { getFirestore } from "firebase/firestore";
+import { getAuth } from "firebase/auth"; // Ensure getAuth is imported
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -23,8 +21,7 @@ if (!getApps().length) {
   app = getApps()[0];
 }
 
-// Example for later:
-// const auth = getAuth(app);
-// const firestore = getFirestore(app);
+const auth = getAuth(app); // Initialize auth instance
+// const firestore = getFirestore(app); // Example for later
 
-export { app /*, auth, firestore */ };
+export { app, auth /*, firestore */ }; // Export app and auth

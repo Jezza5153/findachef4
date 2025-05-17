@@ -25,6 +25,10 @@ import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
 import { ChefHat, UserPlus, UploadCloud, ShieldCheck } from 'lucide-react';
 import Link from 'next/link';
+import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
+import { auth } from '@/lib/firebase';
+import { useRouter } from 'next/navigation';
+
 
 const chefSignupSchema = z.object({
   email: z.string().email({ message: 'Invalid email address.' }),
@@ -33,7 +37,7 @@ const chefSignupSchema = z.object({
   name: z.string().min(2, { message: 'Name must be at least 2 characters.' }),
   abn: z.string().min(1, {message: 'ABN is required.'}),
   bio: z.string().min(20, {message: 'Bio must be at least 20 characters.'}).max(500, {message: "Bio cannot exceed 500 characters."}),
-  specialties: z.string().min(1, { message: 'Please list at least one specialty.' }), // Comma-separated
+  specialties: z.string().min(1, { message: 'Please list at least one specialty.' }), 
   profilePicture: z.instanceof(File).optional()
     .refine(file => !file || file.size <= 2 * 1024 * 1024, `Max file size is 2MB.`)
     .refine(file => !file || ['image/jpeg', 'image/png', 'image/webp'].includes(file.type), `Only JPG, PNG, WEBP files are allowed.`),
@@ -52,6 +56,8 @@ export default function ChefSignupPage() {
   const [isResumeUploaded, setIsResumeUploaded] = useState(false);
   const [profilePicturePreview, setProfilePicturePreview] = useState<string | null>(null);
   const { toast } = useToast();
+  const router = useRouter();
+  const [isLoading, setIsLoading] = useState(false);
 
   const form = useForm<ChefSignupFormValues>({
     resolver: zodResolver(chefSignupSchema),
@@ -70,7 +76,6 @@ export default function ChefSignupPage() {
   const handleResumeParsed = (data: ParseResumeOutput) => {
     setResumeParsedData(data);
     setIsResumeUploaded(true);
-    // Optionally pre-fill form fields, e.g., bio if skills/experience can be summarized
     if (data.experience && form.getValues('bio') === '') {
         form.setValue('bio', data.experience.substring(0,500));
     }
@@ -94,7 +99,7 @@ export default function ChefSignupPage() {
     }
   };
 
-  const onSubmit = (data: ChefSignupFormValues) => {
+  const onSubmit = async (data: ChefSignupFormValues) => {
     if (!isResumeUploaded) {
       toast({
         title: 'Resume Required',
@@ -104,17 +109,52 @@ export default function ChefSignupPage() {
       return;
     }
     
-    console.log('Chef Signup Data:', data);
-    console.log('Parsed Resume Data:', resumeParsedData);
-    // TODO: Implement actual signup logic (e.g., Firebase Auth, API call)
-    toast({
-      title: 'Signup Successful (Simulated)',
-      description: 'Your chef profile has been created. Welcome to FindAChef!',
-    });
-    form.reset();
-    setResumeParsedData(null);
-    setIsResumeUploaded(false);
-    setProfilePicturePreview(null);
+    setIsLoading(true);
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password);
+      const user = userCredential.user;
+
+      // Update Firebase user's display name (optional but good practice)
+      await updateProfile(user, { displayName: data.name });
+
+      // TODO: Save additional chef profile data to Firestore here
+      // This would include: data.abn, data.bio, data.specialties, resumeParsedData, 
+      // profilePictureUrl (after uploading the picture to Firebase Storage),
+      // role: 'chef', isApproved: false, isSubscribed: false
+      console.log('Chef Signup Data (to be saved to Firestore):', {
+        uid: user.uid,
+        email: user.email,
+        name: data.name,
+        abn: data.abn,
+        bio: data.bio,
+        specialties: data.specialties.split(',').map(s => s.trim()),
+        resume: resumeParsedData,
+        // profilePicture: data.profilePicture (needs upload to Storage first)
+      });
+      
+      toast({
+        title: 'Signup Successful!',
+        description: 'Your chef account has been created. You will be redirected to login. Your account will require admin approval.',
+      });
+      form.reset();
+      setResumeParsedData(null);
+      setIsResumeUploaded(false);
+      setProfilePicturePreview(null);
+      router.push('/login'); // Redirect to login after successful signup
+    } catch (error: any) {
+      console.error('Signup error:', error);
+      let errorMessage = 'Failed to create account.';
+      if (error.code === 'auth/email-already-in-use') {
+        errorMessage = 'This email address is already in use.';
+      }
+      toast({
+        title: 'Signup Failed',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -207,7 +247,7 @@ export default function ChefSignupPage() {
               <FormField
                   control={form.control}
                   name="profilePicture"
-                  render={({ field }) => ( // field is not directly used here, onChange is handled by handleProfilePictureChange
+                  render={({ field }) => (
                     <FormItem>
                       <FormLabel>Profile Picture</FormLabel>
                       <FormControl>
@@ -296,8 +336,8 @@ export default function ChefSignupPage() {
                 )}
               />
               
-              <Button type="submit" className="w-full text-lg py-3" size="lg" disabled={!isResumeUploaded || form.formState.isSubmitting}>
-                <UserPlus className="mr-2 h-5 w-5" /> Create Chef Account
+              <Button type="submit" className="w-full text-lg py-3" size="lg" disabled={!isResumeUploaded || isLoading || form.formState.isSubmitting}>
+                {isLoading ? 'Creating Account...' : <><UserPlus className="mr-2 h-5 w-5" /> Create Chef Account</>}
               </Button>
               {!isResumeUploaded && (
                 <p className="text-sm text-destructive text-center">Please upload and parse your resume above to enable account creation.</p>
@@ -309,5 +349,3 @@ export default function ChefSignupPage() {
     </div>
   );
 }
-
-    

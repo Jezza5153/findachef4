@@ -1,0 +1,12 @@
+{
+  "/_not-found/page": "app/_not-found/page.js",
+  "/chef/dashboard/menus/page": "app/chef/dashboard/menus/page.js",
+  "/chef/dashboard/page": "app/chef/dashboard/page.js",
+  "/chef/dashboard/profile/page": "app/chef/dashboard/profile/page.js",
+  "/chef/dashboard/receipts/page": "app/chef/dashboard/receipts/page.js",
+  "/chef/dashboard/shopping-list/page": "app/chef/dashboard/shopping-list/page.js",
+  "/chef/signup/page": "app/chef/signup/page.js",
+  "/customer/dashboard/page": "app/customer/dashboard/page.js",
+  "/login/page": "app/login/page.js",
+  "/page": "app/page.js"
+}
