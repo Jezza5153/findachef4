@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, ChangeEvent } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm, Controller } from 'react-hook-form';
 import * as z from 'zod';
@@ -28,9 +28,10 @@ import { PlusCircle, Edit, Trash2, NotebookText, Eye, EyeOff, ShoppingCart, Aler
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where, serverTimestamp, Timestamp, setDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, deleteDoc, query, where, serverTimestamp, Timestamp, setDoc, onSnapshot, orderBy } from 'firebase/firestore';
 import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import Image from 'next/image';
+import { assistMenuItem } from '@/ai/flows/menu-item-assist-flow';
 
 
 const dietaryOptions: Option[] = [
@@ -69,6 +70,8 @@ export default function MenuManagementPage() {
   
   const [menuImageFile, setMenuImageFile] = useState<File | null>(null);
   const [menuImagePreview, setMenuImagePreview] = useState<string | null>(null);
+  const [isAiAssisting, setIsAiAssisting] = useState(false);
+
 
   const { toast } = useToast();
 
@@ -98,12 +101,11 @@ export default function MenuManagementPage() {
     const q = query(menusCollectionRef, where("chefId", "==", user.uid), orderBy("createdAt", "desc"));
     
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const fetchedMenus = querySnapshot.docs.map(doc => ({ 
-        id: doc.id, 
-        ...doc.data(),
-        // Ensure timestamps are converted if they exist
-        createdAt: doc.data().createdAt ? (doc.data().createdAt as Timestamp).toDate() : undefined,
-        updatedAt: doc.data().updatedAt ? (doc.data().updatedAt as Timestamp).toDate() : undefined,
+      const fetchedMenus = querySnapshot.docs.map(docSnap => ({ 
+        id: docSnap.id, 
+        ...docSnap.data(),
+        createdAt: docSnap.data().createdAt ? (docSnap.data().createdAt as Timestamp).toDate() : undefined,
+        updatedAt: docSnap.data().updatedAt ? (docSnap.data().updatedAt as Timestamp).toDate() : undefined,
       } as Menu));
       setMenus(fetchedMenus);
       setIsLoading(false);
@@ -113,10 +115,10 @@ export default function MenuManagementPage() {
       setIsLoading(false);
     });
     
-    return () => unsubscribe(); // Unsubscribe when component unmounts
+    return () => unsubscribe();
   }, [user, toast]);
 
-  const handleMenuImageFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleMenuImageFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
       form.setValue('menuImageFile', file, { shouldValidate: true });
@@ -141,11 +143,11 @@ export default function MenuManagementPage() {
     setIsSaving(true);
 
     let imageUrlToSave = editingMenu?.imageUrl || ''; 
+    const menuIdForPath = editingMenu?.id || doc(collection(db, 'menus')).id; // Generate ID upfront for path if new
 
     try {
-      const menuIdForPath = editingMenu?.id || doc(collection(db, 'menus')).id;
-
       if (menuImageFile) {
+        // Delete old image from storage if it exists and a new one is being uploaded
         if (editingMenu && editingMenu.imageUrl) {
           try {
             const oldImageRef = storageRef(storage, editingMenu.imageUrl);
@@ -157,10 +159,10 @@ export default function MenuManagementPage() {
         
         const fileExtension = menuImageFile.name.split('.').pop();
         const imagePath = `users/${user.uid}/menus/${menuIdForPath}/image.${fileExtension}`;
-        const imageStorageRef = storageRef(storage, imagePath);
+        const imageStorageRefInstance = storageRef(storage, imagePath);
         
         toast({ title: "Uploading image...", description: "Please wait." });
-        const uploadTask = uploadBytesResumable(imageStorageRef, menuImageFile);
+        const uploadTask = uploadBytesResumable(imageStorageRefInstance, menuImageFile);
         await new Promise<void>((resolve, reject) => {
           uploadTask.on('state_changed', 
             null, 
@@ -185,7 +187,7 @@ export default function MenuManagementPage() {
         imageUrl: imageUrlToSave,
         dataAiHint: data.dataAiHint,
         chefId: user.uid,
-        chefName: userProfile.name || user.displayName || "Chef",
+        chefName: userProfile.name || user.displayName || "Chef", // Ensure chefName is always populated
         chefProfilePictureUrl: userProfile.profilePictureUrl || user.photoURL || undefined,
         updatedAt: serverTimestamp(),
       };
@@ -193,12 +195,11 @@ export default function MenuManagementPage() {
       if (editingMenu) {
         const menuDocRef = doc(db, "menus", editingMenu.id);
         await updateDoc(menuDocRef, menuDataToSave);
-        // No need to manually update local state due to onSnapshot
         toast({ title: 'Menu Updated', description: `"${data.title}" has been successfully updated.` });
       } else {
-        const newMenuDocRef = doc(collection(db, "menus")); 
+        // Use the pre-generated menuIdForPath for the new document ID
+        const newMenuDocRef = doc(db, "menus", menuIdForPath); 
         await setDoc(newMenuDocRef, { ...menuDataToSave, id: newMenuDocRef.id, createdAt: serverTimestamp() });
-        // No need to manually update local state due to onSnapshot
         toast({ title: 'Menu Created', description: `"${data.title}" has been successfully created.` });
       }
       
@@ -246,6 +247,7 @@ export default function MenuManagementPage() {
     if (window.confirm(`Are you sure you want to delete the menu "${menuToDelete?.title}"?`)) {
       setIsSaving(true);
       try {
+        // Delete image from storage if it exists
         if (menuToDelete.imageUrl) {
           try {
             const imageRef = storageRef(storage, menuToDelete.imageUrl);
@@ -255,7 +257,6 @@ export default function MenuManagementPage() {
           }
         }
         await deleteDoc(doc(db, "menus", menuId));
-        // No need to manually update local state due to onSnapshot
         toast({ title: 'Menu Deleted', description: `"${menuToDelete?.title}" has been deleted.`, variant: 'destructive' });
       } catch (error) {
         console.error("Error deleting menu:", error);
@@ -274,9 +275,9 @@ export default function MenuManagementPage() {
     
     const newItem: Omit<ShoppingListItem, 'id' | 'createdAt' | 'updatedAt'> = {
       name: `Ingredients for ${menu.title}`,
-      quantity: 1, // Default quantity
-      unit: 'Lot', // Default unit
-      estimatedCost: menu.costPrice || 0, // Use menu cost price as estimate or default to 0
+      quantity: 1, 
+      unit: 'Lot', 
+      estimatedCost: menu.costPrice || 0, 
       notes: `For menu: ${menu.title} (ID: ${menu.id})`,
       purchased: false,
       chefId: user.uid,
@@ -319,13 +320,38 @@ export default function MenuManagementPage() {
     setIsDialogOpen(true);
   };
 
-  const handleAiAssist = () => {
-    const currentDescription = form.getValues("description");
-    toast({
-      title: "AI Menu Assist (Placeholder)",
-      description: "This feature will soon help generate descriptions, suggest dietary options, and more!",
-      duration: 5000,
-    });
+  const handleAiAssist = async () => {
+    const { title, description, cuisine } = form.getValues();
+    if (!title || !cuisine) {
+      toast({
+        title: "Missing Information for AI",
+        description: "Please provide at least a Menu Title and Cuisine Type for AI assistance.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsAiAssisting(true);
+    toast({ title: "AI Menu Assist", description: "Generating suggestions..." });
+    try {
+      const result = await assistMenuItem({
+        menuTitle: title,
+        currentDescription: description,
+        cuisine: cuisine,
+        // keyIngredients: "optional comma separated string of ingredients" // Add if you want an input for this
+      });
+      if (result && result.suggestedDescription) {
+        form.setValue('description', result.suggestedDescription, { shouldValidate: true });
+        toast({ title: "AI Suggestion Applied", description: "Description updated with AI suggestion." });
+      } else {
+        toast({ title: "AI Menu Assist", description: "Could not generate a suggestion at this time.", variant: "default" });
+      }
+    } catch (error) {
+      console.error("Error with AI Menu Assist:", error);
+      toast({ title: "AI Error", description: "Failed to get AI suggestions.", variant: "destructive" });
+    } finally {
+      setIsAiAssisting(false);
+    }
   };
 
 
@@ -343,7 +369,7 @@ export default function MenuManagementPage() {
       </div>
 
       <Dialog open={isDialogOpen} onOpenChange={(isOpen) => {
-          if (isSaving && isOpen) return; 
+          if ((isSaving || isAiAssisting) && isOpen) return; 
           setIsDialogOpen(isOpen);
           if (!isOpen) {
             setMenuImageFile(null);
@@ -369,6 +395,17 @@ export default function MenuManagementPage() {
                   </FormItem>
                 )}
               />
+               <FormField
+                  control={form.control}
+                  name="cuisine"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Cuisine Type</FormLabel>
+                      <FormControl><Input placeholder="e.g., Mexican, Thai, Fusion" {...field} /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
               <FormField
                 control={form.control}
                 name="description"
@@ -380,22 +417,12 @@ export default function MenuManagementPage() {
                   </FormItem>
                 )}
               />
-               <Button type="button" variant="outline" onClick={handleAiAssist} size="sm" className="w-full">
-                <Sparkles className="mr-2 h-4 w-4" /> Get AI Suggestions for Description
+               <Button type="button" variant="outline" onClick={handleAiAssist} size="sm" className="w-full" disabled={isAiAssisting || isSaving}>
+                {isAiAssisting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                {isAiAssisting ? "Getting Suggestion..." : "AI Assist: Enhance Description"}
               </Button>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <FormField
-                  control={form.control}
-                  name="cuisine"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Cuisine Type</FormLabel>
-                      <FormControl><Input placeholder="e.g., Mexican, Thai, Fusion" {...field} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
                  <FormField
                   control={form.control}
                   name="pricePerHead"
@@ -407,9 +434,7 @@ export default function MenuManagementPage() {
                     </FormItem>
                   )}
                 />
-              </div>
-               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <FormField
+                 <FormField
                   control={form.control}
                   name="pax"
                   render={({ field }) => (
@@ -421,6 +446,8 @@ export default function MenuManagementPage() {
                     </FormItem>
                   )}
                 />
+              </div>
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                  <FormField
                   control={form.control}
                   name="costPrice"
@@ -429,6 +456,18 @@ export default function MenuManagementPage() {
                       <FormLabel>Estimated Cost Price ($)</FormLabel>
                       <FormControl><Input type="number" step="0.01" placeholder="30.00" {...field} /></FormControl>
                       <FormDescription>Your internal cost for ingredients per menu serving.</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                 <FormField
+                  control={form.control}
+                  name="dataAiHint"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Image Description Hint (for AI)</FormLabel>
+                      <FormControl><Input placeholder="e.g., italian food, pasta dish" {...field} /></FormControl>
+                      <FormDescription>One or two keywords to help AI understand the image content (max 2 words).</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -455,18 +494,6 @@ export default function MenuManagementPage() {
                       </div>
                     )}
                     <FormDescription>A captivating image for your menu (max 2MB, JPG/PNG/WEBP).</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="dataAiHint"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Image Description Hint (for AI)</FormLabel>
-                    <FormControl><Input placeholder="e.g., italian food, pasta dish" {...field} /></FormControl>
-                    <FormDescription>One or two keywords to help AI understand the image content (max 2 words).</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -525,11 +552,11 @@ export default function MenuManagementPage() {
                               onCheckedChange={(checked) => {
                                 if (checked && !isChefSubscribed) {
                                     toast({ title: "Subscription Required", description: "You need an active subscription to publish menus publicly.", variant: "destructive"});
-                                    return; // Prevent toggle if trying to publish without subscription
+                                    return; 
                                 }
                                 field.onChange(checked);
                               }}
-                              disabled={isSaving || (field.value && !isChefSubscribed)} // Disable if trying to publish without sub OR if already public & no sub (shouldn't happen)
+                              disabled={isSaving || (field.value && !isChefSubscribed)} 
                             />
                           </FormControl>
                         </TooltipTrigger>
@@ -545,9 +572,9 @@ export default function MenuManagementPage() {
               />
               <DialogFooter>
                 <DialogClose asChild>
-                    <Button type="button" variant="outline" disabled={isSaving}>Cancel</Button>
+                    <Button type="button" variant="outline" disabled={isSaving || isAiAssisting}>Cancel</Button>
                 </DialogClose>
-                <Button type="submit" disabled={isSaving || (form.getValues("isPublic") && !isChefSubscribed) }>
+                <Button type="submit" disabled={isSaving || isAiAssisting || (form.getValues("isPublic") && !isChefSubscribed) }>
                   {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (editingMenu ? 'Save Changes' : 'Create Menu')}
                 </Button>
               </DialogFooter>
