@@ -1,3 +1,4 @@
+
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -22,16 +23,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { FileText, Sparkles, UploadCloud } from 'lucide-react';
 
 const resumeFormSchema = z.object({
-  resume: z.instanceof(File).optional()
-    .refine(file => file && file.size <= 5 * 1024 * 1024, `Max file size is 5MB.`)
-    .refine(file => file && file.type === 'application/pdf', `Only PDF files are allowed.`),
+  resume: z.instanceof(File) // Make it required for this form submission
+    .refine(file => file.size <= 5 * 1024 * 1024, `Max file size is 5MB.`)
+    .refine(file => file.type === 'application/pdf', `Only PDF files are allowed.`),
 });
 
 type ResumeFormValues = z.infer<typeof resumeFormSchema>;
 
 interface ResumeUploadFormProps {
-  onResumeParsed: (data: ParseResumeOutput) => void;
-  initialData?: ParseResumeOutput;
+  onResumeParsed: (data: { parsedData: ParseResumeOutput; file: File }) => void;
+  initialData?: ParseResumeOutput; // Kept for potential initial display, though parsing is main action
 }
 
 export function ResumeUploadForm({ onResumeParsed, initialData }: ResumeUploadFormProps) {
@@ -39,7 +40,7 @@ export function ResumeUploadForm({ onResumeParsed, initialData }: ResumeUploadFo
   const [isUploading, setIsUploading] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
-  const [parsedData, setParsedData] = useState<ParseResumeOutput | null>(initialData || null);
+  const [parsedDataDisplay, setParsedDataDisplay] = useState<ParseResumeOutput | null>(initialData || null);
   const { toast } = useToast();
 
   const form = useForm<ResumeFormValues>({
@@ -50,14 +51,14 @@ export function ResumeUploadForm({ onResumeParsed, initialData }: ResumeUploadFo
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      form.setValue('resume', file);
+      form.setValue('resume', file, { shouldValidate: true });
       setFileName(file.name);
-      setParsedData(null); // Clear previous parsed data on new file selection
+      setParsedDataDisplay(null); // Clear previous parsed data on new file selection
     }
   };
 
   const onSubmit = async (data: ResumeFormValues) => {
-    if (!data.resume) {
+    if (!data.resume) { // Should be caught by zod, but good to double check
       toast({
         title: 'No file selected',
         description: 'Please select a PDF resume to upload.',
@@ -70,10 +71,10 @@ export function ResumeUploadForm({ onResumeParsed, initialData }: ResumeUploadFo
     setIsParsing(false);
     setUploadProgress(0);
 
-    // Simulate upload progress
+    // Simulate upload progress (since actual upload happens later on profile save)
     let progress = 0;
     const interval = setInterval(() => {
-      progress += 10;
+      progress += 20;
       if (progress <= 100) {
         setUploadProgress(progress);
       } else {
@@ -85,8 +86,8 @@ export function ResumeUploadForm({ onResumeParsed, initialData }: ResumeUploadFo
       const reader = new FileReader();
       reader.readAsDataURL(data.resume);
       reader.onloadend = async () => {
-        clearInterval(interval); // Ensure progress interval is cleared
-        setUploadProgress(100); // Set progress to 100%
+        clearInterval(interval);
+        setUploadProgress(100);
         setIsUploading(false);
         setIsParsing(true);
         
@@ -99,20 +100,20 @@ export function ResumeUploadForm({ onResumeParsed, initialData }: ResumeUploadFo
 
         try {
           const result = await parseResume({ resumeDataUri: base64data });
-          setParsedData(result);
-          onResumeParsed(result);
+          setParsedDataDisplay(result); // Update local display
+          onResumeParsed({ parsedData: result, file: data.resume }); // Pass parsed data AND file to parent
           toast({
-            title: 'Resume Parsed Successfully',
-            description: 'Your experience and skills have been extracted.',
+            title: 'Resume Processed & Ready for Profile Save',
+            description: 'Extracted information has been updated in the form fields. Save your profile to upload the new resume.',
           });
         } catch (error) {
           console.error('Error parsing resume:', error);
           toast({
             title: 'Error Parsing Resume',
-            description: 'Could not parse the resume. Please try again or ensure it is a valid PDF.',
+            description: 'Could not parse the resume. Please ensure it is a valid PDF.',
             variant: 'destructive',
           });
-          setParsedData(null);
+          setParsedDataDisplay(null);
         } finally {
           setIsParsing(false);
         }
@@ -131,8 +132,8 @@ export function ResumeUploadForm({ onResumeParsed, initialData }: ResumeUploadFo
       setIsUploading(false);
       console.error('Error processing file upload:', error);
       toast({
-        title: 'Upload Failed',
-        description: 'An unexpected error occurred during upload.',
+        title: 'Processing Failed',
+        description: 'An unexpected error occurred during processing.',
         variant: 'destructive',
       });
     }
@@ -142,11 +143,11 @@ export function ResumeUploadForm({ onResumeParsed, initialData }: ResumeUploadFo
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center">
-          <FileText className="mr-2 h-6 w-6 text-primary" />
-          Upload Your Resume
+          <FileText className="mr-2 h-6 w-6 text-primary" data-ai-hint="resume document"/>
+          Upload & Parse Resume
         </CardTitle>
         <CardDescription>
-          Upload your PDF resume. We'll use AI to help populate your profile. Max 5MB.
+          Upload a new PDF resume (max 5MB). AI will extract details to help populate your profile. The new resume file will be uploaded when you save your main profile.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -155,13 +156,13 @@ export function ResumeUploadForm({ onResumeParsed, initialData }: ResumeUploadFo
             <FormField
               control={form.control}
               name="resume"
-              render={({ field }) => (
+              render={({ field }) => ( // field is not directly used here, onChange is manual
                 <FormItem>
-                  <FormLabel htmlFor="resume-upload" className="sr-only">Resume</FormLabel>
+                  <FormLabel htmlFor="resume-upload-profile" className="sr-only">Resume</FormLabel>
                   <FormControl>
                     <div className="flex items-center space-x-2">
                        <Input
-                        id="resume-upload"
+                        id="resume-upload-profile"
                         type="file"
                         accept="application/pdf"
                         onChange={handleFileChange}
@@ -169,7 +170,7 @@ export function ResumeUploadForm({ onResumeParsed, initialData }: ResumeUploadFo
                         disabled={isUploading || isParsing}
                       />
                       <label
-                        htmlFor="resume-upload"
+                        htmlFor="resume-upload-profile"
                         className={`flex items-center justify-center w-full px-4 py-2 border-2 border-dashed rounded-md cursor-pointer
                                     hover:border-primary transition-colors
                                     ${isUploading || isParsing ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -191,7 +192,7 @@ export function ResumeUploadForm({ onResumeParsed, initialData }: ResumeUploadFo
               <div className="space-y-2">
                 <Progress value={uploadProgress} className="w-full" />
                 <p className="text-sm text-muted-foreground text-center">
-                  {isUploading ? `Uploading: ${uploadProgress}%` : 'Parsing resume with AI...'}
+                  {isUploading ? `Processing: ${uploadProgress}%` : 'Parsing resume with AI...'}
                 </p>
               </div>
             )}
@@ -202,32 +203,33 @@ export function ResumeUploadForm({ onResumeParsed, initialData }: ResumeUploadFo
                   <Sparkles className="mr-2 h-4 w-4 animate-spin" /> Parsing...
                 </>
               ) : isUploading ? (
-                'Uploading...'
+                'Processing...'
               ) : (
                 <>
-                  <UploadCloud className="mr-2 h-4 w-4" /> Upload & Parse Resume
+                  <Sparkles className="mr-2 h-4 w-4" /> Process Resume
                 </>
               )}
             </Button>
           </form>
         </Form>
 
-        {parsedData && (
+        {parsedDataDisplay && (
           <div className="mt-8 space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center"><Sparkles className="mr-2 h-5 w-5 text-primary" /> AI Extracted Information</CardTitle>
+                <CardTitle className="flex items-center"><Sparkles className="mr-2 h-5 w-5 text-primary" /> AI Extracted Information (Preview)</CardTitle>
+                <CardDescription>This information has been used to populate the fields above. It will be saved with your profile.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
                   <h3 className="text-lg font-semibold text-foreground">Experience Summary</h3>
-                  <p className="text-sm text-muted-foreground whitespace-pre-wrap">{parsedData.experience || 'No experience summary extracted.'}</p>
+                  <p className="text-sm text-muted-foreground whitespace-pre-wrap">{parsedDataDisplay.experience || 'No experience summary extracted.'}</p>
                 </div>
                 <div>
                   <h3 className="text-lg font-semibold text-foreground">Skills</h3>
-                  {parsedData.skills && parsedData.skills.length > 0 ? (
+                  {parsedDataDisplay.skills && parsedDataDisplay.skills.length > 0 ? (
                     <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
-                      {parsedData.skills.map((skill, index) => (
+                      {parsedDataDisplay.skills.map((skill, index) => (
                         <li key={index}>{skill}</li>
                       ))}
                     </ul>
@@ -235,6 +237,12 @@ export function ResumeUploadForm({ onResumeParsed, initialData }: ResumeUploadFo
                     <p className="text-sm text-muted-foreground">No skills extracted.</p>
                   )}
                 </div>
+                 {parsedDataDisplay.education && (
+                    <div>
+                    <h3 className="text-lg font-semibold text-foreground">Education</h3>
+                    <p className="text-sm text-muted-foreground whitespace-pre-wrap">{parsedDataDisplay.education || 'No education information extracted.'}</p>
+                    </div>
+                )}
               </CardContent>
             </Card>
           </div>

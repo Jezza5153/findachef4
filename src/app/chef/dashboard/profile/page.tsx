@@ -22,7 +22,7 @@ import { useState, useEffect } from 'react';
 import type { ParseResumeOutput, ChefProfile as ChefProfileType } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
-import { UserCircle, Save, Edit3, Briefcase, Lightbulb, UploadCloud, GraduationCap, Images, Download, Trash2 } from 'lucide-react';
+import { UserCircle, Save, Edit3, Briefcase, Lightbulb, UploadCloud, GraduationCap, Images, Download, Trash2, Loader2 } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -34,24 +34,29 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { useAuth } from '@/context/AuthContext';
+import { db, storage } from '@/lib/firebase';
+import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
+import { updateProfile as updateAuthProfile } from 'firebase/auth';
 
-// Mock current chef data
-const currentChefData: ChefProfileType = {
-  id: 'chef123',
-  name: 'Julia Child',
-  email: 'julia.child@example.com',
-  tagline: 'Master of French Cuisine',
-  bio: 'Passionate chef with over 10 years of experience in French cuisine. Loves to create memorable dining experiences.',
-  specialties: ['French Cuisine', 'Pastry', 'Classic European'],
-  profilePictureUrl: 'https://placehold.co/150x150.png',
-  experienceSummary: "Initial summary from a previous resume perhaps.",
-  education: "Graduated from Le Cordon Bleu, Paris.",
-  skills: ["Knife Skills", "Menu Planning", "Event Catering"],
-  portfolioItem1Url: 'https://placehold.co/300x200.png',
-  portfolioItem1Caption: 'Signature Beef Bourguignon',
-  portfolioItem2Url: 'https://placehold.co/300x200.png',
-  portfolioItem2Caption: 'Delicate Chocolate Soufflé',
-  resumeFileUrl: '#', // Placeholder for actual resume URL
+// Mock current chef data - will be replaced by fetched data
+const initialChefData: ChefProfileType = {
+  id: '', // Will be set from auth user
+  name: '',
+  email: '',
+  tagline: '',
+  bio: '',
+  specialties: [],
+  profilePictureUrl: '',
+  experienceSummary: "",
+  education: "",
+  skills: [],
+  portfolioItem1Url: '',
+  portfolioItem1Caption: '',
+  portfolioItem2Url: '',
+  portfolioItem2Caption: '',
+  resumeFileUrl: '',
 };
 
 const chefProfileSchema = z.object({
@@ -60,7 +65,7 @@ const chefProfileSchema = z.object({
   tagline: z.string().max(100, "Tagline cannot exceed 100 characters.").optional(),
   bio: z.string().min(20, {message: 'Bio must be at least 20 characters.'}).max(500, {message: "Bio cannot exceed 500 characters."}),
   specialties: z.string().min(1, { message: 'Please list at least one specialty.' }), // Comma-separated
-  profilePicture: z.instanceof(File).optional()
+  profilePictureFile: z.instanceof(File).optional() // For new file upload
     .refine(file => !file || file.size <= 2 * 1024 * 1024, `Max file size is 2MB.`)
     .refine(file => !file || ['image/jpeg', 'image/png', 'image/webp'].includes(file.type), `Only JPG, PNG, WEBP files are allowed.`),
   experienceSummary: z.string().optional(),
@@ -70,126 +75,226 @@ const chefProfileSchema = z.object({
   portfolioItem1Caption: z.string().max(150, "Caption for item 1 cannot exceed 150 characters.").optional(),
   portfolioItem2Url: z.string().url({ message: "Invalid URL for portfolio item 2." }).optional().or(z.literal('')),
   portfolioItem2Caption: z.string().max(150, "Caption for item 2 cannot exceed 150 characters.").optional(),
+  // resumeFileUrl is managed via file upload, not a direct form field for URL input
 });
 
 type ChefProfileFormValues = z.infer<typeof chefProfileSchema>;
 
 export default function ChefProfilePage() {
-  const [chefData, setChefData] = useState<ChefProfileType>(currentChefData);
-  const [profilePicturePreview, setProfilePicturePreview] = useState<string | null>(chefData.profilePictureUrl || null);
+  const { user, loading: authLoading } = useAuth();
+  const [chefData, setChefData] = useState<ChefProfileType>(initialChefData);
+  const [profilePicturePreview, setProfilePicturePreview] = useState<string | null>(null);
+  const [newProfilePictureFile, setNewProfilePictureFile] = useState<File | null>(null);
+  const [newResumeFile, setNewResumeFile] = useState<File | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
 
   const form = useForm<ChefProfileFormValues>({
     resolver: zodResolver(chefProfileSchema),
-    defaultValues: {
-      name: chefData.name,
-      email: chefData.email,
-      tagline: chefData.tagline || '',
-      bio: chefData.bio,
-      specialties: chefData.specialties.join(', '),
-      experienceSummary: chefData.experienceSummary,
-      education: chefData.education || '',
-      skills: chefData.skills?.join(', '),
-      portfolioItem1Url: chefData.portfolioItem1Url || '',
-      portfolioItem1Caption: chefData.portfolioItem1Caption || '',
-      portfolioItem2Url: chefData.portfolioItem2Url || '',
-      portfolioItem2Caption: chefData.portfolioItem2Caption || '',
-    },
+    defaultValues: initialChefData,
   });
 
   useEffect(() => {
-    form.reset({
-      name: chefData.name,
-      email: chefData.email,
-      tagline: chefData.tagline || '',
-      bio: chefData.bio,
-      specialties: chefData.specialties.join(', '),
-      experienceSummary: chefData.experienceSummary,
-      education: chefData.education || '',
-      skills: chefData.skills?.join(', '),
-      portfolioItem1Url: chefData.portfolioItem1Url || '',
-      portfolioItem1Caption: chefData.portfolioItem1Caption || '',
-      portfolioItem2Url: chefData.portfolioItem2Url || '',
-      portfolioItem2Caption: chefData.portfolioItem2Caption || '',
-    });
-    setProfilePicturePreview(chefData.profilePictureUrl || null);
-  }, [chefData, form]);
+    const fetchChefProfile = async () => {
+      if (user) {
+        setIsLoading(true);
+        const userDocRef = doc(db, "users", user.uid);
+        try {
+          const docSnap = await getDoc(userDocRef);
+          if (docSnap.exists()) {
+            const data = docSnap.data() as ChefProfileType;
+            setChefData(data);
+            form.reset({
+              name: data.name || '',
+              email: data.email || user.email || '',
+              tagline: data.tagline || '',
+              bio: data.bio || '',
+              specialties: data.specialties?.join(', ') || '',
+              experienceSummary: data.experienceSummary || '',
+              education: data.education || '',
+              skills: data.skills?.join(', ') || '',
+              portfolioItem1Url: data.portfolioItem1Url || '',
+              portfolioItem1Caption: data.portfolioItem1Caption || '',
+              portfolioItem2Url: data.portfolioItem2Url || '',
+              portfolioItem2Caption: data.portfolioItem2Caption || '',
+            });
+            setProfilePicturePreview(data.profilePictureUrl || user.photoURL || null);
+          } else {
+            // Profile doesn't exist, initialize form with auth data if available
+            form.reset({
+              name: user.displayName || '',
+              email: user.email || '',
+            });
+            setProfilePicturePreview(user.photoURL || null);
+            toast({ title: "Welcome!", description: "Please complete your chef profile.", variant: "default" });
+          }
+        } catch (error) {
+          console.error("Error fetching chef profile:", error);
+          toast({ title: "Error", description: "Could not load your profile.", variant: "destructive" });
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    };
 
-
-  const handleResumeParsed = (data: ParseResumeOutput) => {
-    setChefData(prev => ({
-      ...prev,
-      experienceSummary: data.experience,
-      skills: data.skills,
-      education: data.education || prev.education, // Update education if provided
-    }));
-    form.setValue('experienceSummary', data.experience);
-    form.setValue('skills', data.skills.join(', '));
-    if (data.education) {
-      form.setValue('education', data.education);
+    if (!authLoading && user) {
+      fetchChefProfile();
+    } else if (!authLoading && !user) {
+      // Should be handled by layout redirect, but good to be safe
+      setIsLoading(false);
     }
+  }, [user, authLoading, form, toast]);
+
+
+  const handleResumeProcessed = (data: { parsedData: ParseResumeOutput; file: File }) => {
+    form.setValue('experienceSummary', data.parsedData.experience || '', { shouldValidate: true });
+    form.setValue('skills', data.parsedData.skills?.join(', ') || '', { shouldValidate: true });
+    if (data.parsedData.education) {
+      form.setValue('education', data.parsedData.education, { shouldValidate: true });
+    }
+    setNewResumeFile(data.file); // Stage the new resume file for upload
     toast({
-        title: "Profile Updated from Resume",
-        description: "Your experience, skills, and education have been updated."
-    })
+        title: "Resume Processed",
+        description: "Resume details populated. Save profile to upload the new file."
+    });
   };
 
   const handleProfilePictureChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      form.setValue('profilePicture', file);
+      form.setValue('profilePictureFile', file, {shouldValidate: true}); // Validate file
       const reader = new FileReader();
       reader.onloadend = () => {
         setProfilePicturePreview(reader.result as string);
       };
       reader.readAsDataURL(file);
-    } else {
-      form.setValue('profilePicture', undefined);
-      setProfilePicturePreview(chefData.profilePictureUrl || null);
+      setNewProfilePictureFile(file);
     }
   };
 
-  const onSubmit = (data: ChefProfileFormValues) => {
-    console.log('Chef Profile Update Data:', data);
-    // Simulate API call to update profile
-    setChefData(prev => ({
-      ...prev,
-      name: data.name,
-      email: data.email,
-      tagline: data.tagline,
-      bio: data.bio,
-      specialties: data.specialties.split(',').map(s => s.trim()),
-      experienceSummary: data.experienceSummary,
-      education: data.education,
-      skills: data.skills?.split(',').map(s => s.trim()),
-      profilePictureUrl: profilePicturePreview || prev.profilePictureUrl,
-      portfolioItem1Url: data.portfolioItem1Url,
-      portfolioItem1Caption: data.portfolioItem1Caption,
-      portfolioItem2Url: data.portfolioItem2Url,
-      portfolioItem2Caption: data.portfolioItem2Caption,
-    }));
+  const onSubmit = async (data: ChefProfileFormValues) => {
+    if (!user) {
+      toast({ title: "Error", description: "You must be logged in to update your profile.", variant: "destructive" });
+      return;
+    }
+    setIsSaving(true);
 
-    toast({
-      title: 'Profile Updated Successfully',
-      description: 'Your chef profile has been saved.',
-    });
+    let profilePicUrl = chefData.profilePictureUrl || user.photoURL; // Keep existing if no new one
+    let resumeUrl = chefData.resumeFileUrl; // Keep existing if no new one
+
+    try {
+      // 1. Upload new profile picture if one is staged
+      if (newProfilePictureFile) {
+        const fileExtension = newProfilePictureFile.name.split('.').pop();
+        const profilePicRef = storageRef(storage, `users/${user.uid}/profilePicture.${fileExtension}`);
+        const uploadTask = uploadBytesResumable(profilePicRef, newProfilePictureFile);
+        
+        await new Promise<void>((resolve, reject) => {
+          uploadTask.on('state_changed', 
+            (snapshot) => { /* Optional: handle progress */ },
+            (error) => { console.error("Profile pic upload error", error); reject(error); },
+            async () => {
+              profilePicUrl = await getDownloadURL(uploadTask.snapshot.ref);
+              resolve();
+            }
+          );
+        });
+      }
+
+      // 2. Upload new resume file if one is staged
+      if (newResumeFile) {
+        // Assuming PDF, can add more robust extension handling
+        const resumeRef = storageRef(storage, `users/${user.uid}/resume.pdf`); 
+        const resumeUploadTask = uploadBytesResumable(resumeRef, newResumeFile);
+
+        await new Promise<void>((resolve, reject) => {
+          resumeUploadTask.on('state_changed',
+            (snapshot) => { /* Optional: handle progress */ },
+            (error) => { console.error("Resume upload error", error); reject(error); },
+            async () => {
+              resumeUrl = await getDownloadURL(resumeUploadTask.snapshot.ref);
+              resolve();
+            }
+          );
+        });
+      }
+
+      // 3. Prepare data for Firestore
+      const updatedProfileData: Partial<ChefProfileType> = {
+        name: data.name,
+        // email: data.email, // Email usually shouldn't be changed directly here
+        tagline: data.tagline,
+        bio: data.bio,
+        specialties: data.specialties.split(',').map(s => s.trim()).filter(s => s),
+        profilePictureUrl: profilePicUrl,
+        experienceSummary: data.experienceSummary,
+        education: data.education,
+        skills: data.skills?.split(',').map(s => s.trim()).filter(s => s) || [],
+        portfolioItem1Url: data.portfolioItem1Url,
+        portfolioItem1Caption: data.portfolioItem1Caption,
+        portfolioItem2Url: data.portfolioItem2Url,
+        portfolioItem2Caption: data.portfolioItem2Caption,
+        resumeFileUrl: resumeUrl,
+        id: user.uid, // Ensure ID is present
+        email: user.email || data.email, // Ensure email is present
+      };
+
+      // 4. Save profile to Firestore
+      const userDocRef = doc(db, "users", user.uid);
+      await setDoc(userDocRef, updatedProfileData, { merge: true }); // Use setDoc with merge to create or update
+
+      // 5. Update Firebase Auth user profile (displayName, photoURL)
+      if (user.displayName !== data.name || (profilePicUrl && user.photoURL !== profilePicUrl)) {
+        await updateAuthProfile(user, {
+          displayName: data.name,
+          photoURL: profilePicUrl,
+        });
+      }
+      
+      // 6. Update local state and form
+      setChefData(prev => ({ ...prev, ...updatedProfileData } as ChefProfileType));
+      setNewProfilePictureFile(null); // Clear staged file
+      setNewResumeFile(null); // Clear staged file
+      // form.reset(updatedProfileData); // Reset form with new values, might be redundant if setChefData triggers re-render
+
+      toast({
+        title: 'Profile Updated Successfully',
+        description: 'Your chef profile has been saved.',
+      });
+
+    } catch (error) {
+      console.error('Error updating profile:', error);
+      toast({
+        title: 'Update Failed',
+        description: 'Could not save your profile. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleDeleteAccount = () => {
-    // Simulate account deletion request
     toast({
       title: 'Account Deletion Request Submitted',
       description: 'Your request to delete your account has been received and will be processed according to our data retention policy.',
       duration: 7000,
     });
-    // In a real app, this would trigger backend processes and likely log the user out.
   };
+
+  if (isLoading || authLoading) {
+    return <div className="flex h-screen items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /> Loading Profile...</div>;
+  }
+  if (!user) {
+     return <div className="flex h-screen items-center justify-center">Please log in to view your profile.</div>;
+  }
 
   return (
     <div className="space-y-8">
       <Card className="shadow-lg">
         <CardHeader>
-          <CardTitle className="text-2xl font-bold flex items-center"><UserCircle className="mr-3 h-7 w-7 text-primary" /> Your Chef Profile</CardTitle>
+          <CardTitle className="text-2xl font-bold flex items-center"><UserCircle className="mr-3 h-7 w-7 text-primary" data-ai-hint="user profile" /> Your Chef Profile</CardTitle>
           <CardDescription>Manage your public-facing profile information, portfolio, and resume.</CardDescription>
         </CardHeader>
         <CardContent>
@@ -199,16 +304,17 @@ export default function ChefProfilePage() {
                 <div className="md:col-span-1 flex flex-col items-center">
                   <Image
                     src={profilePicturePreview || "https://placehold.co/150x150.png"}
-                    alt={chefData.name}
+                    alt={form.getValues('name') || "Chef"}
                     width={150}
                     height={150}
                     className="rounded-full object-cover shadow-md mb-4"
                     data-ai-hint="chef portrait"
+                    key={profilePicturePreview} // Force re-render if URL changes
                   />
                    <FormField
                       control={form.control}
-                      name="profilePicture"
-                      render={({ field }) => (
+                      name="profilePictureFile" // Control the file input
+                      render={() => ( // field prop not directly used for input type file custom handler
                         <FormItem className="w-full">
                           <FormControl>
                             <>
@@ -218,8 +324,9 @@ export default function ChefProfilePage() {
                                 onChange={handleProfilePictureChange}
                                 className="hidden"
                                 id="profilePictureUpdate"
+                                disabled={isSaving}
                               />
-                              <Button type="button" variant="outline" asChild className="w-full">
+                              <Button type="button" variant="outline" asChild className="w-full" disabled={isSaving}>
                                 <label htmlFor="profilePictureUpdate" className="cursor-pointer flex items-center justify-center">
                                   <UploadCloud className="mr-2 h-4 w-4" /> Change Photo
                                 </label>
@@ -239,7 +346,7 @@ export default function ChefProfilePage() {
                       <FormItem>
                         <FormLabel>Full Name</FormLabel>
                         <FormControl>
-                          <Input placeholder="e.g., Julia Child" {...field} />
+                          <Input placeholder="e.g., Julia Child" {...field} disabled={isSaving} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -252,7 +359,7 @@ export default function ChefProfilePage() {
                       <FormItem>
                         <FormLabel>Email Address</FormLabel>
                         <FormControl>
-                          <Input type="email" placeholder="you@example.com" {...field} readOnly disabled // Email usually not editable after signup
+                          <Input type="email" placeholder="you@example.com" {...field} readOnly disabled 
                           />
                         </FormControl>
                         <FormMessage />
@@ -266,7 +373,7 @@ export default function ChefProfilePage() {
                       <FormItem>
                         <FormLabel>Tagline / Professional Title</FormLabel>
                         <FormControl>
-                          <Input placeholder="e.g., Master of French Cuisine, Private Chef" {...field} />
+                          <Input placeholder="e.g., Master of French Cuisine, Private Chef" {...field} disabled={isSaving} />
                         </FormControl>
                         <FormDescription>A short, catchy title for your profile.</FormDescription>
                         <FormMessage />
@@ -287,6 +394,7 @@ export default function ChefProfilePage() {
                         placeholder="Tell us about your culinary passion..."
                         className="min-h-[100px]"
                         {...field}
+                        disabled={isSaving}
                       />
                     </FormControl>
                     <FormDescription>This will be shown on your public profile. Max 500 characters.</FormDescription>
@@ -301,7 +409,7 @@ export default function ChefProfilePage() {
                   <FormItem>
                     <FormLabel>Specialties / Cuisine Types (Tags)</FormLabel>
                     <FormControl>
-                      <Input placeholder="e.g., Italian, French, Pastry" {...field} />
+                      <Input placeholder="e.g., Italian, French, Pastry" {...field} disabled={isSaving} />
                     </FormControl>
                     <FormDescription>Comma-separated list of your culinary specialties.</FormDescription>
                     <FormMessage />
@@ -310,7 +418,7 @@ export default function ChefProfilePage() {
               />
 
               <div className="pt-4 border-t">
-                <h3 className="text-lg font-semibold mb-3 flex items-center"><GraduationCap className="mr-2 h-5 w-5 text-primary" /> Education</h3>
+                <h3 className="text-lg font-semibold mb-3 flex items-center"><GraduationCap className="mr-2 h-5 w-5 text-primary" data-ai-hint="education cap" /> Education</h3>
                  <FormField
                     control={form.control}
                     name="education"
@@ -321,6 +429,7 @@ export default function ChefProfilePage() {
                             placeholder="Your education summary will appear here (from resume or manual input)..."
                             className="min-h-[80px] bg-muted/30"
                             {...field}
+                            disabled={isSaving}
                           />
                         </FormControl>
                         <FormDescription>This field can be auto-filled by resume parsing or edited manually.</FormDescription>
@@ -331,7 +440,7 @@ export default function ChefProfilePage() {
               </div>
 
               <div className="pt-4 border-t">
-                <h3 className="text-lg font-semibold mb-3 flex items-center"><Briefcase className="mr-2 h-5 w-5 text-primary" /> Experience Summary (from Resume)</h3>
+                <h3 className="text-lg font-semibold mb-3 flex items-center"><Briefcase className="mr-2 h-5 w-5 text-primary" data-ai-hint="work briefcase" /> Experience Summary</h3>
                  <FormField
                     control={form.control}
                     name="experienceSummary"
@@ -342,6 +451,7 @@ export default function ChefProfilePage() {
                             placeholder="Your professional experience summary will appear here after resume parsing..."
                             className="min-h-[120px] bg-muted/30"
                             {...field}
+                            disabled={isSaving}
                           />
                         </FormControl>
                         <FormDescription>This field can be auto-filled by resume parsing or edited manually.</FormDescription>
@@ -352,7 +462,7 @@ export default function ChefProfilePage() {
               </div>
 
               <div className="pt-4 border-t">
-                <h3 className="text-lg font-semibold mb-3 flex items-center"><Lightbulb className="mr-2 h-5 w-5 text-primary" /> Skills (from Resume)</h3>
+                <h3 className="text-lg font-semibold mb-3 flex items-center"><Lightbulb className="mr-2 h-5 w-5 text-primary" data-ai-hint="idea lightbulb" /> Skills</h3>
                  <FormField
                     control={form.control}
                     name="skills"
@@ -363,6 +473,7 @@ export default function ChefProfilePage() {
                             placeholder="Your skills will appear here, comma-separated..."
                             className="bg-muted/30"
                             {...field}
+                            disabled={isSaving}
                            />
                         </FormControl>
                         <FormDescription>This field can be auto-filled by resume parsing or edited manually. Comma-separated.</FormDescription>
@@ -371,9 +482,33 @@ export default function ChefProfilePage() {
                     )}
                   />
               </div>
+              
+              <div className="pt-4 border-t">
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full sm:w-auto mb-4"
+                    onClick={() => {
+                        if (chefData.resumeFileUrl) {
+                        window.open(chefData.resumeFileUrl, '_blank');
+                        } else {
+                        toast({ title: "Resume Not Available", description: "No resume file URL is currently set for download.", variant: "destructive" });
+                        }
+                    }}
+                    disabled={!chefData.resumeFileUrl || isSaving}
+                    >
+                    <Download className="mr-2 h-4 w-4" /> Download Current Resume
+                </Button>
+                <ResumeUploadForm
+                    onResumeParsed={handleResumeProcessed}
+                    // initialData is for display within the form, not used to prefill parent form
+                />
+              </div>
+
 
               <div className="pt-4 border-t">
-                <h3 className="text-lg font-semibold mb-4 flex items-center"><Images className="mr-2 h-5 w-5 text-primary" /> Portfolio (Max 2 items)</h3>
+                <h3 className="text-lg font-semibold mb-4 flex items-center"><Images className="mr-2 h-5 w-5 text-primary" data-ai-hint="gallery images" /> Portfolio (Max 2 items)</h3>
                 <div className="space-y-6">
                   {[1, 2].map(itemNum => (
                     <div key={itemNum} className="p-4 border rounded-md shadow-sm bg-muted/20 space-y-4">
@@ -384,7 +519,7 @@ export default function ChefProfilePage() {
                         render={({ field }) => (
                           <FormItem>
                             <FormLabel>Image URL</FormLabel>
-                            <FormControl><Input placeholder="https://example.com/your-dish.jpg" {...field} /></FormControl>
+                            <FormControl><Input placeholder="https://example.com/your-dish.jpg" {...field} disabled={isSaving} /></FormControl>
                             <FormMessage />
                           </FormItem>
                         )}
@@ -406,7 +541,7 @@ export default function ChefProfilePage() {
                         render={({ field }) => (
                           <FormItem>
                             <FormLabel>Caption (Optional)</FormLabel>
-                            <FormControl><Input placeholder="e.g., My Signature Dish" {...field} /></FormControl>
+                            <FormControl><Input placeholder="e.g., My Signature Dish" {...field} disabled={isSaving} /></FormControl>
                             <FormMessage />
                           </FormItem>
                         )}
@@ -416,25 +551,10 @@ export default function ChefProfilePage() {
                 </div>
               </div>
 
-              <div className="pt-6 border-t flex flex-col sm:flex-row items-center justify-between gap-4">
-                <Button type="submit" size="lg" className="w-full sm:w-auto">
-                  <Save className="mr-2 h-5 w-5" /> Save Profile Changes
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="lg"
-                  className="w-full sm:w-auto"
-                  onClick={() => {
-                    if (chefData.resumeFileUrl && chefData.resumeFileUrl !== '#') {
-                      window.open(chefData.resumeFileUrl, '_blank');
-                    } else {
-                      toast({ title: "Resume Not Available", description: "No resume file URL is currently set for download.", variant: "destructive" });
-                    }
-                  }}
-                  disabled={!chefData.resumeFileUrl || chefData.resumeFileUrl === '#'}
-                >
-                  <Download className="mr-2 h-5 w-5" /> Download Resume
+              <div className="pt-6 border-t flex flex-col sm:flex-row items-center justify-center">
+                <Button type="submit" size="lg" className="w-full sm:w-auto" disabled={isSaving}>
+                  {isSaving ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Save className="mr-2 h-5 w-5" />}
+                  {isSaving ? 'Saving...' : 'Save Profile Changes'}
                 </Button>
               </div>
             </form>
@@ -443,7 +563,7 @@ export default function ChefProfilePage() {
          <CardFooter className="border-t pt-6">
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button variant="destructive" className="w-full sm:w-auto">
+              <Button variant="destructive" className="w-full sm:w-auto" disabled={isSaving}>
                 <Trash2 className="mr-2 h-4 w-4" /> Delete My Account
               </Button>
             </AlertDialogTrigger>
@@ -465,17 +585,6 @@ export default function ChefProfilePage() {
           </AlertDialog>
         </CardFooter>
       </Card>
-
-      <ResumeUploadForm
-        onResumeParsed={handleResumeParsed}
-        initialData={{
-          experience: chefData.experienceSummary || "",
-          skills: chefData.skills || [],
-          education: chefData.education || ""
-        }}
-      />
     </div>
   );
 }
-
-    
