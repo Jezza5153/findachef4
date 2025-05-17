@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { DashboardLayout, type NavItem } from '@/components/dashboard-layout';
 import { LayoutDashboard, UserCircle, Send, CalendarCheck2, MessageSquare, Utensils, CalendarSearch } from 'lucide-react';
-import { useAuth } from '@/context/AuthContext'; // Import useAuth
+import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 
 const customerNavItems: NavItem[] = [
@@ -24,47 +24,54 @@ export default function CustomerDashboardLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const { user, loading: authLoading } = useAuth(); // Use AuthContext
+  const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
-  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [roleChecked, setRoleChecked] = useState(false);
 
   useEffect(() => {
-    if (!authLoading) {
-      setCheckingAuth(false);
-      if (!user) {
-        router.push('/login');
-        return;
-      }
-      // Temporary role check until Firestore profiles are in place
-      const userRole = localStorage.getItem('userRole');
-      if (user && userRole && userRole !== 'customer') {
-        toast({
-          title: 'Access Denied',
-          description: 'This dashboard is for customers.',
-          variant: 'destructive',
-        });
-        // Redirect to a generic page or their own dashboard if applicable
-        router.push('/login'); 
-        return;
-      }
+    if (authLoading) {
+      // Still waiting for Firebase to determine authentication state
+      return;
     }
+
+    if (!user) {
+      // No Firebase user, redirect to login
+      router.push('/login');
+      setRoleChecked(true); // No further checks needed
+      return;
+    }
+
+    // Firebase user exists, now check role from localStorage (temporary)
+    const userRole = localStorage.getItem('userRole');
+    if (userRole && userRole !== 'customer') {
+      toast({
+        title: 'Access Denied',
+        description: 'This dashboard is for customers.',
+        variant: 'destructive',
+      });
+      router.push('/login'); 
+    }
+    setRoleChecked(true); // Role check complete
+
   }, [user, authLoading, router, toast]);
 
-  if (authLoading || checkingAuth) {
+  if (authLoading || !roleChecked) {
     return <div className="flex h-screen items-center justify-center">Loading customer dashboard...</div>;
   }
-
-  if (!user) {
-    // Should have been redirected by useEffect, but as a fallback
-    return null;
+  
+  if (!user && !authLoading && roleChecked) {
+    // This case handles if user becomes null after initial load but before redirect in useEffect
+    // This should be rare if useEffect redirect is quick
+    return <div className="flex h-screen items-center justify-center">Redirecting to login...</div>;
   }
 
+
+  // If we reach here, user is authenticated and role check (if applicable) has passed
   return (
     <DashboardLayout 
       navItems={customerNavItems}
-      userName="Customer Name" // Placeholder, will be updated by DashboardLayout from localStorage or context
-      userRole="Valued Customer" // Placeholder
-      userAvatarUrl="https://placehold.co/100x100.png" 
+      // userName will be handled by DashboardLayout from AuthContext or localStorage
+      // userRole will be handled by DashboardLayout
     >
       {children}
     </DashboardLayout>

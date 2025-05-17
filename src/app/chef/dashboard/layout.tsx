@@ -6,19 +6,21 @@ import { useRouter } from 'next/navigation';
 import { DashboardLayout, type NavItem } from '@/components/dashboard-layout';
 import { LayoutDashboard, NotebookText, UserCircle, MessageSquare, CalendarDays, FileText, Users, ShoppingBag, LayoutGrid, ShieldAlert } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/context/AuthContext'; // Import useAuth
+import { useAuth } from '@/context/AuthContext';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { auth } from '@/lib/firebase'; // Import auth for logout
+import { signOut } from 'firebase/auth'; // Import signOut
 
 const chefNavItems: NavItem[] = [
   { href: '/chef/dashboard', label: 'Overview', icon: <LayoutDashboard />, matchExact: true },
   { href: '/chef/dashboard/profile', label: 'My Profile', icon: <UserCircle /> },
   { href: '/chef/dashboard/requests', label: 'Requests', icon: <MessageSquare /> },
-  { href: '/chef/dashboard/calendar', label: 'Calendar', icon: <CalendarDays /> },
-  { href: '/chef/dashboard/wall', label: 'The Wall', icon: <LayoutGrid /> },
+  { href: '/chef/dashboard/calendar', label: 'Calendar & Events', icon: <CalendarDays /> },
+  { href: '/chef/dashboard/wall', label: 'The Chef\'s Wall', icon: <LayoutGrid /> },
   { href: '/chef/dashboard/menus', label: 'Menus', icon: <NotebookText /> },
   { href: '/chef/dashboard/shopping-list', label: 'Shopping List', icon: <ShoppingBag /> },
-  { href: '/chef/dashboard/chefs', label: 'Chefs', icon: <Users /> },
+  { href: '/chef/dashboard/chefs', label: 'Chef Directory', icon: <Users /> },
   { href: '/chef/dashboard/receipts', label: 'Receipts & Costs', icon: <FileText /> },
 ];
 
@@ -29,54 +31,51 @@ export default function ChefDashboardLayout({
 }) {
   const router = useRouter();
   const { toast } = useToast();
-  const { user, loading: authLoading } = useAuth(); // Use AuthContext
-  const [isApproved, setIsApproved] = useState<boolean | null>(null);
-  const [checkingAuth, setCheckingAuth] = useState(true);
+  const { user, loading: authLoading } = useAuth();
+  
+  const [chefStatusLoading, setChefStatusLoading] = useState(true);
+  const [isApproved, setIsApproved] = useState<boolean>(false); // Default to false
 
   useEffect(() => {
-    if (!authLoading) {
-      setCheckingAuth(false);
-      if (!user) {
-        router.push('/login');
-        return;
-      }
-
-      // Role and approval check (still using localStorage temporarily for these specifics)
-      const userRole = localStorage.getItem('userRole');
-      if (userRole !== 'chef') {
-        toast({
-            title: 'Access Denied',
-            description: 'You must be logged in as a chef to access this page.',
-            variant: 'destructive',
-        });
-        router.push('/login'); // Or a more appropriate page
-        return;
-      }
-
-      const chefApprovedStatus = localStorage.getItem('isChefApproved');
-      if (chefApprovedStatus === 'false') {
-        setIsApproved(false);
-      } else if (chefApprovedStatus === 'true') {
-        setIsApproved(true);
-      } else {
-        // If not set (e.g., direct navigation after login but before localStorage fully syncs or unexpected state)
-        // Treat as not approved or handle as an error. For now, show pending.
-        setIsApproved(false); 
-      }
+    if (authLoading) {
+      // Still waiting for Firebase to determine authentication state
+      return;
     }
+
+    if (!user) {
+      // No Firebase user, redirect to login
+      router.push('/login');
+      setChefStatusLoading(false); // No further checks needed
+      return;
+    }
+
+    // Firebase user exists, now check role and approval from localStorage (temporary)
+    const userRole = localStorage.getItem('userRole');
+    if (userRole !== 'chef') {
+      toast({
+          title: 'Access Denied',
+          description: 'You must be logged in as a chef to access this page.',
+          variant: 'destructive',
+      });
+      router.push('/login');
+      setChefStatusLoading(false);
+      return;
+    }
+
+    const chefApprovedStatus = localStorage.getItem('isChefApproved');
+    setIsApproved(chefApprovedStatus === 'true');
+    setChefStatusLoading(false); // All checks complete
+    
   }, [user, authLoading, router, toast]);
 
-  if (authLoading || checkingAuth || (user && isApproved === null)) {
-    // Show loading state while auth is resolving or approval status is being checked
+  if (authLoading || chefStatusLoading) {
     return <div className="flex h-screen items-center justify-center">Loading chef dashboard...</div>;
   }
 
-  if (!user) {
-    // Should have been redirected by useEffect, but as a fallback
-    return null; 
-  }
+  // At this point, if user is null or role is not chef, a redirect should have occurred.
+  // If isApproved is false, show the pending approval card.
   
-  if (isApproved === false) {
+  if (!isApproved) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background p-4">
         <Card className="w-full max-w-md text-center shadow-lg">
@@ -94,15 +93,14 @@ export default function ChefDashboardLayout({
             <p className="text-sm text-muted-foreground">
               If you have any questions, please contact support.
             </p>
-             <Button onClick={() => {
+             <Button onClick={async () => {
+                await signOut(auth); // Sign out from Firebase
                 if (typeof window !== 'undefined') {
-                    // Keep Firebase Auth session, but clear local mock role data
                     localStorage.removeItem('userName');
                     localStorage.removeItem('userRole');
                     localStorage.removeItem('isChefApproved');
                     localStorage.removeItem('isChefSubscribed');
                 }
-                // Consider logging out from Firebase as well or redirecting to a generic logged-in landing page
                 router.push('/login'); 
              }}>
                 Back to Login
@@ -113,13 +111,12 @@ export default function ChefDashboardLayout({
     );
   }
 
-  // isApproved is true and user is authenticated
+  // If we reach here, user is an authenticated and approved chef
   return (
     <DashboardLayout 
       navItems={chefNavItems}
-      userName="Chef FullName" // Placeholder, will be updated by DashboardLayout from localStorage or context
-      userRole="Professional Chef" // Placeholder
-      userAvatarUrl="https://placehold.co/100x100.png" 
+      // userName will be handled by DashboardLayout from AuthContext or localStorage
+      // userRole will be handled by DashboardLayout
     >
       {children}
     </DashboardLayout>
