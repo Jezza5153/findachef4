@@ -91,7 +91,7 @@ export interface CustomerRequest {
   eventDate: any; // Firestore Timestamp
   notes?: string;
   customerId: string;
-  status?: 'new' | 'awaiting_customer_response' | 'proposal_sent' | 'chef_declined' | 'chef_accepted' | 'customer_confirmed' | 'booked' | 'cancelled_by_customer';
+  status?: 'new' | 'awaiting_customer_response' | 'proposal_sent' | 'chef_declined' | 'chef_accepted' | 'customer_confirmed' | 'proposal_declined' | 'booked' | 'cancelled_by_customer';
   createdAt?: any; // Firestore Timestamp
   updatedAt?: any; // Firestore Timestamp
   respondingChefIds?: string[];
@@ -100,17 +100,21 @@ export interface CustomerRequest {
     menuTitle: string;
     menuPricePerHead: number;
     chefId: string;
-    chefName: string;
+    chefName: string; // Denormalized for easier display
+    chefAvatarUrl?: string; // Denormalized
     notes?: string;
     proposedAt: any; // Firestore Timestamp
   };
+  declinedChefIds?: string[]; // Optional: to track chefs who declined
 }
 
 export interface RequestMessage {
   id: string; // Firestore document ID
   requestId: string; // ID of the parent CustomerRequest
   senderId: string; // UID of the sender
-  senderRole: 'chef' | 'customer';
+  senderName?: string; // Denormalized sender name
+  senderAvatarUrl?: string; // Denormalized sender avatar
+  senderRole: 'chef' | 'customer' | 'system';
   text: string;
   timestamp: any; // Firestore Timestamp
 }
@@ -305,4 +309,9 @@ export interface Booking {
   chefNotes?: string;
   location?: string;
   qrCodeScannedAt?: any; // Firestore Timestamp for event completion
+}
+
+// Enriched types for UI display
+export interface EnrichedCustomerRequest extends CustomerRequest {
+  proposingChef?: Pick<ChefProfile, 'name' | 'profilePictureUrl'>;
 }
