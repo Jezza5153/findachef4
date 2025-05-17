@@ -5,41 +5,34 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { MenuCard } from '@/components/menu-card';
-import type { Menu, ChefProfile as ChefProfileType } from '@/types';
+import type { Menu, ChefProfile as ChefProfileType, ChefWallEvent } from '@/types'; // Added ChefWallEvent
 import { ArrowRight, CalendarCheck2, Send, UserCircle, Utensils, Search, Sparkles, CalendarSearch, Loader2 } from 'lucide-react';
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, query, where, limit, getDocs, orderBy } from 'firebase/firestore';
+import { collection, query, where, limit, getDocs, orderBy, Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/context/AuthContext';
 
-const myBookedEventsMock = [
+const myBookedEventsMock = [ // This remains mock data as booking system is not yet fully integrated
     { id: 'mbe1', name: 'Birthday Dinner with Chef Julia', date: 'Nov 15, 2024 - 7:00 PM', status: 'Confirmed', image: 'https://placehold.co/100x100.png', dataAiHint: 'dinner party' },
     { id: 'mbe2', name: 'Cooking Class: Pasta Making', date: 'Dec 02, 2024 - 2:00 PM', status: 'Confirmed', image: 'https://placehold.co/100x100.png', dataAiHint: 'cooking class' },
-];
-
-const discoverChefEventsMock = [
-  { id: 'dce1', name: 'Neighborhood BBQ Fest', date: 'Upcoming: Sat, Nov 25', image: 'https://placehold.co/600x400.png' , dataAiHint: 'bbq food fest'},
-  { id: 'dce2', name: 'Exclusive Wine Tasting', date: 'Upcoming: Fri, Dec 1', image: 'https://placehold.co/600x400.png', dataAiHint: 'wine tasting event' },
-  { id: 'dce3', name: 'Farm-to-Table Pop-Up Dinner', date: 'Upcoming: Sat, Dec 9', image: 'https://placehold.co/600x400.png', dataAiHint: 'farm to table' },
 ];
 
 
 export default function CustomerDashboardPage() {
   const [topMenus, setTopMenus] = useState<Menu[]>([]);
   const [featuredChefs, setFeaturedChefs] = useState<ChefProfileType[]>([]);
-  const [myBookedEvents, setMyBookedEvents] = useState(myBookedEventsMock); // Stays mock for now
-  const [discoverChefEvents, setDiscoverChefEvents] = useState(discoverChefEventsMock); // Stays mock for now
+  const [myBookedEvents, setMyBookedEvents] = useState(myBookedEventsMock); 
+  const [discoverChefEvents, setDiscoverChefEvents] = useState<ChefWallEvent[]>([]);
   const [loadingMenus, setLoadingMenus] = useState(true);
   const [loadingChefs, setLoadingChefs] = useState(true);
+  const [loadingDiscoverEvents, setLoadingDiscoverEvents] = useState(true);
   const { user } = useAuth();
   const [userName, setUserName] = useState("Customer");
 
   useEffect(() => {
-    if (user && user.displayName) {
-      setUserName(user.displayName);
-    } else if (user && user.email) {
-      setUserName(user.email.split('@')[0]);
+    if (user) {
+      setUserName(user.displayName || user.email?.split('@')[0] || "Customer");
     }
   }, [user]);
 
@@ -50,11 +43,16 @@ export default function CustomerDashboardPage() {
         const menusQuery = query(
           collection(db, "menus"),
           where("isPublic", "==", true),
-          orderBy("createdAt", "desc"), // Example: order by most recent
-          limit(5)
+          orderBy("createdAt", "desc"), 
+          limit(3) // Reduced to 3 to match event display count
         );
         const querySnapshot = await getDocs(menusQuery);
-        const menusData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Menu));
+        const menusData = querySnapshot.docs.map(doc => ({ 
+            id: doc.id, 
+            ...doc.data(),
+            createdAt: doc.data().createdAt ? (doc.data().createdAt as Timestamp).toDate() : undefined,
+            updatedAt: doc.data().updatedAt ? (doc.data().updatedAt as Timestamp).toDate() : undefined,
+        } as Menu));
         setTopMenus(menusData);
       } catch (error) {
         console.error("Error fetching top menus: ", error);
@@ -69,12 +67,17 @@ export default function CustomerDashboardPage() {
         const chefsQuery = query(
           collection(db, "users"),
           where("role", "==", "chef"),
-          where("isApproved", "==", true), // Only approved chefs
-          // Add orderBy for consistent results or a specific "featured" flag if you implement one
+          where("isApproved", "==", true),
+          orderBy("createdAt", "desc"), // Example ordering
           limit(4) 
         );
         const querySnapshot = await getDocs(chefsQuery);
-        const chefsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ChefProfileType));
+        const chefsData = querySnapshot.docs.map(doc => ({ 
+            id: doc.id, 
+            ...doc.data(),
+            createdAt: doc.data().createdAt ? (doc.data().createdAt as Timestamp).toDate() : undefined,
+            updatedAt: doc.data().updatedAt ? (doc.data().updatedAt as Timestamp).toDate() : undefined,
+        } as ChefProfileType));
         setFeaturedChefs(chefsData);
       } catch (error) {
         console.error("Error fetching featured chefs: ", error);
@@ -83,9 +86,46 @@ export default function CustomerDashboardPage() {
       }
     };
 
+    const fetchDiscoverChefEvents = async () => {
+      setLoadingDiscoverEvents(true);
+      try {
+        const eventsQuery = query(
+          collection(db, "chefWallEvents"),
+          where("isPublic", "==", true),
+          orderBy("createdAt", "desc"),
+          limit(3) 
+        );
+        const querySnapshot = await getDocs(eventsQuery);
+        const eventsData = querySnapshot.docs.map(docSnap => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+          // Ensure eventDateTime is handled correctly if it's a string or Timestamp
+          eventDateTime: docSnap.data().eventDateTime, 
+          createdAt: docSnap.data().createdAt ? (docSnap.data().createdAt as Timestamp).toDate() : undefined,
+          updatedAt: docSnap.data().updatedAt ? (docSnap.data().updatedAt as Timestamp).toDate() : undefined,
+        } as ChefWallEvent));
+        setDiscoverChefEvents(eventsData);
+      } catch (error) {
+        console.error("Error fetching discoverable chef events: ", error);
+      } finally {
+        setLoadingDiscoverEvents(false);
+      }
+    };
+
     fetchTopMenus();
     fetchFeaturedChefs();
+    fetchDiscoverChefEvents();
   }, []);
+
+  const formatEventDateForDisplay = (dateTimeString: string | Timestamp) => {
+    try {
+      const date = dateTimeString instanceof Timestamp ? dateTimeString.toDate() : new Date(dateTimeString);
+      if (isNaN(date.getTime())) return "Invalid Date";
+      return new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+    } catch (e) {
+      return String(dateTimeString); 
+    }
+  };
 
 
   return (
@@ -107,7 +147,7 @@ export default function CustomerDashboardPage() {
         </div>
       </Card>
 
-      {/* My Booked Events */}
+      {/* My Booked Events - Remains Mock for now */}
       <section>
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-semibold flex items-center"><CalendarCheck2 className="mr-3 h-7 w-7 text-primary"/> My Booked Events</h2>
@@ -117,7 +157,7 @@ export default function CustomerDashboardPage() {
         </div>
         {myBookedEvents.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {myBookedEvents.slice(0,5).map(event => (
+                {myBookedEvents.slice(0,3).map(event => ( // Display max 3 mock events
                     <Card key={event.id} className="p-4 flex items-center space-x-4 shadow-md hover:shadow-lg transition-shadow">
                         <Image src={event.image} alt={event.name} width={80} height={80} className="rounded-lg object-cover" data-ai-hint={event.dataAiHint} />
                         <div>
@@ -135,9 +175,10 @@ export default function CustomerDashboardPage() {
                 <Button variant="outline" asChild><Link href="/customer/menus">Explore Menus to Book</Link></Button>
             </Card>
         )}
+         <p className="text-xs text-muted-foreground mt-2 text-center">(My Booked Events section is using placeholder data. Full booking system integration pending.)</p>
       </section>
 
-      {/* Top Menus Section */}
+      {/* Top Menus Section - Already Dynamic */}
       <section>
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-semibold flex items-center"><Utensils className="mr-3 h-7 w-7 text-primary"/> Top Menus You Might Like</h2>
@@ -155,11 +196,11 @@ export default function CustomerDashboardPage() {
             {topMenus.map(menu => <MenuCard key={menu.id} menu={menu} showChefDetails={false} data-ai-hint={menu.dataAiHint} />)}
           </div>
         ) : (
-          <p className="text-muted-foreground text-center">No public menus available right now. Check back soon!</p>
+          <p className="text-muted-foreground text-center py-8">No public menus available right now. Check back soon!</p>
         )}
       </section>
 
-      {/* Discover Chef-Hosted Events Section */}
+      {/* Discover Chef-Hosted Events Section - Now Dynamic */}
       <section>
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-semibold flex items-center"><CalendarSearch className="mr-3 h-7 w-7 text-primary"/>Discover Chef-Hosted Events</h2>
@@ -167,29 +208,44 @@ export default function CustomerDashboardPage() {
             <Link href="/customer/wall">View All Events <ArrowRight className="ml-1 h-4 w-4"/></Link>
           </Button>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {discoverChefEvents.slice(0,5).map(event => (
-            <Card key={event.id} className="overflow-hidden shadow-md hover:shadow-lg transition-shadow group">
-              <Image src={event.image} alt={event.name} width={600} height={300} className="w-full h-48 object-cover group-hover:scale-105 transition-transform" data-ai-hint={event.dataAiHint} />
-              <CardContent className="p-4">
-                <CardTitle className="text-lg mb-1">{event.name}</CardTitle>
-                <p className="text-sm text-muted-foreground">{event.date}</p>
-              </CardContent>
-              <CardFooter className="p-4 bg-muted/30">
-                <Button variant="outline" className="w-full">View Event Details</Button>
-              </CardFooter>
-            </Card>
-          ))}
-           {discoverChefEvents.length === 0 && (
+        {loadingDiscoverEvents ? (
+            <div className="flex justify-center items-center h-40">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                <p className="ml-2">Loading events...</p>
+            </div>
+        ) : discoverChefEvents.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {discoverChefEvents.map(event => (
+                <Card key={event.id} className="overflow-hidden shadow-md hover:shadow-lg transition-shadow group">
+                {event.imageUrl ? (
+                    <Image src={event.imageUrl} alt={event.title} width={600} height={300} className="w-full h-48 object-cover group-hover:scale-105 transition-transform" data-ai-hint={event.dataAiHint || "event food"} />
+                ) : (
+                    <div className="w-full h-48 bg-muted flex items-center justify-center text-muted-foreground">
+                        <CalendarSearch className="h-16 w-16 opacity-50" data-ai-hint="event placeholder" />
+                    </div>
+                )}
+                <CardContent className="p-4">
+                    <CardTitle className="text-lg mb-1">{event.title}</CardTitle>
+                    <p className="text-sm text-muted-foreground">{formatEventDateForDisplay(event.eventDateTime)}</p>
+                    <p className="text-xs text-muted-foreground">By: {event.chefName}</p>
+                </CardContent>
+                <CardFooter className="p-4 bg-muted/30">
+                    <Button variant="outline" className="w-full" asChild>
+                        <Link href={`/customer/wall#event-${event.id}`}>View Event Details</Link>
+                    </Button>
+                </CardFooter>
+                </Card>
+            ))}
+            </div>
+        ) : (
              <Card className="md:col-span-2 lg:col-span-3 p-6 text-center items-center justify-center flex flex-col border-dashed hover:border-primary transition-colors">
                 <CalendarSearch className="h-12 w-12 text-muted-foreground mb-3"/>
                 <p className="text-muted-foreground mb-2">No chef-hosted events posted right now.</p>
             </Card>
-           )}
-        </div>
+        )}
       </section>
 
-      {/* Featured Chefs Section */}
+      {/* Featured Chefs Section - Already Dynamic */}
       <section>
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-semibold flex items-center"><Sparkles className="mr-3 h-7 w-7 text-primary"/>Featured Chefs</h2>
@@ -215,12 +271,15 @@ export default function CustomerDashboardPage() {
                 />
                 <h3 className="font-semibold text-md">{chef.name}</h3>
                 <p className="text-xs text-muted-foreground truncate w-full px-2">{chef.specialties?.join(', ')}</p>
-                <Button variant="link" size="sm" className="mt-2">View Profile</Button>
+                <Button variant="link" size="sm" className="mt-2" asChild>
+                    {/* This link will eventually go to a public chef profile page if we create one */}
+                    <Link href="#">View Profile</Link> 
+                </Button>
               </Card>
             ))}
           </div>
         ) : (
-          <p className="text-muted-foreground text-center">No featured chefs available at the moment.</p>
+          <p className="text-muted-foreground text-center py-8">No featured chefs available at the moment.</p>
         )}
       </section>
     </div>
