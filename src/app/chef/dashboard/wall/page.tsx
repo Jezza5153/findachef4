@@ -20,81 +20,48 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
-import type { ChefWallEvent } from '@/types';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
+import type { ChefWallEvent, CalendarEvent } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
-import { PlusCircle, Edit3, Trash2, LayoutGrid, Users, CalendarClock, DollarSign, MapPin, Tag, Globe, Lock, AlertCircle, ChefHat } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, LayoutGrid, Users, CalendarClock, DollarSign, MapPin, Globe, Lock, AlertCircle, ChefHat, Loader2 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Badge } from '@/components/ui/badge';
+import { useAuth } from '@/context/AuthContext';
+import { db } from '@/lib/firebase';
+import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where, serverTimestamp, Timestamp, setDoc } from 'firebase/firestore';
 
 const wallEventFormSchema = z.object({
   title: z.string().min(5, { message: 'Event title must be at least 5 characters.' }),
   description: z.string().min(20, { message: 'Description must be at least 20 characters.' }).max(500, { message: 'Description cannot exceed 500 characters.' }),
   maxPax: z.coerce.number().min(1, { message: 'Maximum PAX must be at least 1.' }),
-  eventDateTime: z.string().min(1, { message: 'Event date and time are required.' }), // Simple text for now
+  eventDateTime: z.string().refine(val => {
+    try {
+      return !isNaN(new Date(val).getTime());
+    } catch {
+      return false;
+    }
+  }, { message: 'Please enter a valid date and time (e.g., YYYY-MM-DD HH:MM).' }),
   location: z.string().min(3, { message: 'Location is required.' }),
   pricePerPerson: z.coerce.number().min(0, { message: 'Price must be a positive number.' }),
-  chefsInvolved: z.string().optional(), // Comma-separated string
-  tags: z.string().optional(), // Comma-separated string
+  chefsInvolved: z.string().optional(), 
+  tags: z.string().optional(), 
   imageUrl: z.string().url({ message: "Please enter a valid image URL." }).optional().or(z.literal('')),
-  isPublic: z.boolean().default(true), // Default to public
-  requiresSubscription: z.boolean().default(false).optional(), // Informational
+  dataAiHint: z.string().optional(),
+  isPublic: z.boolean().default(true), 
+  requiresSubscription: z.boolean().default(false).optional(), 
 });
 
 type WallEventFormValues = z.infer<typeof wallEventFormSchema>;
 
-const initialWallEvents: ChefWallEvent[] = [
-  {
-    id: 'wall1',
-    title: 'Summer BBQ Cookout Masterclass',
-    description: 'Join Chef Julia for an afternoon of grilling techniques and delicious BBQ food. Learn to make perfect ribs, brisket, and sides. All ingredients and equipment provided.',
-    maxPax: 20,
-    eventDateTime: '2024-08-15 14:00',
-    location: 'Community Park Pavilion A',
-    pricePerPerson: 75,
-    chefsInvolved: ['Chef Julia', 'Chef Assistant Ben'],
-    tags: ['BBQ', 'Outdoor', 'Casual', 'Grilling'],
-    imageUrl: 'https://placehold.co/600x400.png',
-    isPublic: true,
-    chefId: 'chef123',
-    chefName: 'Chef Julia',
-    chefAvatarUrl: 'https://placehold.co/80x80.png',
-    dataAiHint: 'bbq grilling',
-  },
-  {
-    id: 'wall2',
-    title: 'Exclusive Pasta Making Workshop (Private Group)',
-    description: 'A hands-on workshop for you and your friends to learn the art of fresh pasta making from scratch. Enjoy the fruits of your labor with a delicious meal afterwards.',
-    maxPax: 8,
-    eventDateTime: '2024-09-05 18:00',
-    location: 'Chef Julia\'s Kitchen Studio',
-    pricePerPerson: 120,
-    chefsInvolved: ['Chef Julia'],
-    tags: ['Italian', 'Workshop', 'Hands-on', 'Private'],
-    imageUrl: 'https://placehold.co/600x400.png',
-    isPublic: false, // Example of a private event
-    chefId: 'chef123',
-    chefName: 'Chef Julia',
-    chefAvatarUrl: 'https://placehold.co/80x80.png',
-    dataAiHint: 'pasta making',
-  },
-];
-
-
 export default function ChefWallPage() {
-  const [wallEvents, setWallEvents] = useState<ChefWallEvent[]>(initialWallEvents);
+  const { user, userProfile, isChefSubscribed } = useAuth();
+  const [wallEvents, setWallEvents] = useState<ChefWallEvent[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [isPostDialogOpen, setIsPostDialogOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<ChefWallEvent | null>(null);
-  const [isChefSubscribed, setIsChefSubscribed] = useState<boolean>(false);
   const { toast } = useToast();
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const subscriptionStatus = localStorage.getItem('isChefSubscribed');
-      setIsChefSubscribed(subscriptionStatus === 'true');
-    }
-  }, []);
 
   const form = useForm<WallEventFormValues>({
     resolver: zodResolver(wallEventFormSchema),
@@ -108,59 +75,161 @@ export default function ChefWallPage() {
       chefsInvolved: '',
       tags: '',
       imageUrl: '',
+      dataAiHint: '',
       isPublic: true,
-      requiresSubscription: false,
+      requiresSubscription: !isChefSubscribed,
     },
   });
 
-  const onSubmitEventPost = (data: WallEventFormValues) => {
-    // The 'requiresSubscription' field is purely informational for the form
+  useEffect(() => {
+    if (userProfile) {
+      form.setValue('requiresSubscription', !isChefSubscribed);
+    }
+  }, [isChefSubscribed, userProfile, form]);
+
+  useEffect(() => {
+    const fetchEvents = async () => {
+      if (!user) {
+        setIsLoading(false);
+        return;
+      }
+      setIsLoading(true);
+      try {
+        const eventsCollectionRef = collection(db, "chefWallEvents");
+        const q = query(eventsCollectionRef, where("chefId", "==", user.uid), orderBy("createdAt", "desc"));
+        const querySnapshot = await getDocs(q);
+        const fetchedEvents = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ChefWallEvent));
+        setWallEvents(fetchedEvents);
+      } catch (error) {
+        console.error("Error fetching wall events:", error);
+        toast({ title: "Error", description: "Could not fetch your event posts.", variant: "destructive" });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchEvents();
+  }, [user, toast]);
+
+  const onSubmitEventPost = async (data: WallEventFormValues) => {
+    if (!user || !userProfile) {
+      toast({ title: "Authentication Error", description: "You must be logged in.", variant: "destructive" });
+      return;
+    }
+    setIsSaving(true);
+
     const { requiresSubscription, ...eventData } = data;
 
-    const finalEventData = {
-        ...eventData,
-        chefsInvolved: data.chefsInvolved?.split(',').map(s => s.trim()).filter(s => s) || [],
-        tags: data.tags?.split(',').map(s => s.trim()).filter(s => s) || [],
+    const finalEventData: Omit<ChefWallEvent, 'id' | 'createdAt' | 'updatedAt' | 'chefId' | 'chefName' | 'chefAvatarUrl'> & { chefId: string, chefName: string, chefAvatarUrl?: string } = {
+      ...eventData,
+      chefsInvolved: data.chefsInvolved?.split(',').map(s => s.trim()).filter(s => s) || [],
+      tags: data.tags?.split(',').map(s => s.trim()).filter(s => s) || [],
+      chefId: user.uid,
+      chefName: userProfile.name || user.displayName || "Chef",
+      chefAvatarUrl: userProfile.profilePictureUrl || user.photoURL || undefined,
     };
     
-    if (editingEvent) {
-      setWallEvents(wallEvents.map(event => event.id === editingEvent.id ? { ...editingEvent, ...finalEventData } : event));
-      toast({ title: 'Event Post Updated', description: `"${finalEventData.title}" has been successfully updated.` });
-    } else {
-      const newEvent: ChefWallEvent = {
-        id: String(Date.now()),
-        ...finalEventData,
-        chefId: 'chef123', // Placeholder
-        chefName: 'Chef Julia', // Placeholder
-        chefAvatarUrl: 'https://placehold.co/80x80.png', // Placeholder
-      };
-      setWallEvents([...wallEvents, newEvent]);
-      toast({ title: 'Event Post Created', description: `"${finalEventData.title}" has been successfully created.` });
+    try {
+      let eventId: string;
+      if (editingEvent) {
+        eventId = editingEvent.id;
+        const eventDocRef = doc(db, "chefWallEvents", eventId);
+        await updateDoc(eventDocRef, { ...finalEventData, updatedAt: serverTimestamp() });
+        
+        // Update corresponding calendar event
+        const calendarEventDocRef = doc(db, `users/${user.uid}/calendarEvents`, eventId);
+        const calendarEventData: Partial<CalendarEvent> = {
+          title: finalEventData.title,
+          date: Timestamp.fromDate(new Date(finalEventData.eventDateTime)),
+          location: finalEventData.location,
+          pax: finalEventData.maxPax,
+          pricePerHead: finalEventData.pricePerPerson,
+          notes: finalEventData.description,
+          coChefs: finalEventData.chefsInvolved,
+          status: 'Confirmed', // Assuming wall events are confirmed
+          chefId: user.uid,
+          updatedAt: serverTimestamp(),
+        };
+        await updateDoc(calendarEventDocRef, calendarEventData);
+
+        setWallEvents(wallEvents.map(event => event.id === eventId ? { ...event, ...finalEventData, id: eventId, updatedAt: Timestamp.now() } as ChefWallEvent : event));
+        toast({ title: 'Event Post Updated', description: `"${finalEventData.title}" has been successfully updated.` });
+      } else {
+        const newDocRef = doc(collection(db, "chefWallEvents")); // Auto-generate ID
+        eventId = newDocRef.id;
+        await setDoc(newDocRef, { ...finalEventData, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+        
+        // Create corresponding calendar event
+        const calendarEventDocRef = doc(db, `users/${user.uid}/calendarEvents`, eventId);
+        const calendarEventData: CalendarEvent = {
+          id: eventId,
+          title: finalEventData.title,
+          date: Timestamp.fromDate(new Date(finalEventData.eventDateTime)),
+          location: finalEventData.location,
+          pax: finalEventData.maxPax,
+          menuName: `Event: ${finalEventData.title}`, // Placeholder for menu name
+          pricePerHead: finalEventData.pricePerPerson,
+          notes: finalEventData.description,
+          coChefs: finalEventData.chefsInvolved,
+          status: 'Confirmed', // Assuming wall events are confirmed
+          chefId: user.uid,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+        await setDoc(calendarEventDocRef, calendarEventData);
+        
+        setWallEvents([{ ...finalEventData, id: eventId, createdAt: Timestamp.now(), updatedAt: Timestamp.now() } as ChefWallEvent, ...wallEvents]);
+        toast({ title: 'Event Post Created', description: `"${finalEventData.title}" has been successfully created.` });
+      }
+      
+      form.reset();
+      setEditingEvent(null);
+      setIsPostDialogOpen(false);
+
+    } catch (error) {
+      console.error('Error saving wall event:', error);
+      toast({ title: 'Save Failed', description: 'Could not save your event post. Please try again.', variant: 'destructive' });
+    } finally {
+      setIsSaving(false);
     }
-    form.reset();
-    setEditingEvent(null);
-    setIsPostDialogOpen(false);
   };
 
-  const handleEditEventPost = (eventId: string) => {
-    const eventToEdit = wallEvents.find(event => event.id === eventId);
+  const handleEditEventPost = (eventIdToEdit: string) => {
+    const eventToEdit = wallEvents.find(event => event.id === eventIdToEdit);
     if (eventToEdit) {
       setEditingEvent(eventToEdit);
       form.reset({
         ...eventToEdit,
-        chefsInvolved: eventToEdit.chefsInvolved.join(', '),
-        tags: eventToEdit.tags.join(', '),
-        requiresSubscription: !isChefSubscribed, // Set based on current subscription
+        chefsInvolved: eventToEdit.chefsInvolved?.join(', ') || '',
+        tags: eventToEdit.tags?.join(', ') || '',
+        requiresSubscription: !isChefSubscribed,
       });
       setIsPostDialogOpen(true);
     }
   };
 
-  const handleDeleteEventPost = (eventId: string) => {
-    const eventToDelete = wallEvents.find(e => e.id === eventId);
-    if (window.confirm(`Are you sure you want to delete the event post "${eventToDelete?.title}"?`)) {
-      setWallEvents(wallEvents.filter(event => event.id !== eventId));
-      toast({ title: 'Event Post Deleted', description: `"${eventToDelete?.title}" has been deleted.`, variant: 'destructive' });
+  const handleDeleteEventPost = async (eventIdToDelete: string) => {
+    if (!user) return;
+    const eventToDelete = wallEvents.find(e => e.id === eventIdToDelete);
+    if (!eventToDelete) return;
+
+    if (window.confirm(`Are you sure you want to delete the event post "${eventToDelete?.title}"? This will also remove it from your calendar.`)) {
+      setIsSaving(true);
+      try {
+        // Delete from chefWallEvents
+        await deleteDoc(doc(db, "chefWallEvents", eventIdToDelete));
+        // Delete from user's personal calendar
+        await deleteDoc(doc(db, `users/${user.uid}/calendarEvents`, eventIdToDelete));
+
+        // TODO: If image was uploaded to Firebase Storage, delete it here
+
+        setWallEvents(wallEvents.filter(event => event.id !== eventIdToDelete));
+        toast({ title: 'Event Post Deleted', description: `"${eventToDelete?.title}" has been deleted.`, variant: 'destructive' });
+      } catch (error) {
+        console.error("Error deleting event post:", error);
+        toast({ title: "Delete Error", description: "Could not delete event post.", variant: "destructive" });
+      } finally {
+        setIsSaving(false);
+      }
     }
   };
   
@@ -175,12 +244,28 @@ export default function ChefWallPage() {
       chefsInvolved: '',
       tags: '',
       imageUrl: '',
+      dataAiHint: '',
       isPublic: true,
-      requiresSubscription: !isChefSubscribed, // Set based on current subscription
+      requiresSubscription: !isChefSubscribed,
     });
     setEditingEvent(null);
     setIsPostDialogOpen(true);
   };
+  
+  const formatEventDateTime = (dateTimeString: string) => {
+    try {
+      const date = new Date(dateTimeString);
+      if (isNaN(date.getTime())) return "Invalid Date";
+      return new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+    } catch (e) {
+      return dateTimeString; // return original if parsing fails
+    }
+  };
+
+
+  if (isLoading) {
+    return <div className="flex justify-center items-center h-64"><Loader2 className="h-8 w-8 animate-spin text-primary" /> Loading event posts...</div>;
+  }
 
   return (
     <div className="space-y-8">
@@ -188,12 +273,19 @@ export default function ChefWallPage() {
         <h1 className="text-3xl font-bold flex items-center">
           <LayoutGrid className="mr-3 h-8 w-8 text-primary" /> The Chef's Wall (Your Events)
         </h1>
-        <Button onClick={openNewEventDialog}>
+        <Button onClick={openNewEventDialog} disabled={isSaving}>
           <PlusCircle className="mr-2 h-5 w-5" /> Post New Event
         </Button>
       </div>
 
-      <Dialog open={isPostDialogOpen} onOpenChange={setIsPostDialogOpen}>
+      <Dialog open={isPostDialogOpen} onOpenChange={(open) => {
+        if (isSaving && open) return; // Prevent closing while saving
+        setIsPostDialogOpen(open);
+        if (!open) {
+            form.reset();
+            setEditingEvent(null);
+        }
+      }}>
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingEvent ? 'Edit Event Post' : 'Create New Event Post'}</DialogTitle>
@@ -253,8 +345,8 @@ export default function ChefWallPage() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Event Date & Time</FormLabel>
-                    <FormControl><Input placeholder="e.g., 2024-12-24 19:00 or Next Saturday at 7 PM" {...field} /></FormControl>
-                    <FormDescription>Be specific (YYYY-MM-DD HH:MM) or descriptive.</FormDescription>
+                    <FormControl><Input type="datetime-local" {...field} /></FormControl>
+                    <FormDescription>Be specific (YYYY-MM-DD HH:MM).</FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -308,6 +400,18 @@ export default function ChefWallPage() {
                 )}
               />
               <FormField
+                control={form.control}
+                name="dataAiHint"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Image Description Hint (for AI)</FormLabel>
+                    <FormControl><Input placeholder="e.g., outdoor cooking, fine dining" {...field} /></FormControl>
+                    <FormDescription>One or two keywords to help AI understand the image content (max 2 words).</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
                   control={form.control}
                   name="requiresSubscription"
                   render={({ field }) => (
@@ -322,9 +426,9 @@ export default function ChefWallPage() {
                       </FormControl>
                       <div className="space-y-0.5">
                         <FormLabel className="font-normal text-sm">
-                          Publishing to the public Customer Wall requires a $1/month subscription (simulated).
+                          Publishing to the public Customer Wall requires a subscription.
                         </FormLabel>
-                         {!isChefSubscribed && <p className="text-xs text-destructive">Your account is not currently subscribed.</p>}
+                         {!isChefSubscribed && <p className="text-xs text-destructive">Your account is not currently subscribed. (Simulated - for public event posts)</p>}
                       </div>
                     </FormItem>
                   )}
@@ -348,8 +452,14 @@ export default function ChefWallPage() {
                           <FormControl>
                             <Switch
                               checked={field.value}
-                              onCheckedChange={field.onChange}
-                              disabled={!isChefSubscribed && field.value} // Disable if trying to set public without subscription
+                              onCheckedChange={(checked) => {
+                                if (checked && !isChefSubscribed) {
+                                  toast({ title: "Subscription Required", description: "You need an active subscription to make events public.", variant: "destructive"});
+                                  return; // Prevent switching to public if not subscribed
+                                }
+                                field.onChange(checked);
+                              }}
+                              disabled={!isChefSubscribed && field.value} 
                               aria-readonly={!isChefSubscribed && field.value}
                             />
                           </FormControl>
@@ -366,10 +476,10 @@ export default function ChefWallPage() {
               />
               <DialogFooter>
                 <DialogClose asChild>
-                    <Button type="button" variant="outline">Cancel</Button>
+                    <Button type="button" variant="outline" disabled={isSaving}>Cancel</Button>
                 </DialogClose>
-                <Button type="submit" disabled={!isChefSubscribed && form.getValues('isPublic')}>
-                  {editingEvent ? 'Save Changes' : 'Create Event Post'}
+                <Button type="submit" disabled={isSaving || (!isChefSubscribed && form.getValues('isPublic'))}>
+                  {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (editingEvent ? 'Save Changes' : 'Create Event Post')}
                 </Button>
               </DialogFooter>
             </form>
@@ -405,7 +515,7 @@ export default function ChefWallPage() {
               </CardHeader>
               <CardContent className="space-y-3 text-sm flex-grow">
                 <p className="line-clamp-3">{event.description}</p>
-                <div className="flex items-center"><CalendarClock className="mr-2 h-4 w-4 text-primary" /> {event.eventDateTime}</div>
+                <div className="flex items-center"><CalendarClock className="mr-2 h-4 w-4 text-primary" /> {formatEventDateTime(event.eventDateTime)}</div>
                 <div className="flex items-center"><MapPin className="mr-2 h-4 w-4 text-primary" /> {event.location}</div>
                 <div className="flex items-center"><DollarSign className="mr-2 h-4 w-4 text-green-600" /> ${event.pricePerPerson}/person</div>
                 <div className="flex items-center"><Users className="mr-2 h-4 w-4 text-primary" /> Max {event.maxPax} guests</div>
@@ -413,7 +523,7 @@ export default function ChefWallPage() {
                   <div className="flex items-center text-xs">
                     <ChefHat className="mr-1.5 h-3.5 w-3.5 text-muted-foreground" />
                     <span className="font-medium mr-1">Chefs:</span> 
-                    {event.chefsInvolved.map((chef, index) => (
+                    {event.chefsInvolved.map((chef) => (
                        <Badge key={chef} variant="outline" className="mr-1 text-xs">{chef}</Badge>
                     ))}
                   </div>
@@ -426,10 +536,10 @@ export default function ChefWallPage() {
               </CardContent>
               <CardFooter className="p-4 border-t bg-muted/20">
                 <div className="flex space-x-2 w-full">
-                  <Button variant="outline" size="sm" onClick={() => handleEditEventPost(event.id)} className="flex-1">
+                  <Button variant="outline" size="sm" onClick={() => handleEditEventPost(event.id)} className="flex-1" disabled={isSaving}>
                     <Edit3 className="mr-2 h-4 w-4" /> Edit
                   </Button>
-                  <Button variant="destructive" size="sm" onClick={() => handleDeleteEventPost(event.id)} className="flex-1">
+                  <Button variant="destructive" size="sm" onClick={() => handleDeleteEventPost(event.id)} className="flex-1" disabled={isSaving}>
                     <Trash2 className="mr-2 h-4 w-4" /> Delete
                   </Button>
                 </div>
@@ -438,19 +548,22 @@ export default function ChefWallPage() {
           ))}
         </div>
       ) : (
-        <Card className="text-center py-12 border-dashed">
-          <CardHeader>
-            <LayoutGrid className="mx-auto h-12 w-12 text-muted-foreground mb-3" />
-            <CardTitle>No Event Posts Yet</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-muted-foreground mb-4">You haven't posted any events. Share your upcoming culinary experiences!</p>
-            <Button onClick={openNewEventDialog}>
-              <PlusCircle className="mr-2 h-5 w-5" /> Create Your First Event Post
-            </Button>
-          </CardContent>
-        </Card>
+        !isLoading && (
+            <Card className="text-center py-12 border-dashed">
+                <CardHeader>
+                    <LayoutGrid className="mx-auto h-12 w-12 text-muted-foreground mb-3" data-ai-hint="grid empty" />
+                    <CardTitle>No Event Posts Yet</CardTitle>
+                </CardHeader>
+                <CardContent>
+                    <p className="text-muted-foreground mb-4">You haven't posted any events. Share your upcoming culinary experiences!</p>
+                    <Button onClick={openNewEventDialog}>
+                    <PlusCircle className="mr-2 h-5 w-5" /> Create Your First Event Post
+                    </Button>
+                </CardContent>
+            </Card>
+        )
       )}
     </div>
   );
 }
+
