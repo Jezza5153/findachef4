@@ -874,24 +874,40 @@ const AuthContext = /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project
 function AuthProvider({ children }) {
     const [user, setUser] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])(null);
     const [userProfile, setUserProfile] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])(null);
-    const [loading, setLoading] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])(true);
+    const [loading, setLoading] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])(true); // For initial Firebase Auth check
+    const [profileLoading, setProfileLoading] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])(false); // For Firestore profile loading
     const [isChef, setIsChef] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])(false);
     const [isCustomer, setIsCustomer] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])(false);
+    const [isAdmin, setIsAdmin] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])(false);
     const [isChefApproved, setIsChefApproved] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])(false);
     const [isChefSubscribed, setIsChefSubscribed] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useState"])(false);
     (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["useEffect"])(()=>{
         const unsubscribe = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$firebase$2f$node_modules$2f40$firebase$2f$auth$2f$dist$2f$node$2d$esm$2f$totp$2d$1a843a99$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__$3c$export__z__as__onAuthStateChanged$3e$__["onAuthStateChanged"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$firebase$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["auth"], async (currentUser)=>{
             setUser(currentUser);
             if (currentUser) {
+                setProfileLoading(true); // Start loading profile
+                // Check for custom claims
                 try {
-                    const userDocRef = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$firebase$2f$firestore$2f$dist$2f$index$2e$node$2e$mjs__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["doc"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$firebase$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["db"], "users", currentUser.uid);
-                    const docSnap = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$firebase$2f$firestore$2f$dist$2f$index$2e$node$2e$mjs__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["getDoc"])(userDocRef);
+                    const idTokenResult = await currentUser.getIdTokenResult(true); // Force refresh of token
+                    setIsAdmin(idTokenResult.claims.admin === true);
+                } catch (error) {
+                    console.error("Error fetching ID token result for custom claims:", error);
+                    setIsAdmin(false);
+                }
+                // Listen for profile changes from Firestore
+                const userDocRef = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$firebase$2f$firestore$2f$dist$2f$index$2e$node$2e$mjs__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["doc"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$firebase$2e$ts__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["db"], "users", currentUser.uid);
+                const unsubscribeProfile = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$firebase$2f$firestore$2f$dist$2f$index$2e$node$2e$mjs__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["onSnapshot"])(userDocRef, (docSnap)=>{
                     if (docSnap.exists()) {
                         const profileData = docSnap.data();
                         setUserProfile(profileData);
-                        setIsChef(profileData.role === 'chef');
-                        setIsCustomer(profileData.role === 'customer');
-                        if (profileData.role === 'chef') {
+                        const currentIsChef = profileData.role === 'chef';
+                        const currentIsCustomer = profileData.role === 'customer';
+                        // Note: isAdmin is now set from claims, not from profile.role === 'admin'
+                        // If you still want profile.role === 'admin' to grant admin, you'd OR it with claims.admin
+                        // setIsAdmin(profileData.role === 'admin' || idTokenResult.claims.admin === true); 
+                        setIsChef(currentIsChef);
+                        setIsCustomer(currentIsCustomer);
+                        if (currentIsChef) {
                             const chefProfile = profileData;
                             setIsChefApproved(chefProfile.isApproved || false);
                             setIsChefSubscribed(chefProfile.isSubscribed || false);
@@ -900,30 +916,42 @@ function AuthProvider({ children }) {
                             setIsChefSubscribed(false);
                         }
                     } else {
-                        console.log("No such user profile document in Firestore!");
-                        setUserProfile(null); // Ensure profile is null if not found
+                        console.warn("No such user profile document in Firestore for UID:", currentUser.uid);
+                        setUserProfile(null);
                         setIsChef(false);
                         setIsCustomer(false);
+                        // setIsAdmin(false); // Keep admin status from claims if profile doesn't exist yet
                         setIsChefApproved(false);
                         setIsChefSubscribed(false);
                     }
-                } catch (error) {
-                    console.error("Error fetching user profile from Firestore:", error);
+                    setProfileLoading(false); // Profile loading finished
+                }, (error)=>{
+                    console.error("Error with profile snapshot listener:", error);
                     setUserProfile(null);
                     setIsChef(false);
                     setIsCustomer(false);
+                    // setIsAdmin(false);
                     setIsChefApproved(false);
                     setIsChefSubscribed(false);
-                }
+                    setProfileLoading(false);
+                });
+                // Return cleanup for profile listener when user changes
+                // This inner return is for the onSnapshot cleanup
+                return ()=>{
+                    unsubscribeProfile();
+                };
             } else {
                 setUserProfile(null);
                 setIsChef(false);
                 setIsCustomer(false);
+                setIsAdmin(false);
                 setIsChefApproved(false);
                 setIsChefSubscribed(false);
+                setProfileLoading(false); // No profile to load
             }
-            setLoading(false);
+            setLoading(false); // Initial Firebase auth check finished
         });
+        // Return cleanup for auth state listener
         return ()=>unsubscribe();
     }, []);
     return /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$server$2f$route$2d$modules$2f$app$2d$page$2f$vendored$2f$ssr$2f$react$2d$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$ssr$5d$__$28$ecmascript$29$__["jsxDEV"])(AuthContext.Provider, {
@@ -931,15 +959,17 @@ function AuthProvider({ children }) {
             user,
             userProfile,
             loading,
+            profileLoading,
             isChef,
             isCustomer,
+            isAdmin,
             isChefApproved,
             isChefSubscribed
         },
         children: children
     }, void 0, false, {
         fileName: "[project]/src/context/AuthContext.tsx",
-        lineNumber: 82,
+        lineNumber: 117,
         columnNumber: 5
     }, this);
 }
