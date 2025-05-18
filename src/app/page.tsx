@@ -1,5 +1,5 @@
 
-'use client'; // Make it a client component to use hooks
+'use client'; // Keep as client component if we want any dynamic aspects later, for now, mainly for consistency with prior versions.
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,7 +7,7 @@ import { Lock, MessagesSquare, ShieldCheck } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import type { Testimonial } from '@/types';
-import { useAuth } from '@/context/AuthContext'; // Import useAuth
+// import { useAuth } from '@/context/AuthContext'; // Not strictly needed if CTAs are static to signup
 
 const benefits = [
   {
@@ -52,10 +52,9 @@ const testimonials: Testimonial[] = [
 ];
 
 export default function Home() {
-  const { user, userProfile } = useAuth();
-  const isCustomer = userProfile?.role === 'customer';
-
-  const customerCtaLink = user && isCustomer ? '/customer/dashboard' : '/login';
+  // const { user, userProfile } = useAuth();
+  // const isCustomer = userProfile?.role === 'customer';
+  // const customerCtaLink = user && isCustomer ? '/customer/dashboard' : '/login';
 
   return (
     <div className="flex flex-col">
@@ -68,7 +67,7 @@ export default function Home() {
               fill
               className="object-cover opacity-20"
               data-ai-hint="gourmet food"
-              priority // Ensures hero image has priority
+              priority 
             />
         </div>
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
@@ -81,12 +80,18 @@ export default function Home() {
           </p>
           <div className="mt-10 flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4">
             <Button asChild size="lg" className="text-lg px-8 py-4 bg-primary hover:bg-primary/90 text-primary-foreground">
-              <Link href={customerCtaLink}>I’m a Customer</Link>
+              <Link href="/customer/signup">I’m a Customer</Link>
             </Button>
             <Button asChild size="lg" variant="outline" className="text-lg px-8 py-4 border-primary text-primary hover:bg-primary/10">
               <Link href="/chef/signup">I’m a Chef</Link>
             </Button>
           </div>
+          <p className="mt-6 text-sm">
+            Already have an account?{' '}
+            <Link href="/login" className="font-semibold text-primary hover:underline">
+              Log In
+            </Link>
+          </p>
         </div>
       </section>
 
@@ -160,7 +165,7 @@ export default function Home() {
                     width={50}
                     height={50}
                     className="rounded-full"
-                    data-ai-hint="person avatar" // Ensures hint is present
+                    data-ai-hint="person avatar"
                   />
                   <div>
                     <p className="font-semibold text-foreground">{testimonial.customerName}</p>
