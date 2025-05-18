@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
@@ -18,12 +17,11 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { doc, onSnapshot, updateDoc, Timestamp, collection, query, orderBy } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, Timestamp, collection, query, orderBy, serverTimestamp, writeBatch } from 'firebase/firestore';
 
 export default function ChefCalendarPage() {
   const { user, userProfile } = useAuth();
@@ -33,6 +31,7 @@ export default function ChefCalendarPage() {
   const [isLoadingCalendarData, setIsLoadingCalendarData] = useState(true);
   const [isEventDetailsDialogOpen, setIsEventDetailsDialogOpen] = useState(false);
   const [selectedEventForDialog, setSelectedEventForDialog] = useState<CalendarEvent | null>(null);
+  const [isProcessingAction, setIsProcessingAction] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -47,6 +46,7 @@ export default function ChefCalendarPage() {
     let unsubscribeUserProfile: (() => void) | undefined;
     let unsubscribeCalendarEvents: (() => void) | undefined;
 
+    // Fetch User Profile for Blocked Dates
     const userDocRef = doc(db, "users", user.uid);
     unsubscribeUserProfile = onSnapshot(userDocRef, (docSnap) => {
       if (docSnap.exists()) {
@@ -57,47 +57,53 @@ export default function ChefCalendarPage() {
           setBlockedDates([]);
         }
       }
-      // Ensure calendar events are fetched/refetched after profile data is loaded if needed
-      // For this setup, events are fetched independently, but this ensures loading state is accurate
-      if (unsubscribeCalendarEvents === undefined) fetchCalendarEvents();
     }, (error) => {
       console.error("Error fetching user profile for blocked dates:", error);
       toast({ title: "Error", description: "Could not fetch blocked dates.", variant: "destructive" });
     });
 
-    const fetchCalendarEvents = () => {
-      const eventsCollectionRef = collection(db, `users/${user.uid}/calendarEvents`);
-      const q = query(eventsCollectionRef, orderBy("date", "asc"));
-      
-      unsubscribeCalendarEvents = onSnapshot(q, (querySnapshot) => {
-        const fetchedEvents = querySnapshot.docs.map(docSnap => {
-          const data = docSnap.data();
-          return {
-            id: docSnap.id,
-            ...data,
-            date: (data.date as Timestamp).toDate(), 
-            createdAt: data.createdAt ? (data.createdAt as Timestamp).toDate() : undefined,
-            updatedAt: data.updatedAt ? (data.updatedAt as Timestamp).toDate() : undefined,
-          } as CalendarEvent;
-        });
-        setAllEvents(fetchedEvents);
-        setIsLoadingCalendarData(false); 
-      }, (error) => {
-        console.error("Error fetching calendar events:", error);
-        toast({ title: "Error", description: "Could not fetch calendar events.", variant: "destructive" });
-        setIsLoadingCalendarData(false);
-      });
-    };
+    // Fetch Calendar Events
+    const eventsCollectionRef = collection(db, `users/${user.uid}/calendarEvents`);
+    const q = query(eventsCollectionRef, orderBy("date", "asc"));
     
-    // Initial fetch of events if user profile is already available through AuthContext on first load
-    if(userProfile) fetchCalendarEvents();
+    unsubscribeCalendarEvents = onSnapshot(q, (querySnapshot) => {
+      const fetchedEvents = querySnapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        // Ensure date is a Date object
+        let eventDate = data.date;
+        if (eventDate instanceof Timestamp) {
+          eventDate = eventDate.toDate();
+        } else if (typeof eventDate === 'string') {
+          eventDate = parseISO(eventDate); // Or new Date(eventDate) if it's a simple string
+        } else if (eventDate && typeof eventDate.toDate === 'function') { // For older Firestore SDKs maybe
+          eventDate = eventDate.toDate();
+        } else if (!(eventDate instanceof Date)) {
+          console.warn("Event date is not a Firestore Timestamp or Date object:", data.date);
+          eventDate = new Date(); // Fallback
+        }
+        
+        return {
+          id: docSnap.id,
+          ...data,
+          date: eventDate, 
+          createdAt: data.createdAt ? (data.createdAt instanceof Timestamp ? data.createdAt.toDate() : new Date(data.createdAt as any)) : undefined,
+          updatedAt: data.updatedAt ? (data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : new Date(data.updatedAt as any)) : undefined,
+        } as CalendarEvent;
+      });
+      setAllEvents(fetchedEvents);
+      setIsLoadingCalendarData(false); 
+    }, (error) => {
+      console.error("Error fetching calendar events:", error);
+      toast({ title: "Error", description: "Could not fetch calendar events.", variant: "destructive" });
+      setIsLoadingCalendarData(false);
+    });
     
     return () => {
       if (unsubscribeUserProfile) unsubscribeUserProfile();
       if (unsubscribeCalendarEvents) unsubscribeCalendarEvents();
     };
 
-  }, [user, userProfile, toast]);
+  }, [user, toast]);
 
   const eventsForSelectedDate = useMemo(() => {
     if (!selectedDate) return [];
@@ -116,6 +122,7 @@ export default function ChefCalendarPage() {
       case 'Pending': return 'secondary';
       case 'Cancelled': return 'destructive';
       case 'WallEvent': return 'outline';
+      case 'Completed': return 'secondary'; // Added for completed status
       default: return 'outline';
     }
   };
@@ -126,6 +133,7 @@ export default function ChefCalendarPage() {
       case 'Pending': return <Clock className="h-4 w-4 mr-1.5 text-yellow-600" />;
       case 'Cancelled': return <AlertTriangle className="h-4 w-4 mr-1.5 text-red-600" />;
       case 'WallEvent': return <InfoIcon className="h-4 w-4 mr-1.5 text-blue-500" />;
+      case 'Completed': return <CheckCircle className="h-4 w-4 mr-1.5 text-green-700" />; // Icon for completed
       default: return <Info className="h-4 w-4 mr-1.5" />;
     }
   };
@@ -137,12 +145,51 @@ export default function ChefCalendarPage() {
     });
   };
 
-  const handleProcessCompletion = (eventId: string) => {
+  const handleProcessCompletion = async (eventId: string, calendarEventDetails: CalendarEvent) => {
+    if (!user || !eventId) return;
+    setIsProcessingAction(true);
     toast({
-        title: "Process Event Completion (Placeholder)",
-        description: `Action for event ${eventId} (e.g., QR Scan) initiated. This would trigger backend processes for fund release of the remaining 50%.`,
-        duration: 7000,
+        title: "Processing Event Completion...",
+        description: `Marking event ${eventId.substring(0,6)}... as complete.`,
     });
+
+    try {
+      const batch = writeBatch(db);
+
+      // 1. Update Booking document
+      // The eventId on CalendarEvent should be the bookingId
+      const bookingDocRef = doc(db, "bookings", eventId);
+      batch.update(bookingDocRef, {
+        status: 'completed',
+        qrCodeScannedAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      
+      // 2. Update Chef's CalendarEvent
+      const calendarEventDocRef = doc(db, `users/${user.uid}/calendarEvents`, eventId);
+      batch.update(calendarEventDocRef, {
+        status: 'Completed', // Custom status for calendar display
+        updatedAt: serverTimestamp()
+      });
+      
+      await batch.commit();
+
+      toast({
+          title: "Event Marked as Complete!",
+          description: `Event ${eventId.substring(0,6)}... status updated. Final payout process initiated (simulated).`,
+          duration: 7000,
+      });
+      // Local state update will be handled by onSnapshot listener
+    } catch (error) {
+      console.error("Error processing event completion:", error);
+      toast({
+        title: "Error",
+        description: "Could not mark event as complete. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsProcessingAction(false);
+    }
   };
 
   const handleToggleBlockDate = async () => {
@@ -150,6 +197,7 @@ export default function ChefCalendarPage() {
       toast({ title: "No Date Selected", description: "Please select a date to block or unblock.", variant: "destructive" });
       return;
     }
+    setIsProcessingAction(true);
     const dateToToggle = startOfDay(selectedDate);
     const alreadyBlocked = blockedDates.some(d => isSameDay(d, dateToToggle));
     let newBlockedDatesIso: string[];
@@ -174,6 +222,8 @@ export default function ChefCalendarPage() {
     } catch (error) {
       console.error("Error updating blocked dates:", error);
       toast({ title: "Update Error", description: "Could not update blocked status.", variant: "destructive"});
+    } finally {
+      setIsProcessingAction(false);
     }
   };
 
@@ -228,8 +278,8 @@ export default function ChefCalendarPage() {
                 } 
               }}
             />
-            <Button onClick={handleToggleBlockDate} variant="outline" className="mt-4 w-full">
-              <Ban className="mr-2 h-4 w-4"/>
+            <Button onClick={handleToggleBlockDate} variant="outline" className="mt-4 w-full" disabled={isProcessingAction}>
+              {isProcessingAction && blockedDates.some(d => isSameDay(d, selectedDate || new Date(0))) ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Ban className="mr-2 h-4 w-4"/>}
               {isDateBlocked ? "Unblock Selected Date" : "Block Selected Date"}
             </Button>
              <p className="text-xs text-muted-foreground mt-2">Blocked dates will prevent new booking requests.</p>
@@ -258,7 +308,9 @@ export default function ChefCalendarPage() {
                 event.status === 'Confirmed' ? 'border-green-500' :
                 event.status === 'Pending' ? 'border-yellow-500' :
                 event.status === 'Cancelled' ? 'border-red-500' : 
-                event.status === 'WallEvent' ? 'border-blue-500' : 'border-gray-300'
+                event.status === 'WallEvent' ? 'border-blue-500' :
+                event.status === 'Completed' ? 'border-green-700' : // Style for completed
+                'border-gray-300'
               }`}>
                 <CardHeader>
                   <div className="flex justify-between items-start">
@@ -321,19 +373,28 @@ export default function ChefCalendarPage() {
                             <p className="text-xs text-muted-foreground">
                                 <strong>Event Completion:</strong> At the event, the customer will provide a QR code. Scan it to confirm completion and initiate the release of the remaining 50% of your funds. Remember to upload all related receipts.
                             </p>
-                            <Button variant="outline" size="sm" onClick={() => handleProcessCompletion(event.id)} className="w-full sm:w-auto">
-                                <QrCode className="mr-2 h-4 w-4" />
+                            <Button 
+                                variant="outline" 
+                                size="sm" 
+                                onClick={() => handleProcessCompletion(event.id, event)} 
+                                className="w-full sm:w-auto"
+                                disabled={isProcessingAction}
+                            >
+                                {isProcessingAction ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <QrCode className="mr-2 h-4 w-4" />}
                                 Scan Customer QR / Process Completion
                             </Button>
                         </>
                     )}
-                    {(event.status === 'Confirmed' || event.status === 'Pending' || event.status === 'WallEvent') && (
+                    {(event.status === 'Confirmed' || event.status === 'Pending' || event.status === 'WallEvent' || event.status === 'Completed') && (
                         <Button variant="outline" size="sm" onClick={() => openEventDetailsDialog(event)} className="w-full sm:w-auto mt-2">
                           View Event Details
                         </Button>
                     )}
                     {event.status === 'Cancelled' && (
                         <p className="text-xs text-destructive">This event has been cancelled.</p>
+                    )}
+                    {event.status === 'Completed' && (
+                        <p className="text-xs text-green-700 font-medium">This event has been marked as completed.</p>
                     )}
                 </CardFooter>
               </Card>
@@ -367,7 +428,7 @@ export default function ChefCalendarPage() {
           </AlertDialogHeader>
             {selectedEventForDialog ? (
               <div className="space-y-3 text-sm max-h-[60vh] overflow-y-auto p-1">
-                <p><strong>Date:</strong> {format(selectedEventForDialog.date, 'PPP p')}</p>
+                <p><strong>Date:</strong> {selectedEventForDialog.date ? format(selectedEventForDialog.date, 'PPP p') : 'N/A'}</p>
                 <p><strong>Status:</strong> <Badge variant={getStatusBadgeVariant(selectedEventForDialog.status)}>{selectedEventForDialog.status}</Badge></p>
                 {selectedEventForDialog.customerName && <p><strong>Customer:</strong> {selectedEventForDialog.customerName}</p>}
                 <p><strong>PAX:</strong> {selectedEventForDialog.pax}</p>

@@ -1,27 +1,38 @@
 
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { MessageSquare, Send, UserCircle, Search, Inbox, AlertTriangle, Info, CheckCircle, XCircle, Loader2, FileText, Briefcase, DollarSign } from 'lucide-react';
-import Image from 'next/image';
+import { MessageSquare, Send, UserCircle, Search, Inbox, AlertTriangle, Info, CheckCircle, XCircle, Loader2, FileText, Briefcase, DollarSign, CalendarDays } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, doc, updateDoc, addDoc, serverTimestamp, Timestamp, onSnapshot, orderBy, getDoc as getFirestoreDoc, setDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc, addDoc, serverTimestamp, Timestamp, onSnapshot, orderBy, getDoc as getFirestoreDoc, setDoc, writeBatch } from 'firebase/firestore';
 import type { CustomerRequest, RequestMessage, ChefProfile, EnrichedCustomerRequest, Booking, CalendarEvent } from '@/types';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
-import { useRouter, useSearchParams } from 'next/navigation'; // Import useSearchParams
+import { useRouter, useSearchParams } from 'next/navigation';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 export default function CustomerMessagesPage() {
   const { user, userProfile } = useAuth();
   const { toast } = useToast();
   const router = useRouter();
-  const searchParams = useSearchParams(); // For reading query parameters
+  const searchParams = useSearchParams();
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const [customerRequests, setCustomerRequests] = useState<EnrichedCustomerRequest[]>([]);
   const [selectedRequest, setSelectedRequest] = useState<EnrichedCustomerRequest | null>(null);
@@ -32,7 +43,12 @@ export default function CustomerMessagesPage() {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [isProcessingProposalAction, setIsProcessingProposalAction] = useState(false);
+  const [isConfirmPaymentDialogOpen, setIsConfirmPaymentDialogOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   useEffect(() => {
     if (!user) {
@@ -51,13 +67,34 @@ export default function CustomerMessagesPage() {
 
     const unsubscribe = onSnapshot(q, async (querySnapshot) => {
       const fetchedRequestsPromises = querySnapshot.docs.map(async (docSnap) => {
-        const data = docSnap.data() as CustomerRequest;
+        const data = docSnap.data() as Omit<CustomerRequest, 'id'>;
+        
+        let eventDate = data.eventDate;
+        if (eventDate instanceof Timestamp) {
+          eventDate = eventDate.toDate();
+        } else if (typeof eventDate === 'string') {
+          eventDate = new Date(eventDate);
+        } else if (eventDate && typeof eventDate.toDate === 'function') {
+          eventDate = eventDate.toDate();
+        } else if (!(eventDate instanceof Date)) {
+          eventDate = new Date(); // Fallback
+        }
+
+        let createdAt = data.createdAt;
+        if (createdAt && !(createdAt instanceof Date)) {
+            createdAt = (createdAt as Timestamp).toDate();
+        }
+        let updatedAt = data.updatedAt;
+        if (updatedAt && !(updatedAt instanceof Date)) {
+            updatedAt = (updatedAt as Timestamp).toDate();
+        }
+        
         let enrichedData: EnrichedCustomerRequest = { 
           id: docSnap.id, 
           ...data,
-          eventDate: data.eventDate instanceof Timestamp ? data.eventDate.toDate() : new Date(data.eventDate as any),
-          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
-          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
+          eventDate,
+          createdAt,
+          updatedAt,
         };
 
         if (data.activeProposal?.chefId) {
@@ -85,10 +122,10 @@ export default function CustomerMessagesPage() {
       const requestIdFromUrl = searchParams.get('requestId');
       if (requestIdFromUrl && resolvedRequests.length > 0) {
         const requestToSelect = resolvedRequests.find(r => r.id === requestIdFromUrl);
-        if (requestToSelect) {
+        if (requestToSelect && (!selectedRequest || selectedRequest.id !== requestToSelect.id)) {
           setSelectedRequest(requestToSelect);
         }
-      } else if (selectedRequest) { // If a request was already selected, update its data
+      } else if (selectedRequest) {
         const updatedSelectedRequest = resolvedRequests.find(r => r.id === selectedRequest.id);
         setSelectedRequest(updatedSelectedRequest || null);
       }
@@ -101,7 +138,7 @@ export default function CustomerMessagesPage() {
     });
 
     return () => unsubscribe();
-  }, [user, toast, searchParams, selectedRequest?.id]); // Added selectedRequest.id to deps for refreshing
+  }, [user, toast, searchParams, selectedRequest?.id]);
 
   useEffect(() => {
     if (!selectedRequest) {
@@ -114,11 +151,18 @@ export default function CustomerMessagesPage() {
     const qMessages = query(messagesCollectionRef, orderBy("timestamp", "asc"));
 
     const unsubscribeMessages = onSnapshot(qMessages, (querySnapshot) => {
-      const fetchedMessages = querySnapshot.docs.map(docSnap => ({
-        id: docSnap.id,
-        ...docSnap.data(),
-        timestamp: docSnap.data().timestamp instanceof Timestamp ? docSnap.data().timestamp.toDate() : new Date(docSnap.data().timestamp as any)
-      } as RequestMessage));
+      const fetchedMessages = querySnapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        let timestamp = data.timestamp;
+        if (timestamp && !(timestamp instanceof Date)) {
+            timestamp = (timestamp as Timestamp).toDate();
+        }
+        return {
+          id: docSnap.id,
+          ...data,
+          timestamp
+        } as RequestMessage;
+      });
       setMessages(fetchedMessages);
       setIsLoadingMessages(false);
     }, (error) => {
@@ -133,7 +177,6 @@ export default function CustomerMessagesPage() {
   const handleSelectRequest = (request: EnrichedCustomerRequest) => {
     setSelectedRequest(request);
     setNewMessageText('');
-     // Update URL without full page reload
     router.replace(`/customer/dashboard/messages?requestId=${request.id}`, { scroll: false });
   };
 
@@ -154,7 +197,6 @@ export default function CustomerMessagesPage() {
         timestamp: serverTimestamp()
       });
       
-      // Update the parent request's updatedAt timestamp and potentially status
       let newStatus = selectedRequest.status;
       if (selectedRequest.status === 'proposal_sent' || selectedRequest.status === 'chef_accepted') {
         newStatus = 'awaiting_customer_response';
@@ -170,98 +212,132 @@ export default function CustomerMessagesPage() {
     }
   };
 
-  const handleProposalAction = async (action: 'accept' | 'decline') => {
+  const proceedWithAcceptingProposal = async () => {
     if (!selectedRequest || !selectedRequest.activeProposal || !user || !userProfile) return;
-
+    
     setIsProcessingProposalAction(true);
     const requestDocRef = doc(db, "customerRequests", selectedRequest.id);
-    const systemMessageText = action === 'accept' 
-      ? `Customer ${userProfile.name || 'You'} accepted the proposal from Chef ${selectedRequest.activeProposal.chefName}. A booking has been initiated.`
-      : `Customer ${userProfile.name || 'You'} declined the proposal from Chef ${selectedRequest.activeProposal.chefName}.`;
+    const systemMessageText = `Customer ${userProfile.name || 'You'} accepted the proposal from Chef ${selectedRequest.activeProposal.chefName}. A booking has been created.`;
 
     try {
-      if (action === 'accept') {
-        // 1. Update CustomerRequest status
-        await updateDoc(requestDocRef, {
-          status: 'customer_confirmed', 
-          updatedAt: serverTimestamp()
-        });
-        
-        // 2. Create Booking document
-        const eventDateAsTimestamp = selectedRequest.eventDate instanceof Date 
-                                     ? Timestamp.fromDate(selectedRequest.eventDate) 
-                                     : selectedRequest.eventDate; // Assume it's already a Timestamp if not a Date
+      const batch = writeBatch(db);
 
-        const newBookingData: Omit<Booking, 'id'> = {
-          customerId: user.uid,
-          customerName: userProfile.name || user.displayName || "Customer",
-          chefId: selectedRequest.activeProposal.chefId,
-          chefName: selectedRequest.activeProposal.chefName,
-          chefAvatarUrl: selectedRequest.activeProposal.chefAvatarUrl || undefined,
-          eventTitle: selectedRequest.eventType || `Menu: ${selectedRequest.activeProposal.menuTitle}`,
-          eventDate: eventDateAsTimestamp,
-          pax: selectedRequest.pax,
-          totalPrice: selectedRequest.activeProposal.menuPricePerHead * selectedRequest.pax,
-          pricePerHead: selectedRequest.activeProposal.menuPricePerHead,
-          status: 'confirmed', 
-          menuTitle: selectedRequest.activeProposal.menuTitle,
-          location: selectedRequest.location || undefined,
-          requestId: selectedRequest.id,
+      // 1. Update CustomerRequest status
+      batch.update(requestDocRef, {
+        status: 'customer_confirmed', 
+        updatedAt: serverTimestamp()
+      });
+      
+      // 2. Create Booking document
+      const eventDateAsTimestamp = selectedRequest.eventDate instanceof Date 
+                                   ? Timestamp.fromDate(selectedRequest.eventDate) 
+                                   : selectedRequest.eventDate; 
+
+      const newBookingData: Omit<Booking, 'id'> = {
+        customerId: user.uid,
+        customerName: userProfile.name || user.displayName || "Customer",
+        chefId: selectedRequest.activeProposal.chefId,
+        chefName: selectedRequest.activeProposal.chefName,
+        chefAvatarUrl: selectedRequest.activeProposal.chefAvatarUrl || undefined,
+        eventTitle: selectedRequest.eventType || `Menu: ${selectedRequest.activeProposal.menuTitle}`,
+        eventDate: eventDateAsTimestamp,
+        pax: selectedRequest.pax,
+        totalPrice: selectedRequest.activeProposal.menuPricePerHead * selectedRequest.pax,
+        pricePerHead: selectedRequest.activeProposal.menuPricePerHead,
+        status: 'confirmed', 
+        menuTitle: selectedRequest.activeProposal.menuTitle,
+        location: selectedRequest.location || undefined,
+        requestId: selectedRequest.id,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
+      const bookingDocRef = doc(collection(db, "bookings")); // Generate new ID
+      batch.set(bookingDocRef, newBookingData);
+
+      // 3. Create CalendarEvent for the Chef
+      const calendarEventData: Omit<CalendarEvent, 'id'> = {
+          chefId: newBookingData.chefId,
+          date: newBookingData.eventDate, 
+          title: `Booking: ${newBookingData.eventTitle}`,
+          customerName: newBookingData.customerName,
+          pax: newBookingData.pax,
+          menuName: newBookingData.menuTitle || 'Custom Event',
+          pricePerHead: newBookingData.pricePerHead || 0,
+          location: newBookingData.location,
+          notes: `Booking confirmed via customer request ID: ${selectedRequest.id}. Booking ID: ${bookingDocRef.id}`,
+          status: 'Confirmed',
+          isWallEvent: false, 
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
-        };
+      };
+      const chefCalendarEventDocRef = doc(db, `users/${newBookingData.chefId}/calendarEvents`, bookingDocRef.id);
+      batch.set(chefCalendarEventDocRef, calendarEventData);
 
-        const bookingsCollectionRef = collection(db, "bookings");
-        const bookingDocRef = await addDoc(bookingsCollectionRef, newBookingData);
-
-        // 3. Create CalendarEvent for the Chef
-        const calendarEventData: Omit<CalendarEvent, 'id'> = {
-            chefId: newBookingData.chefId,
-            date: newBookingData.eventDate, // Firestore Timestamp
-            title: `Booking: ${newBookingData.eventTitle}`,
-            customerName: newBookingData.customerName,
-            pax: newBookingData.pax,
-            menuName: newBookingData.menuTitle || 'Custom Event',
-            pricePerHead: newBookingData.pricePerHead || 0,
-            location: newBookingData.location,
-            notes: `Booking confirmed via customer request ID: ${selectedRequest.id}. Booking ID: ${bookingDocRef.id}`,
-            status: 'Confirmed',
-            isWallEvent: false, // This is not from Chef Wall directly
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-        };
-        const chefCalendarEventDocRef = doc(db, `users/${newBookingData.chefId}/calendarEvents`, bookingDocRef.id);
-        await setDoc(chefCalendarEventDocRef, calendarEventData);
-
-
-        toast({ 
-          title: "Proposal Accepted!", 
-          description: `Booking (ID: ${bookingDocRef.id.substring(0,6)}...) created. Check 'My Booked Events'. The chef's calendar has been updated.`,
-          duration: 7000,
-        });
-        router.push('/customer/dashboard/events');
-
-      } else { // Decline
-        await updateDoc(requestDocRef, {
-          status: 'proposal_declined',
-          activeProposal: null, // Clear the active proposal when customer declines
-          updatedAt: serverTimestamp()
-        });
-        toast({ title: "Proposal Declined", variant: "default", description: "The chef has been notified." });
-      }
-      
+      // 4. Add system message
       const messagesCollectionRef = collection(requestDocRef, "messages");
-      await addDoc(messagesCollectionRef, {
+      const systemMessageRef = doc(messagesCollectionRef); // auto-generate ID
+      batch.set(systemMessageRef, {
         requestId: selectedRequest.id,
-        senderId: 'system', // Could be user.uid with senderRole: 'customer' if preferred
+        senderId: 'system', 
         senderRole: 'system',
         text: systemMessageText,
         timestamp: serverTimestamp()
       });
 
+      await batch.commit();
+
+      toast({ 
+        title: "Proposal Accepted & Booking Confirmed!", 
+        description: `Booking (ID: ${bookingDocRef.id.substring(0,6)}...) created. Check 'My Booked Events'.`,
+        duration: 7000,
+      });
+      router.push('/customer/dashboard/events');
+
     } catch (error) {
-      console.error(`Error ${action}ing proposal:`, error);
-      toast({ title: "Error", description: `Could not ${action} proposal. Details: ${(error as Error).message}`, variant: "destructive" });
+      console.error("Error accepting proposal and creating booking:", error);
+      toast({ title: "Error", description: `Could not accept proposal. Details: ${(error as Error).message}`, variant: "destructive" });
+    } finally {
+      setIsProcessingProposalAction(false);
+      setIsConfirmPaymentDialogOpen(false);
+    }
+  };
+
+  const handleProposalAction = async (action: 'accept' | 'decline') => {
+    if (!selectedRequest || !selectedRequest.activeProposal || !user || !userProfile) return;
+
+    if (action === 'accept') {
+      setIsConfirmPaymentDialogOpen(true); // Open payment dialog first
+      return;
+    }
+
+    // Handle decline directly
+    setIsProcessingProposalAction(true);
+    const requestDocRef = doc(db, "customerRequests", selectedRequest.id);
+    const systemMessageText = `Customer ${userProfile.name || 'You'} declined the proposal from Chef ${selectedRequest.activeProposal.chefName}.`;
+    
+    try {
+        const batch = writeBatch(db);
+        batch.update(requestDocRef, {
+          status: 'proposal_declined',
+          activeProposal: null, 
+          updatedAt: serverTimestamp()
+        });
+        
+        const messagesCollectionRef = collection(requestDocRef, "messages");
+        const systemMessageRef = doc(messagesCollectionRef);
+        batch.set(systemMessageRef, {
+          requestId: selectedRequest.id,
+          senderId: 'system',
+          senderRole: 'system',
+          text: systemMessageText,
+          timestamp: serverTimestamp()
+        });
+
+        await batch.commit();
+        toast({ title: "Proposal Declined", variant: "default", description: "The chef has been notified." });
+    } catch (error) {
+      console.error(`Error declining proposal:`, error);
+      toast({ title: "Error", description: `Could not decline proposal. Details: ${(error as Error).message}`, variant: "destructive" });
     } finally {
       setIsProcessingProposalAction(false);
     }
@@ -367,6 +443,11 @@ export default function CustomerMessagesPage() {
                 <CardDescription className="text-xs">Request ID: {selectedRequest.id.substring(0,8)}... | Status: {getStatusDisplay(selectedRequest.status)}</CardDescription>
               </div>
             </div>
+            <div className="text-xs text-muted-foreground space-y-0.5 text-right">
+                <p><CalendarDays className="inline h-3 w-3 mr-1"/> Event Date: {format(selectedRequest.eventDate, 'PP')}</p>
+                <p><Users className="inline h-3 w-3 mr-1"/> PAX: {selectedRequest.pax}</p>
+                <p><DollarSign className="inline h-3 w-3 mr-1"/> Budget: ${selectedRequest.budget}</p>
+            </div>
           </CardHeader>
 
           <CardContent className="p-6 flex-grow overflow-y-auto space-y-4">
@@ -375,33 +456,36 @@ export default function CustomerMessagesPage() {
             ) : messages.length === 0 && !selectedRequest.activeProposal ? (
                 <div className="text-center text-muted-foreground py-8">No messages yet for this request. Send a message to start the conversation or await a chef's proposal.</div>
             ) : (
-              messages.map(msg => (
-                <div key={msg.id} className={`flex ${msg.senderId === user?.uid ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`flex items-end gap-2 max-w-[75%]`}>
-                    {msg.senderId !== user?.uid && msg.senderRole !== 'system' && (
-                       <Avatar className="h-6 w-6">
-                         <AvatarImage src={msg.senderAvatarUrl || undefined} alt={msg.senderName || 'U'} data-ai-hint="user avatar"/>
-                         <AvatarFallback>{msg.senderName ? msg.senderName.charAt(0).toUpperCase() : (msg.senderRole === 'chef' ? 'C' : 'S')}</AvatarFallback>
-                       </Avatar>
-                    )}
-                     {msg.senderRole === 'system' && (
-                        <Info className="h-5 w-5 text-muted-foreground flex-shrink-0 self-center mr-1" />
-                    )}
-                    <div className={`px-3 py-2 rounded-xl ${msg.senderId === user?.uid ? 'bg-primary text-primary-foreground' : (msg.senderRole === 'system' ? 'bg-amber-100 text-amber-700 text-xs italic text-center w-full' : 'bg-muted')}`}>
-                      <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
-                      <p className={`text-xs mt-1 ${msg.senderId === user?.uid ? 'text-primary-foreground/70 text-right' : (msg.senderRole === 'system' ? 'hidden' : 'text-muted-foreground/70 text-left')}`}>
-                        {msg.timestamp ? format(new Date(msg.timestamp), 'p') : 'Sending...'}
-                      </p>
+              <>
+                {messages.map(msg => (
+                  <div key={msg.id} className={`flex ${msg.senderId === user?.uid ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`flex items-end gap-2 max-w-[75%]`}>
+                      {msg.senderId !== user?.uid && msg.senderRole !== 'system' && (
+                         <Avatar className="h-6 w-6">
+                           <AvatarImage src={msg.senderAvatarUrl || undefined} alt={msg.senderName || 'U'} data-ai-hint="user avatar"/>
+                           <AvatarFallback>{msg.senderName ? msg.senderName.charAt(0).toUpperCase() : (msg.senderRole === 'chef' ? 'C' : 'S')}</AvatarFallback>
+                         </Avatar>
+                      )}
+                       {msg.senderRole === 'system' && (
+                          <Info className="h-5 w-5 text-muted-foreground flex-shrink-0 self-center mr-1" />
+                      )}
+                      <div className={`px-3 py-2 rounded-xl ${msg.senderId === user?.uid ? 'bg-primary text-primary-foreground' : (msg.senderRole === 'system' ? 'bg-amber-100 text-amber-700 text-xs italic text-center w-full' : 'bg-muted')}`}>
+                        <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
+                        <p className={`text-xs mt-1 ${msg.senderId === user?.uid ? 'text-primary-foreground/70 text-right' : (msg.senderRole === 'system' ? 'hidden' : 'text-muted-foreground/70 text-left')}`}>
+                          {msg.timestamp ? format(new Date(msg.timestamp), 'p') : 'Sending...'}
+                        </p>
+                      </div>
+                       {msg.senderId === user?.uid && userProfile && (
+                         <Avatar className="h-6 w-6">
+                           <AvatarImage src={userProfile.profilePictureUrl || undefined} alt={userProfile.name || 'Me'} data-ai-hint="user avatar"/>
+                           <AvatarFallback>{userProfile.name ? userProfile.name.charAt(0).toUpperCase() : 'M'}</AvatarFallback>
+                         </Avatar>
+                      )}
                     </div>
-                     {msg.senderId === user?.uid && userProfile && (
-                       <Avatar className="h-6 w-6">
-                         <AvatarImage src={userProfile.profilePictureUrl || undefined} alt={userProfile.name || 'Me'} data-ai-hint="user avatar"/>
-                         <AvatarFallback>{userProfile.name ? userProfile.name.charAt(0).toUpperCase() : 'M'}</AvatarFallback>
-                       </Avatar>
-                    )}
                   </div>
-                </div>
-              ))
+                ))}
+                <div ref={messagesEndRef} />
+              </>
             )}
 
             {selectedRequest.activeProposal && (
@@ -418,13 +502,11 @@ export default function CustomerMessagesPage() {
                   }`}>
                     <FileText className="mr-2 h-5 w-5"/>
                     Proposal from Chef {selectedRequest.activeProposal.chefName}
-                    {selectedRequest.status === 'proposal_declined' && " (You Declined)"}
-                    {selectedRequest.status === 'customer_confirmed' && " (You Accepted - Booking Initiated)"}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0 text-sm space-y-1">
                   <p><Briefcase className="inline h-4 w-4 mr-1 text-muted-foreground"/>Menu: <strong>{selectedRequest.activeProposal.menuTitle}</strong></p>
-                  <p><DollarSign className="inline h-4 w-4 mr-1 text-muted-foreground"/>Price: <strong>${selectedRequest.activeProposal.menuPricePerHead.toFixed(2)} per head</strong></p>
+                  <p><DollarSign className="inline h-4 w-4 mr-1 text-muted-foreground"/>Price: <strong>${selectedRequest.activeProposal.menuPricePerHead.toFixed(2)} per head</strong> (Total: ${(selectedRequest.activeProposal.menuPricePerHead * selectedRequest.pax).toFixed(2)})</p>
                   {selectedRequest.activeProposal.notes && <p><Info className="inline h-4 w-4 mr-1 text-muted-foreground"/>Notes: {selectedRequest.activeProposal.notes}</p>}
                 </CardContent>
                 {canTakeProposalAction && (
@@ -454,7 +536,7 @@ export default function CustomerMessagesPage() {
             </div>
             <div className="flex w-full items-center space-x-2">
               <Textarea
-                placeholder="Type your message..."
+                placeholder={isConversationFinalized ? "This conversation is finalized." : "Type your message..."}
                 value={newMessageText}
                 onChange={(e) => setNewMessageText(e.target.value)}
                 className="flex-1 min-h-[40px] max-h-[120px]"
@@ -481,7 +563,32 @@ export default function CustomerMessagesPage() {
           <p className="text-sm text-muted-foreground">Your conversations with chefs will appear here.</p>
         </div>
       )}
+
+      {selectedRequest && selectedRequest.activeProposal && (
+        <AlertDialog open={isConfirmPaymentDialogOpen} onOpenChange={setIsConfirmPaymentDialogOpen}>
+            <AlertDialogContent>
+                <AlertDialogHeader>
+                    <AlertDialogTitle>Confirm Booking &amp; Payment</AlertDialogTitle>
+                    <AlertDialogDescription>
+                        You are about to accept the proposal from Chef {selectedRequest.activeProposal.chefName} for the menu "{selectedRequest.activeProposal.menuTitle}".
+                        <br />
+                        Total Price: <strong>${(selectedRequest.activeProposal.menuPricePerHead * selectedRequest.pax).toFixed(2)}</strong>
+                        <br /><br />
+                        This is a simulation. In a real application, you would be redirected to a secure payment gateway.
+                    </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                    <AlertDialogCancel onClick={() => setIsConfirmPaymentDialogOpen(false)} disabled={isProcessingProposalAction}>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={proceedWithAcceptingProposal} disabled={isProcessingProposalAction}>
+                        {isProcessingProposalAction ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : null}
+                        Confirm &amp; Pay (Simulated)
+                    </AlertDialogAction>
+                </AlertDialogFooter>
+            </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
   );
 }
 
+    
