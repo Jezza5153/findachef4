@@ -11,21 +11,32 @@ import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
 import { collection, query, where, onSnapshot, orderBy, Timestamp, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { format } from 'date-fns';
-import { CalendarCheck2, Users, DollarSign, QrCode, Info, Loader2, ChefHat, MapPin, FileText, MessageSquare } from 'lucide-react';
+import { CalendarCheck2, Users, DollarSign, QrCode, Info, Loader2, ChefHat, MapPin, FileText, MessageSquare, XCircle } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 import { QRCodeSVG } from 'qrcode.react';
-import { BookingInvoiceDialog } from '@/components/booking-invoice-dialog'; // Import the new dialog
+import { BookingInvoiceDialog } from '@/components/booking-invoice-dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription as ShadAlertDialogDescription, // Renamed to avoid conflict
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 export default function CustomerBookedEventsPage() {
-  const { user, userProfile } = useAuth(); // Get userProfile for customer name
+  const { user, userProfile } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
   const [bookedEvents, setBookedEvents] = useState<Booking[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isCancelling, setIsCancelling] = useState<string | null>(null); // For loading state on cancel button
+  const [isCancelling, setIsCancelling] = useState<string | null>(null);
 
   const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = useState(false);
   const [selectedBookingForInvoice, setSelectedBookingForInvoice] = useState<Booking | null>(null);
@@ -89,14 +100,16 @@ export default function CustomerBookedEventsPage() {
   const handleCancelBooking = async (bookingId: string) => {
     if (!user) return;
     const bookingToCancel = bookedEvents.find(b => b.id === bookingId);
-    if (!bookingToCancel || bookingToCancel.status !== 'confirmed') {
+    if (!bookingToCancel) {
+      toast({ title: "Error", description: "Booking not found.", variant: "destructive" });
+      return;
+    }
+    // Check if cancellation is allowed based on status and potentially event date
+    if (bookingToCancel.status !== 'confirmed') {
       toast({ title: "Cancellation Not Allowed", description: "This booking cannot be cancelled at its current stage.", variant: "destructive" });
       return;
     }
-
-    if (!window.confirm("Are you sure you want to cancel this booking? Review cancellation policy in Terms of Service.")) {
-        return;
-    }
+    // Add logic for date-based cancellation policy if needed (e.g., no cancellations within 24h)
 
     setIsCancelling(bookingId);
     try {
@@ -109,6 +122,7 @@ export default function CustomerBookedEventsPage() {
         title: "Booking Cancelled",
         description: `Your booking for "${bookingToCancel.eventTitle}" has been cancelled.`,
       });
+      // The UI will update via onSnapshot
     } catch (error) {
       console.error("Error cancelling booking:", error);
       toast({ title: "Error", description: "Could not cancel booking. Please try again.", variant: "destructive" });
@@ -132,6 +146,10 @@ export default function CustomerBookedEventsPage() {
         variant: "default",
       });
     }
+  };
+
+  const isCancellable = (status?: Booking['status']) => {
+    return status === 'confirmed'; // Simple rule for now
   };
 
   if (isLoading) {
@@ -212,13 +230,13 @@ export default function CustomerBookedEventsPage() {
                   <Alert variant="default" className="mt-4 bg-blue-500/10 border-blue-500/30">
                      <QrCode className="h-5 w-5 text-blue-600" data-ai-hint="qr code" />
                     <AlertTitle className="text-blue-700 font-semibold">Event Completion QR Code</AlertTitle>
-                    <AlertDescription className="text-blue-600 text-xs space-y-1">
+                    <ShadAlertDialogDescription className="text-blue-600 text-xs space-y-1">
                       <p>On the day of your event, show this QR code area and the Booking ID below to your chef. They will scan it or enter the ID to confirm completion.</p>
                       <div className="flex flex-col items-center justify-center p-2 bg-white rounded-md my-2 shadow">
                         <QRCodeSVG value={booking.id} size={120} bgColor={"#ffffff"} fgColor={"#000000"} level={"L"} />
                         <p className="text-xs font-mono mt-1.5 text-black">Booking ID: <span className="font-bold">{booking.id}</span></p>
                       </div>
-                    </AlertDescription>
+                    </ShadAlertDialogDescription>
                   </Alert>
                 )}
                 {booking.status === 'completed' && booking.qrCodeScannedAt && (
@@ -230,17 +248,35 @@ export default function CustomerBookedEventsPage() {
                     <MessageSquare className="mr-2 h-4 w-4"/> Message Chef
                 </Button>
                 <div className="flex space-x-2 w-full sm:w-auto">
-                    {booking.status === 'confirmed' && (
-                        <Button 
+                    {isCancellable(booking.status) && (
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                           <Button 
                             variant="destructive" 
                             size="sm" 
-                            onClick={() => handleCancelBooking(booking.id)} 
                             disabled={isCancelling === booking.id}
                             className="flex-1 sm:flex-none"
-                        >
-                            {isCancelling === booking.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : null}
+                          >
+                            {isCancelling === booking.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <XCircle className="mr-2 h-4 w-4"/>}
                             Cancel Booking
-                        </Button>
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+                            <ShadAlertDialogDescription>
+                              Are you sure you want to cancel this booking for "{booking.eventTitle}"? 
+                              Please review our cancellation policy in the Terms of Service.
+                            </ShadAlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Keep Booking</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => handleCancelBooking(booking.id)} className="bg-destructive hover:bg-destructive/90">
+                              Yes, Cancel Booking
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
                     )}
                     {(booking.status === 'completed' || booking.status === 'confirmed') && (
                          <Button 
@@ -261,12 +297,12 @@ export default function CustomerBookedEventsPage() {
        <Alert className="mt-8">
           <Info className="h-4 w-4" data-ai-hint="information circle" />
           <AlertTitle>Booking Information</AlertTitle>
-          <AlertDescription className="text-xs">
+          <ShadAlertDialogDescription className="text-xs">
             This page shows your confirmed and past events. If you've just made a request or a chef has sent a proposal,
             check your <Link href="/customer/dashboard/messages" className="underline hover:text-primary">Messages</Link> for updates.
             Bookings are finalized after payment and mutual confirmation.
             Cancellation policies apply as per our <Link href="/terms" className="underline hover:text-primary">Terms of Service</Link>.
-          </AlertDescription>
+          </ShadAlertDialogDescription>
         </Alert>
 
         <BookingInvoiceDialog 
