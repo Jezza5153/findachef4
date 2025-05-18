@@ -24,7 +24,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog"; // Removed AlertDialogTrigger as it's not directly used here
+} from "@/components/ui/alert-dialog";
 
 export default function CustomerMessagesPage() {
   const { user, userProfile } = useAuth();
@@ -42,7 +42,8 @@ export default function CustomerMessagesPage() {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [isProcessingProposalAction, setIsProcessingProposalAction] = useState(false);
-  const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false); // Renamed for clarity
+  const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
+  const [isActuallyProcessingPayment, setIsActuallyProcessingPayment] = useState(false); // New state for payment processing
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
@@ -61,37 +62,21 @@ export default function CustomerMessagesPage() {
     const q = query(
       requestsCollectionRef,
       where("customerId", "==", user.uid),
-      orderBy("updatedAt", "desc")
+      orderBy("updatedAt", "desc") // Order by most recently updated
     );
 
     const unsubscribe = onSnapshot(q, async (querySnapshot) => {
       const fetchedRequestsPromises = querySnapshot.docs.map(async (docSnap) => {
-        const data = docSnap.data() as Omit<CustomerRequest, 'id'>;
+        const data = docSnap.data() as Omit<CustomerRequest, 'id' | 'createdAt' | 'updatedAt' | 'eventDate'> & { createdAt?: any, updatedAt?: any, eventDate: any };
         
-        let eventDate = data.eventDate;
-        if (eventDate && !(eventDate instanceof Date) && typeof eventDate.toDate === 'function') {
-          eventDate = (eventDate as Timestamp).toDate();
-        } else if (typeof eventDate === 'string') {
-          eventDate = new Date(eventDate);
-        } else if (!(eventDate instanceof Date)) {
-          eventDate = new Date(); 
-        }
+        const convertTimestamp = (ts: any) => ts instanceof Timestamp ? ts.toDate() : (ts ? new Date(ts) : undefined);
 
-        let createdAt = data.createdAt;
-        if (createdAt && !(createdAt instanceof Date) && typeof createdAt.toDate === 'function') {
-            createdAt = (createdAt as Timestamp).toDate();
-        }
-        let updatedAt = data.updatedAt;
-        if (updatedAt && !(updatedAt instanceof Date) && typeof updatedAt.toDate === 'function') {
-            updatedAt = (updatedAt as Timestamp).toDate();
-        }
-        
         let enrichedData: EnrichedCustomerRequest = { 
           id: docSnap.id, 
           ...data,
-          eventDate,
-          createdAt,
-          updatedAt,
+          eventDate: convertTimestamp(data.eventDate),
+          createdAt: convertTimestamp(data.createdAt),
+          updatedAt: convertTimestamp(data.updatedAt),
         };
 
         if (data.activeProposal?.chefId) {
@@ -115,14 +100,13 @@ export default function CustomerMessagesPage() {
       const resolvedRequests = await Promise.all(fetchedRequestsPromises);
       setCustomerRequests(resolvedRequests);
       
-
       const requestIdFromUrl = searchParams.get('requestId');
       if (requestIdFromUrl && resolvedRequests.length > 0) {
         const requestToSelect = resolvedRequests.find(r => r.id === requestIdFromUrl);
         if (requestToSelect && (!selectedRequest || selectedRequest.id !== requestToSelect.id)) {
           setSelectedRequest(requestToSelect);
         }
-      } else if (selectedRequest) { // If a request was selected, try to find its updated version
+      } else if (selectedRequest) { 
         const updatedSelectedRequest = resolvedRequests.find(r => r.id === selectedRequest.id);
         setSelectedRequest(updatedSelectedRequest || null);
       }
@@ -135,7 +119,7 @@ export default function CustomerMessagesPage() {
     });
 
     return () => unsubscribe();
-  }, [user, toast, searchParams, selectedRequest?.id]); // Added selectedRequest.id to re-run if it changes externally
+  }, [user, toast, searchParams, selectedRequest?.id]);
 
   useEffect(() => {
     if (!selectedRequest) {
@@ -151,8 +135,10 @@ export default function CustomerMessagesPage() {
       const fetchedMessages = querySnapshot.docs.map(docSnap => {
         const data = docSnap.data();
         let timestamp = data.timestamp;
-        if (timestamp && !(timestamp instanceof Date) && typeof timestamp.toDate === 'function') {
+        if (timestamp && typeof timestamp.toDate === 'function') { // Check if it's a Firestore Timestamp
             timestamp = (timestamp as Timestamp).toDate();
+        } else if (timestamp && typeof timestamp === 'string') { // Handle ISO string dates if any
+            timestamp = new Date(timestamp);
         }
         return {
           id: docSnap.id,
@@ -194,8 +180,8 @@ export default function CustomerMessagesPage() {
         timestamp: serverTimestamp()
       });
       
-      // Update the parent request's updatedAt and potentially status if it was 'proposal_sent' or 'chef_accepted'
       let newStatus = selectedRequest.status;
+      // If customer sends a message on a proposal sent by chef, or accepted by chef, update status
       if (selectedRequest.status === 'proposal_sent' || selectedRequest.status === 'chef_accepted') {
         newStatus = 'awaiting_customer_response';
       }
@@ -213,7 +199,11 @@ export default function CustomerMessagesPage() {
   const proceedWithBookingCreation = async () => {
     if (!selectedRequest || !selectedRequest.activeProposal || !user || !userProfile) return;
     
-    setIsProcessingProposalAction(true); // Use the same loading state
+    setIsActuallyProcessingPayment(true); // Start payment processing simulation
+    // Simulate payment delay
+    await new Promise(resolve => setTimeout(resolve, 2500));
+
+
     const requestDocRef = doc(db, "customerRequests", selectedRequest.id);
     const systemMessageText = `Customer ${userProfile.name || 'You'} accepted the proposal from Chef ${selectedRequest.activeProposal.chefName}. A booking has been created.`;
 
@@ -227,7 +217,7 @@ export default function CustomerMessagesPage() {
       
       const eventDateAsTimestamp = selectedRequest.eventDate instanceof Date 
                                    ? Timestamp.fromDate(selectedRequest.eventDate) 
-                                   : selectedRequest.eventDate; 
+                                   : selectedRequest.eventDate; // Assuming it might already be a Timestamp from Firestore
 
       const newBookingData: Omit<Booking, 'id'> = {
         customerId: user.uid,
@@ -235,7 +225,7 @@ export default function CustomerMessagesPage() {
         chefId: selectedRequest.activeProposal.chefId,
         chefName: selectedRequest.activeProposal.chefName,
         chefAvatarUrl: selectedRequest.activeProposal.chefAvatarUrl || undefined,
-        eventTitle: selectedRequest.eventType || `Menu: ${selectedRequest.activeProposal.menuTitle}`,
+        eventTitle: selectedRequest.activeProposal.menuTitle || selectedRequest.eventType || "Booked Event",
         eventDate: eventDateAsTimestamp,
         pax: selectedRequest.pax,
         totalPrice: selectedRequest.activeProposal.menuPricePerHead * selectedRequest.pax,
@@ -250,7 +240,7 @@ export default function CustomerMessagesPage() {
       const bookingDocRef = doc(collection(db, "bookings")); 
       batch.set(bookingDocRef, newBookingData);
 
-      const calendarEventData: Omit<CalendarEvent, 'id'> = {
+      const calendarEventData: Omit<CalendarEvent, 'id' | 'createdAt' | 'updatedAt'> = {
           chefId: newBookingData.chefId,
           date: newBookingData.eventDate, 
           title: `Booking: ${newBookingData.eventTitle}`,
@@ -262,11 +252,9 @@ export default function CustomerMessagesPage() {
           notes: `Booking confirmed for request ID: ${selectedRequest.id}. Booking ID: ${bookingDocRef.id}`,
           status: 'Confirmed',
           isWallEvent: false, 
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
       };
       const chefCalendarEventDocRef = doc(db, `users/${newBookingData.chefId}/calendarEvents`, bookingDocRef.id);
-      batch.set(chefCalendarEventDocRef, calendarEventData);
+      batch.set(chefCalendarEventDocRef, { ...calendarEventData, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
 
       const messagesCollectionRef = collection(requestDocRef, "messages");
       const systemMessageRef = doc(messagesCollectionRef); 
@@ -281,17 +269,18 @@ export default function CustomerMessagesPage() {
       await batch.commit();
 
       toast({ 
-        title: "Proposal Accepted & Booking Confirmed!", 
-        description: `Booking (ID: ${bookingDocRef.id.substring(0,6)}...) created. Check 'My Booked Events'.`,
+        title: "Booking Confirmed!", 
+        description: `Your event with Chef ${newBookingData.chefName} is confirmed. Booking ID: ${bookingDocRef.id.substring(0,6)}... Check 'My Booked Events'.`,
         duration: 7000,
       });
       router.push('/customer/dashboard/events');
 
     } catch (error) {
       console.error("Error accepting proposal and creating booking:", error);
-      toast({ title: "Error", description: `Could not accept proposal. Details: ${(error as Error).message}`, variant: "destructive" });
+      toast({ title: "Error", description: `Could not complete booking. Details: ${(error as Error).message}`, variant: "destructive" });
     } finally {
       setIsProcessingProposalAction(false);
+      setIsActuallyProcessingPayment(false); // End payment processing simulation
       setIsPaymentDialogOpen(false);
     }
   };
@@ -301,11 +290,10 @@ export default function CustomerMessagesPage() {
     if (!selectedRequest || !selectedRequest.activeProposal || !user || !userProfile) return;
 
     if (action === 'accept') {
-      setIsPaymentDialogOpen(true); // Open payment dialog first
+      setIsPaymentDialogOpen(true); 
       return;
     }
 
-    // Handle decline directly
     setIsProcessingProposalAction(true);
     const requestDocRef = doc(db, "customerRequests", selectedRequest.id);
     const systemMessageText = `Customer ${userProfile.name || 'You'} declined the proposal from Chef ${selectedRequest.activeProposal.chefName}.`;
@@ -357,7 +345,6 @@ export default function CustomerMessagesPage() {
                                    selectedRequest.status === 'proposal_declined' ||
                                    selectedRequest.status === 'booked' || 
                                    selectedRequest.status === 'cancelled_by_customer');
-
 
   return (
     <div className="h-[calc(100vh-var(--header-height,10rem))] flex flex-col md:flex-row gap-6">
@@ -570,10 +557,10 @@ export default function CustomerMessagesPage() {
                     </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
-                    <AlertDialogCancel onClick={() => setIsPaymentDialogOpen(false)} disabled={isProcessingProposalAction}>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={proceedWithBookingCreation} disabled={isProcessingProposalAction}>
-                        {isProcessingProposalAction ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <CheckCircle className="mr-2 h-4 w-4"/>}
-                        Confirm & Pay (Simulated)
+                    <AlertDialogCancel onClick={() => setIsPaymentDialogOpen(false)} disabled={isActuallyProcessingPayment}>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={proceedWithBookingCreation} disabled={isActuallyProcessingPayment || isProcessingProposalAction}>
+                        {isActuallyProcessingPayment ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <CheckCircle className="mr-2 h-4 w-4"/>}
+                        {isActuallyProcessingPayment ? "Processing Payment..." : "Confirm & Pay (Simulated)"}
                     </AlertDialogAction>
                 </AlertDialogFooter>
             </AlertDialogContent>
@@ -582,3 +569,5 @@ export default function CustomerMessagesPage() {
     </div>
   );
 }
+
+    
