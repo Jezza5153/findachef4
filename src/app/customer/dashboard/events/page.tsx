@@ -9,14 +9,20 @@ import { Button } from '@/components/ui/button';
 import type { Booking } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, orderBy, Timestamp, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, Timestamp } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { CalendarCheck2, User, Users, DollarSign, QrCode, Info, Loader2, ChefHat, MapPin } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation'; // Import useRouter
+import { useToast } from '@/hooks/use-toast'; // Import useToast
+
+// MOCK_BOOKED_EVENTS is removed as we are fetching real data
 
 export default function CustomerBookedEventsPage() {
   const { user } = useAuth();
+  const router = useRouter(); // Initialize useRouter
+  const { toast } = useToast(); // Initialize useToast
   const [bookedEvents, setBookedEvents] = useState<Booking[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -50,13 +56,18 @@ export default function CustomerBookedEventsPage() {
       setIsLoading(false);
     }, (error) => {
       console.error('Error fetching booked events:', error);
-      setBookedEvents([]); // Clear on error
+      toast({
+        title: "Error Loading Bookings",
+        description: "Could not fetch your booked events.",
+        variant: "destructive",
+      });
+      setBookedEvents([]);
       setIsLoading(false);
     });
 
-    return () => unsubscribe(); // Cleanup subscription on component unmount
+    return () => unsubscribe();
 
-  }, [user]);
+  }, [user, toast]);
 
   const getStatusVariant = (status?: Booking['status']): 'default' | 'secondary' | 'destructive' | 'outline' => {
     if (!status) return 'outline';
@@ -74,19 +85,39 @@ export default function CustomerBookedEventsPage() {
 
   const handleCancelBooking = (bookingId: string) => {
     // Placeholder for cancel booking logic
-    alert(`Cancel booking ${bookingId} - (Feature to be implemented)`);
+    toast({ 
+        title: "Cancel Booking (Placeholder)", 
+        description: `Cancelling booking ${bookingId.substring(0,6)}... requires backend logic.`,
+        variant: "default"
+    });
     // This would involve updating the booking status in Firestore and handling refund logic.
   };
   
   const handleViewReceipts = (bookingId: string) => {
     // Placeholder for viewing receipts related to this booking
-     alert(`View receipts for booking ${bookingId} - (Feature to be implemented)`);
+     toast({ 
+        title: "View Receipts (Placeholder)", 
+        description: `Viewing receipts for booking ${bookingId.substring(0,6)}... requires further implementation.`,
+        variant: "default"
+    });
+  };
+
+  const handleMessageChef = (booking: Booking) => {
+    if (booking.requestId) {
+      router.push(`/customer/dashboard/messages?requestId=${booking.requestId}`);
+    } else {
+      toast({
+        title: "Messaging Not Available",
+        description: "Direct messaging for this type of booking (e.g., from Chef Wall) is not yet fully integrated.",
+        variant: "default",
+      });
+    }
   };
 
   if (isLoading) {
     return (
       <div className="flex justify-center items-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary" data-ai-hint="loading spinner" />
         <p className="ml-2">Loading your booked events...</p>
       </div>
     );
@@ -96,7 +127,7 @@ export default function CustomerBookedEventsPage() {
     <div className="space-y-8">
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold flex items-center">
-          <CalendarCheck2 className="mr-3 h-8 w-8 text-primary" /> My Booked Events
+          <CalendarCheck2 className="mr-3 h-8 w-8 text-primary" data-ai-hint="calendar check" /> My Booked Events
         </h1>
       </div>
 
@@ -130,7 +161,7 @@ export default function CustomerBookedEventsPage() {
                     {booking.chefAvatarUrl ? (
                        <Image src={booking.chefAvatarUrl} alt={booking.chefName} width={24} height={24} className="rounded-full mr-2 object-cover" data-ai-hint="chef portrait"/>
                     ) : (
-                       <ChefHat className="h-4 w-4 mr-2 text-muted-foreground" />
+                       <ChefHat className="h-4 w-4 mr-2 text-muted-foreground" data-ai-hint="chef hat" />
                     )}
                      With Chef {booking.chefName}
                   </CardDescription>
@@ -139,27 +170,27 @@ export default function CustomerBookedEventsPage() {
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
                 <div className="flex items-center text-muted-foreground">
-                  <CalendarCheck2 className="h-4 w-4 mr-2 text-primary" />
+                  <CalendarCheck2 className="h-4 w-4 mr-2 text-primary" data-ai-hint="calendar event" />
                   Date: <span className="font-medium text-foreground ml-1">{booking.eventDate ? format(booking.eventDate, 'PPpp') : 'Date TBD'}</span>
                 </div>
                 <div className="flex items-center text-muted-foreground">
-                  <Users className="h-4 w-4 mr-2 text-primary" />
+                  <Users className="h-4 w-4 mr-2 text-primary" data-ai-hint="people group" />
                   Guests: <span className="font-medium text-foreground ml-1">{booking.pax}</span>
                 </div>
                  {booking.location && (
                   <div className="flex items-center text-muted-foreground">
-                    <MapPin className="h-4 w-4 mr-2 text-primary" />
+                    <MapPin className="h-4 w-4 mr-2 text-primary" data-ai-hint="location map" />
                     Location: <span className="font-medium text-foreground ml-1">{booking.location}</span>
                   </div>
                 )}
                 <div className="flex items-center text-muted-foreground">
-                  <DollarSign className="h-4 w-4 mr-2 text-green-600" />
+                  <DollarSign className="h-4 w-4 mr-2 text-green-600" data-ai-hint="money dollar" />
                   Total Price: <span className="font-medium text-foreground ml-1">${booking.totalPrice.toFixed(2)}</span>
                 </div>
                 
                 {booking.status === 'confirmed' && !booking.qrCodeScannedAt && (
                   <Alert variant="default" className="mt-4 bg-blue-500/10 border-blue-500/30">
-                     <QrCode className="h-5 w-5 text-blue-600" />
+                     <QrCode className="h-5 w-5 text-blue-600" data-ai-hint="qr code" />
                     <AlertTitle className="text-blue-700 font-semibold">Event Completion</AlertTitle>
                     <AlertDescription className="text-blue-600 text-xs">
                       On the day of your event, the chef will scan a QR code that will be displayed here to confirm completion.
@@ -168,12 +199,12 @@ export default function CustomerBookedEventsPage() {
                   </Alert>
                 )}
                 {booking.status === 'completed' && booking.qrCodeScannedAt && (
-                    <p className="text-xs text-green-600 flex items-center"><Info className="h-3 w-3 mr-1"/>Event marked complete on {format(booking.qrCodeScannedAt, 'PP')}.</p>
+                    <p className="text-xs text-green-600 flex items-center"><Info className="h-3 w-3 mr-1" data-ai-hint="information circle" />Event marked complete on {format(booking.qrCodeScannedAt, 'PP')}.</p>
                 )}
 
               </CardContent>
               <CardFooter className="flex flex-col sm:flex-row justify-between items-center pt-4 border-t space-y-2 sm:space-y-0">
-                <Button variant="outline" size="sm" onClick={() => alert(`Messaging for booking ${booking.id} - (Feature to be implemented)`)}>
+                <Button variant="outline" size="sm" onClick={() => handleMessageChef(booking)}>
                     Message Chef
                 </Button>
                 <div className="flex space-x-2">
@@ -194,7 +225,7 @@ export default function CustomerBookedEventsPage() {
         </div>
       )}
        <Alert className="mt-8">
-          <Info className="h-4 w-4" />
+          <Info className="h-4 w-4" data-ai-hint="information circle" />
           <AlertTitle>Booking Information</AlertTitle>
           <AlertDescription className="text-xs">
             This page shows your confirmed and past events. If you've just made a request or a chef has sent a proposal,
@@ -206,3 +237,5 @@ export default function CustomerBookedEventsPage() {
     </div>
   );
 }
+    
+    
