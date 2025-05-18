@@ -104,9 +104,11 @@ export interface CustomerProfile extends UserProfileBase {
 
 export interface AdminProfile extends UserProfileBase {
   role: 'admin';
+  // Admin-specific fields can be added here if needed
 }
 
 export type AppUserProfile = ChefProfile | CustomerProfile | AdminProfile;
+export type AppUserProfileContext = UserProfileBase & Partial<ChefProfile> & Partial<CustomerProfile> & Partial<AdminProfile>;
 
 
 export interface CustomerRequest {
@@ -198,7 +200,7 @@ export interface CalendarEvent {
   createdAt?: any; 
   updatedAt?: any; 
   teamId?: string;
-  isWallEvent?: boolean;
+  isWallEvent?: boolean; // Indicates if event originated from a ChefWallEvent
 }
 
 export interface ChefWallEvent {
@@ -314,15 +316,24 @@ export interface Booking {
   updatedAt?: any; 
   menuTitle?: string; 
   location?: string;
-  qrCodeScannedAt?: any; 
-  paymentIntentId?: string; 
+  qrCodeScannedAt?: any; // Timestamp for when QR was scanned
+  paymentIntentId?: string; // From Stripe
   requestId?: string; // Link to the original CustomerRequest if applicable
   chefWallEventId?: string; // Link if booked from a ChefWallEvent
 }
 
 
-export interface EnrichedCustomerRequest extends CustomerRequest {
-  proposingChef?: Pick<ChefProfile, 'name' | 'profilePictureUrl'>;
+// Represents a proposal object, could be part of CustomerRequest or a separate subcollection
+export interface Proposal {
+  id: string; // Could be the chef's UID if only one proposal per chef is allowed per request
+  chefId: string;
+  chefName: string;
+  chefAvatarUrl?: string;
+  menuId?: string; // If proposing an existing menu
+  menuTitle: string;
+  menuDescription?: string; // If a custom menu for this proposal
+  pricePerHead: number;
+  notes?: string; // Chef's notes for this specific proposal
+  proposedAt: any; // Firestore Timestamp
+  status: 'pending' | 'accepted' | 'declined_by_customer' | 'withdrawn_by_chef';
 }
-
-export type AppUserProfileContext = UserProfileBase & Partial<ChefProfile> & Partial<CustomerProfile> & Partial<AdminProfile>;

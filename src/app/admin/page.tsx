@@ -16,9 +16,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Input } from '@/components/ui/input'; // Added
-import { Label } from '@/components/ui/label'; // Added
-import { Textarea } from '@/components/ui/textarea'; // Added
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { ShieldAlert, ListChecks, UserCog, FileWarning, UserCheck, FileSearch2, BadgeCheck, MessageCircleWarning, Gavel, Award, MessageSquare, LockKeyhole, CalendarX2, UsersRound, Banknote, PauseCircle, Undo2, ClipboardCheck, FileCheck2, BotMessageSquare, ShieldBan, CreditCard, CalendarCheck2 as CalendarCheckIcon, Download, AlertTriangle, CalendarClock, Loader2, Utensils, CheckCircle, XCircle, Send, Eye } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, orderBy, Timestamp, query, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
@@ -148,7 +148,7 @@ export default function AdminPage() {
     setIsProcessingAction(true);
     try {
       const userDocRef = doc(db, "users", userId);
-      await updateDoc(userDocRef, { isApproved: false, updatedAt: serverTimestamp() });
+      await updateDoc(userDocRef, { isApproved: false, updatedAt: serverTimestamp() }); // Example: just unapprove
       setAllUsers(prevUsers => prevUsers.map(u => u.id === userId ? { ...u, isApproved: false } : u));
       toast({ title: "Chef Rejected", description: `Chef ID ${userId.substring(0, 6)}... status updated to not approved.` });
     } catch (error) {
@@ -691,3 +691,4 @@ export default function AdminPage() {
     </div>
   );
 }
+

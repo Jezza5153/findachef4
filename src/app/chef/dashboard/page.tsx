@@ -65,8 +65,8 @@ export default function ChefDashboardPage() {
 
     // Fetch Upcoming Events Count (Real-time)
     setLoadingEvents(true);
-    const today = new Date(); // Use JS Date for client-side comparison after fetching
-    today.setHours(0,0,0,0);
+    const todayForEvents = new Date();
+    todayForEvents.setHours(0, 0, 0, 0); // Start of today for comparison
 
     const eventsCollectionRef = collection(db, `users/${user.uid}/calendarEvents`);
     const qEvents = query(
@@ -79,7 +79,7 @@ export default function ChefDashboardPage() {
       querySnapshot.forEach(doc => {
         const eventData = doc.data();
         const eventDate = eventData.date instanceof Timestamp ? eventData.date.toDate() : new Date(eventData.date as any);
-        if (eventDate >= today) {
+        if (eventDate >= todayForEvents) {
           count++;
         }
       });
@@ -96,10 +96,10 @@ export default function ChefDashboardPage() {
     const activityCollectionRef = collection(db, `users/${user.uid}/activities`);
     const activityQuery = query(activityCollectionRef, orderBy("timestamp", "desc"), limit(5));
     const unsubscribeActivity = onSnapshot(activityQuery, (activitySnapshot) => {
-      const activities = activitySnapshot.docs.map(doc => {
-        const data = doc.data();
+      const activities = activitySnapshot.docs.map(docSnap => {
+        const data = docSnap.data();
         return {
-          id: doc.id,
+          id: docSnap.id,
           ...data,
           timestamp: data.timestamp instanceof Timestamp ? data.timestamp.toDate() : new Date(data.timestamp as any),
         } as ActivityItem;
@@ -114,23 +114,25 @@ export default function ChefDashboardPage() {
 
     // Fetch Booking Requests Count (Real-time)
     setLoadingRequestsCount(true);
-    const requestsCollectionRef = collection(db, "customerRequests");
+    const customerRequestsRef = collection(db, "customerRequests");
+    // This query aims to find requests relevant to the current chef.
+    // It covers 'new' requests (potentially visible to many chefs, though ideally filtered further by specialty/location in a real app)
+    // and requests where this chef is actively involved.
     const qRequests = query(
-      requestsCollectionRef,
-      where("status", "in", ["new", "awaiting_customer_response", "proposal_sent"]),
-      // Further filtering to only include requests relevant to *this* chef
-      // This might involve checking if chefId is in respondingChefIds or is the activeProposal.chefId
-      // For simplicity here, we'll make a broader query and refine if needed or assume this chef might see all 'new' ones
-      // and ones they are actively engaged in.
+      customerRequestsRef,
+      where("status", "in", ["new", "awaiting_customer_response", "proposal_sent", "chef_accepted"]),
+      orderBy("createdAt", "desc") // General ordering, further client-side filtering might be needed for chef-specific relevance
     );
+
     const unsubscribeRequests = onSnapshot(qRequests, (querySnapshot) => {
       let count = 0;
-      querySnapshot.forEach(doc => {
+      querySnapshot.forEach((doc) => {
         const requestData = doc.data() as CustomerRequest;
-        if (requestData.status === 'new' || 
-            (requestData.respondingChefIds && requestData.respondingChefIds.includes(user.uid)) ||
-            (requestData.activeProposal && requestData.activeProposal.chefId === user.uid && requestData.status !== 'chef_accepted' && requestData.status !== 'customer_confirmed' && requestData.status !== 'booked') // Chef is waiting on their proposal
-           ) {
+        if (
+          requestData.status === 'new' || // All new requests
+          (requestData.respondingChefIds && requestData.respondingChefIds.includes(user.uid) && requestData.status === 'awaiting_customer_response') || // Chef is responding
+          (requestData.activeProposal?.chefId === user.uid && (requestData.status === 'proposal_sent' || requestData.status === 'chef_accepted')) // Chef's proposal is active
+        ) {
           count++;
         }
       });
@@ -142,7 +144,8 @@ export default function ChefDashboardPage() {
       setLoadingRequestsCount(false);
     });
 
-    // Fetch Menu Engagement Data (Dynamic Mock)
+
+    // Fetch Menu Engagement Data (Dynamic Mock based on Chef's menus)
     setLoadingMenuEngagement(true);
     const menusCollectionRef = collection(db, "menus");
     const qMenus = query(menusCollectionRef, where("chefId", "==", user.uid), orderBy("createdAt", "desc"), limit(4));
@@ -153,9 +156,9 @@ export default function ChefDashboardPage() {
         const dynamicMockData = menusSnapshot.docs.map(doc => {
           const menu = doc.data() as Menu;
           return {
-            menu: menu.title.length > 15 ? menu.title.substring(0, 12) + "..." : menu.title, // Shorten long titles for chart
+            menu: menu.title.length > 15 ? menu.title.substring(0, 12) + "..." : menu.title, // Shorten long titles
             views: Math.floor(Math.random() * 200) + 50, // Random views
-            requests: Math.floor(Math.random() * 30) + 5,  // Random requests
+            requests: Math.floor(Math.random() * ( (Math.floor(Math.random() * 200) + 50) / 4 ) ),  // Random requests, somewhat proportional to views
           };
         });
         setMenuEngagementData(dynamicMockData);
@@ -163,7 +166,7 @@ export default function ChefDashboardPage() {
       setLoadingMenuEngagement(false);
     }).catch(error => {
       console.error("Error fetching menus for engagement chart:", error);
-      setMenuEngagementData(initialMenuEngagementData);
+      setMenuEngagementData(initialMenuEngagementData); // Fallback on error
       setLoadingMenuEngagement(false);
     });
 
@@ -235,7 +238,7 @@ export default function ChefDashboardPage() {
       <div className="grid gap-6 md:grid-cols-2">
         <Card className="shadow-md">
           <CardHeader>
-            <CardTitle>Menu Engagement (Examples)</CardTitle>
+            <CardTitle>Menu Engagement</CardTitle>
           </CardHeader>
           <CardContent>
             {loadingMenuEngagement ? (
@@ -255,7 +258,7 @@ export default function ChefDashboardPage() {
                   </RechartsBarChart>
                 </ChartContainer>
             )}
-             <p className="text-xs text-muted-foreground mt-2 text-center">(Placeholder - real data requires advanced tracking)</p>
+             <p className="text-xs text-muted-foreground mt-2 text-center">(Example data based on your menus - real tracking requires advanced setup)</p>
           </CardContent>
         </Card>
        
@@ -299,3 +302,4 @@ export default function ChefDashboardPage() {
     </div>
   );
 }
+

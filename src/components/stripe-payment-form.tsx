@@ -15,6 +15,8 @@ interface StripePaymentFormProps {
   onPaymentAttemptComplete: (result: { success: boolean; paymentIntentId?: string; error?: string }) => void;
   isProcessingPayment: boolean;
   setIsProcessingPayment: (isProcessing: boolean) => void;
+  requestId: string; // Added for metadata
+  customerId: string; // Added for metadata
 }
 
 export const StripePaymentForm: React.FC<StripePaymentFormProps> = ({ 
@@ -23,7 +25,9 @@ export const StripePaymentForm: React.FC<StripePaymentFormProps> = ({
   totalPrice, 
   onPaymentAttemptComplete, 
   isProcessingPayment, 
-  setIsProcessingPayment 
+  setIsProcessingPayment,
+  requestId,
+  customerId
 }) => {
   const stripe = useStripe();
   const elements = useElements();
@@ -47,79 +51,84 @@ export const StripePaymentForm: React.FC<StripePaymentFormProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-            amount: Math.round(totalPrice * 100), // Amount in cents
-            currency: 'aud', // Or your desired currency
-            // You might want to pass customerName, customerEmail, or bookingId as metadata here
+            amount: Math.round(totalPrice * 100), 
+            currency: 'aud',
+            // Pass requestId and customerId for metadata to be used in webhooks
+            metadata: { 
+              requestId: requestId,
+              customerId: customerId 
+            }
         }),
       });
 
       const paymentIntentData = await paymentIntentResponse.json();
 
       if (!paymentIntentResponse.ok || !paymentIntentData.clientSecret) {
+        console.error("Failed to create payment intent:", paymentIntentData);
         throw new Error(paymentIntentData.error || 'Failed to create payment intent.');
       }
       
-      // 2. Confirm the payment on the client side
+      // 2. Confirm the payment on the client side using PaymentElement
       const { error, paymentIntent } = await stripe.confirmPayment({
-        elements,
+        elements, // elements instance from useElements()
         clientSecret: paymentIntentData.clientSecret,
         confirmParams: {
-          return_url: `${window.location.origin}/customer/dashboard/messages?payment_status=complete&request_id=${elements?.getElement('payment')?.id || 'unknown'}`, // A placeholder URL, Stripe might handle redirect
-          payment_method_data: {
+          // Ensure return_url is absolute and correct for your deployed app
+          return_url: `${window.location.origin}/customer/dashboard/messages?payment_status=complete&request_id=${requestId}`,
+          payment_method_data: { // Optional: prefill billing details if not using Link Authentication Element
             billing_details: {
               name: customerName,
               email: customerEmail,
             },
           },
         },
-        redirect: 'if_required', // Important: Handles 3D Secure redirects
+        redirect: 'if_required', 
       });
 
       if (error) {
         console.error("Stripe confirmPayment error:", error);
-        // This error could be due to card decline, authentication failure, etc.
         toast({ title: "Payment Failed", description: error.message || "An error occurred during payment.", variant: "destructive" });
         onPaymentAttemptComplete({ success: false, error: error.message });
-        setIsProcessingPayment(false); // Reset on client-side error from Stripe
-        return;
+        // setIsProcessingPayment(false); // Handled by parent or error state
+        return; // Important to return after handling the error
       }
 
-      // If redirect: 'if_required' and a redirect happened, this part might not be reached immediately.
-      // The user would be redirected to the return_url.
-      // If no redirect was needed (e.g. 3DS not required):
+      // If redirect: 'if_required' and a redirect happens, this code path might not be hit immediately.
+      // The user is redirected, and then upon return, the status of the PaymentIntent should be checked.
+      // For non-redirect scenarios:
       if (paymentIntent && paymentIntent.status === 'succeeded') {
         toast({ title: "Payment Successful!", description: "Your payment has been processed." });
         onPaymentAttemptComplete({ success: true, paymentIntentId: paymentIntent.id });
-        // setIsProcessingPayment is handled by the parent component via onPaymentAttemptComplete
       } else if (paymentIntent && paymentIntent.status === 'requires_action') {
         toast({ title: "Action Required", description: "Further action is needed to complete your payment.", variant: "default" });
-        onPaymentAttemptComplete({ success: false, error: "Payment requires further action from your bank." });
-        setIsProcessingPayment(false);
+        onPaymentAttemptComplete({ success: false, error: "Payment requires further action." });
+      } else if (paymentIntent) { // Other statuses like 'processing'
+        toast({ title: "Payment Processing", description: `Payment status: ${paymentIntent.status}. We'll notify you.`, variant: "default" });
+        onPaymentAttemptComplete({ success: false, error: `Payment status: ${paymentIntent.status}` }); // Or treat as pending
       } else {
-        // Handle other statuses if necessary
-        toast({ title: "Payment Not Successful", description: `Payment status: ${paymentIntent?.status || 'unknown'}.`, variant: "destructive" });
-        onPaymentAttemptComplete({ success: false, error: `Payment status: ${paymentIntent?.status || 'unknown'}` });
-        setIsProcessingPayment(false);
+        // This case should ideally not be reached if there was no error but no paymentIntent
+        toast({ title: "Payment Incomplete", description: "Payment was not completed successfully.", variant: "destructive" });
+        onPaymentAttemptComplete({ success: false, error: "Payment was not completed successfully." });
       }
 
     } catch (err: any) {
       console.error("Payment submission error:", err);
       toast({ title: "Payment Error", description: err.message || "An unexpected error occurred.", variant: "destructive" });
       onPaymentAttemptComplete({ success: false, error: err.message || "An unexpected error occurred during payment." });
-      setIsProcessingPayment(false);
+    } finally {
+      // setIsProcessingPayment(false) is generally managed by the parent component
+      // based on the outcome of onPaymentAttemptComplete to avoid race conditions with dialog closing.
     }
-    // Note: setIsProcessingPayment(false) is called in error paths or implicitly by parent
-    // when onPaymentAttemptComplete({success: true}) leads to dialog close.
   };
 
   const paymentElementOptions: StripePaymentElementOptions = {
-    layout: "tabs", // "tabs" or "accordion" or "auto"
-    // Add other Payment Element options if needed
+    layout: "tabs", 
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="p-3 border rounded-md bg-background shadow-sm">
+         {/* Using PaymentElement for more comprehensive payment method support */}
         <PaymentElement id="payment-element" options={paymentElementOptions} />
       </div>
       <Button type="submit" disabled={!stripe || !elements || isProcessingPayment} className="w-full">
