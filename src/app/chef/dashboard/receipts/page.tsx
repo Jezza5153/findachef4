@@ -43,14 +43,14 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
 import type { Receipt, CostType, TaxAdviceInput, TaxAdviceOutput } from '@/types';
 import { cn } from '@/lib/utils';
-import { format } from 'date-fns';
-import { PlusCircle, Trash2, FileText, Edit3, UploadCloud, CalendarIcon, Download, DollarSign, Camera, Sparkles, InfoIcon, MessageCircleQuestion, Loader2 } from 'lucide-react';
+import { format, startOfDay, endOfDay } from 'date-fns';
+import { PlusCircle, Trash2, FileText, Edit3, UploadCloud, CalendarIcon, Download, DollarSign, Camera, Sparkles, InfoIcon, MessageCircleQuestion, Loader2, Filter, X } from 'lucide-react';
 import Image from 'next/image';
 import { receiptParserFlow } from '@/ai/flows/receipt-parser-flow'; 
 import { getTaxAdvice } from '@/ai/flows/tax-advice-flow';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
-import { collection, addDoc, doc, updateDoc, deleteDoc, query, serverTimestamp, Timestamp, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, deleteDoc, query, serverTimestamp, Timestamp, onSnapshot, orderBy, setDoc, writeBatch } from 'firebase/firestore';
 import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 
 const costTypes: CostType[] = ['Ingredient', 'Equipment', 'Tax', 'BAS', 'Travel', 'Other'];
@@ -75,7 +75,7 @@ type TaxAdviceFormValues = z.infer<typeof taxAdviceFormSchema>;
 
 export default function ReceiptsPage() {
   const { user } = useAuth();
-  const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [allReceipts, setAllReceipts] = useState<Receipt[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
@@ -93,6 +93,11 @@ export default function ReceiptsPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Filters State
+  const [filterCostType, setFilterCostType] = useState<string>('all');
+  const [filterStartDate, setFilterStartDate] = useState<Date | undefined>(undefined);
+  const [filterEndDate, setFilterEndDate] = useState<Date | undefined>(undefined);
 
   const { toast } = useToast();
 
@@ -120,7 +125,7 @@ export default function ReceiptsPage() {
   useEffect(() => {
     if (!user) {
       setIsLoading(false);
-      setReceipts([]);
+      setAllReceipts([]);
       return;
     }
     setIsLoading(true);
@@ -138,7 +143,7 @@ export default function ReceiptsPage() {
           updatedAt: data.updatedAt ? (data.updatedAt as Timestamp).toDate() : undefined,
         } as Receipt;
       });
-      setReceipts(fetchedReceipts);
+      setAllReceipts(fetchedReceipts);
       setIsLoading(false);
     }, (error) => {
       console.error("Error fetching receipts:", error);
@@ -176,6 +181,16 @@ export default function ReceiptsPage() {
       setHasCameraPermission(null); 
     }
   }, [isCameraDialogOpen, toast, hasCameraPermission]);
+
+  const filteredReceipts = useMemo(() => {
+    return allReceipts.filter(receipt => {
+      const matchesCostType = filterCostType === 'all' || receipt.costType === filterCostType;
+      const receiptDate = startOfDay(new Date(receipt.date)); // Ensure comparison is date-only
+      const matchesStartDate = !filterStartDate || receiptDate >= startOfDay(filterStartDate);
+      const matchesEndDate = !filterEndDate || receiptDate <= endOfDay(filterEndDate); // Use endOfDay for inclusive range
+      return matchesCostType && matchesStartDate && matchesEndDate;
+    });
+  }, [allReceipts, filterCostType, filterStartDate, filterEndDate]);
 
   const openUploadDialog = (receiptToEdit: Receipt | null = null) => {
     setEditingReceipt(receiptToEdit);
@@ -306,12 +321,12 @@ export default function ReceiptsPage() {
     const originalFileName = fileNameForForm || (editingReceipt?.fileName) || `receipt_${Date.now()}.jpg`;
 
     try {
-      const receiptIdForPath = editingReceipt?.id || doc(collection(db, 'temp')).id; // Generate ID upfront for path
+      const receiptIdForPath = editingReceipt?.id || doc(collection(db, 'temp')).id; 
 
       if (capturedImageDataUri && (!editingReceipt || capturedImageDataUri !== editingReceipt.imageUrl)) {
         if (editingReceipt?.imageUrl) {
           try {
-            const oldImageRef = storageRef(storage, editingReceipt.imageUrl); // Assumes imageUrl is the full path
+            const oldImageRef = storageRef(storage, editingReceipt.imageUrl);
             await deleteObject(oldImageRef).catch(e => console.warn("Old image not found or could not be deleted for receipt:", e));
           } catch (e) { console.warn("Error deleting old receipt image:", e); }
         }
@@ -342,14 +357,13 @@ export default function ReceiptsPage() {
         updatedAt: serverTimestamp(),
       };
 
+      const receiptDocRef = doc(db, "users", user.uid, "receipts", receiptIdForPath);
+
       if (editingReceipt) {
-        const receiptDocRef = doc(db, "users", user.uid, "receipts", editingReceipt.id);
         await updateDoc(receiptDocRef, receiptDataToSave);
         toast({ title: 'Receipt Updated', description: `Receipt from "${data.vendor}" has been updated.` });
       } else {
-        const finalData = { ...receiptDataToSave, createdAt: serverTimestamp() };
-        const newReceiptDocRef = doc(db, "users", user.uid, "receipts", receiptIdForPath);
-        await setDoc(newReceiptDocRef, finalData);
+        await setDoc(receiptDocRef, { ...receiptDataToSave, createdAt: serverTimestamp() });
         toast({ title: 'Receipt Added', description: `Receipt from "${data.vendor}" has been added.` });
       }
       
@@ -370,7 +384,7 @@ export default function ReceiptsPage() {
 
   const handleDeleteReceipt = async (receiptId: string) => {
     if (!user) return;
-    const receiptToDelete = receipts.find(r => r.id === receiptId);
+    const receiptToDelete = allReceipts.find(r => r.id === receiptId);
     if (!receiptToDelete) return;
 
     if (window.confirm(`Are you sure you want to delete the receipt from "${receiptToDelete?.vendor}"?`)) {
@@ -378,8 +392,6 @@ export default function ReceiptsPage() {
       try {
         if (receiptToDelete.imageUrl) {
           try {
-            // Construct the path based on how it was saved. If imageUrl is already the full path, this might not be needed.
-            // For simplicity, assuming imageUrl might be the full gs:// path or a direct https URL from Firebase.
             const imageRef = storageRef(storage, receiptToDelete.imageUrl);
             await deleteObject(imageRef);
           } catch (e) {
@@ -387,7 +399,7 @@ export default function ReceiptsPage() {
           }
         }
         await deleteDoc(doc(db, "users", user.uid, "receipts", receiptId));
-        toast({ title: 'Receipt Deleted', description: `Receipt from "${receiptToDelete?.vendor}" removed.`, variant: 'destructive' });
+        toast({ title: 'Receipt Deleted', description: `Receipt from "${receiptToDelete?.vendor}" removed.`, variant: "destructive" });
       } catch (error) {
         console.error("Error deleting receipt:", error);
         toast({ title: "Delete Error", description: "Could not delete receipt.", variant: "destructive" });
@@ -398,18 +410,31 @@ export default function ReceiptsPage() {
   };
   
   const totalExpenses = useMemo(() => {
-    return receipts.reduce((sum, receipt) => sum + receipt.totalAmount, 0);
-  }, [receipts]);
+    return filteredReceipts.reduce((sum, receipt) => sum + receipt.totalAmount, 0);
+  }, [filteredReceipts]);
+
+  const expensesByCostType = useMemo(() => {
+    const summary: { [key in CostType]?: number } = {};
+    costTypes.forEach(type => summary[type] = 0); // Initialize all types to 0
+    filteredReceipts.forEach(receipt => {
+      if (summary[receipt.costType] !== undefined) {
+        summary[receipt.costType]! += receipt.totalAmount;
+      } else {
+        summary[receipt.costType] = receipt.totalAmount;
+      }
+    });
+    return summary;
+  }, [filteredReceipts]);
 
   const handleExport = () => {
-    if (receipts.length === 0) {
-      toast({ title: "No Data", description: "Receipt list is empty.", variant: "default" });
+    if (filteredReceipts.length === 0) {
+      toast({ title: "No Data", description: "Receipt list (with current filters) is empty.", variant: "default" });
       return;
     }
     const headers = ["Vendor", "Date", "Total Amount", "Cost Type", "Assigned to Event ID", "Assigned to Menu ID", "Notes", "File Name", "Image URL"];
     const csvRows = [
       headers.join(','),
-      ...receipts.map(receipt => [
+      ...filteredReceipts.map(receipt => [
         `"${receipt.vendor.replace(/"/g, '""')}"`,
         format(receipt.date, 'yyyy-MM-dd'),
         receipt.totalAmount.toFixed(2),
@@ -427,14 +452,14 @@ export default function ReceiptsPage() {
     if (link.download !== undefined) {
       const url = URL.createObjectURL(blob);
       link.setAttribute("href", url);
-      link.setAttribute("download", "receipts_export.csv");
+      link.setAttribute("download", "filtered_receipts_export.csv");
       link.style.visibility = 'hidden';
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
     }
-    toast({ title: 'Export Successful', description: 'Receipts exported to CSV.' });
+    toast({ title: 'Export Successful', description: 'Filtered receipts exported to CSV.' });
   };
 
   const onSubmitTaxAdvice = async (data: TaxAdviceFormValues) => {
@@ -453,11 +478,17 @@ export default function ReceiptsPage() {
     }
   };
 
-  if (isLoading) {
+  const clearFilters = () => {
+    setFilterCostType('all');
+    setFilterStartDate(undefined);
+    setFilterEndDate(undefined);
+  };
+
+  if (isLoading && !user) { // Show loading only if user data is also loading (first load experience)
     return (
       <div className="flex justify-center items-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" data-ai-hint="loading spinner"/>
-        <p className="ml-2">Loading receipts...</p>
+        <p className="ml-2">Loading page...</p>
       </div>
     );
   }
@@ -478,6 +509,66 @@ export default function ReceiptsPage() {
         </div>
       </div>
 
+       <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center"><Filter className="mr-2 h-5 w-5 text-primary"/> Filter Receipts</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+          <FormItem>
+            <FormLabel>Cost Type</FormLabel>
+            <Select value={filterCostType} onValueChange={setFilterCostType}>
+              <SelectTrigger>
+                <SelectValue placeholder="All Cost Types" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Cost Types</SelectItem>
+                {costTypes.map(type => (
+                  <SelectItem key={type} value={type}>{type}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </FormItem>
+          <FormItem>
+            <FormLabel>Start Date</FormLabel>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant={'outline'}
+                  className={cn('w-full justify-start text-left font-normal', !filterStartDate && 'text-muted-foreground')}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {filterStartDate ? format(filterStartDate, 'PPP') : <span>Pick a start date</span>}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0">
+                <Calendar mode="single" selected={filterStartDate} onSelect={setFilterStartDate} initialFocus />
+              </PopoverContent>
+            </Popover>
+          </FormItem>
+          <FormItem>
+            <FormLabel>End Date</FormLabel>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant={'outline'}
+                  className={cn('w-full justify-start text-left font-normal', !filterEndDate && 'text-muted-foreground')}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {filterEndDate ? format(filterEndDate, 'PPP') : <span>Pick an end date</span>}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0">
+                <Calendar mode="single" selected={filterEndDate} onSelect={setFilterEndDate} initialFocus disabled={{ before: filterStartDate }} />
+              </PopoverContent>
+            </Popover>
+          </FormItem>
+          <Button onClick={clearFilters} variant="outline" className="self-end">
+            <X className="mr-2 h-4 w-4" /> Clear Filters
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Dialogs: Upload, Camera, Tax Advice (remain unchanged) */}
       <Dialog open={isUploadDialogOpen} onOpenChange={(isOpen) => {
           if ((isSaving || isParsingReceipt) && isOpen) return;
           setIsUploadDialogOpen(isOpen);
@@ -737,12 +828,59 @@ export default function ReceiptsPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Expenses Summary Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Expenses Summary</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+             <div className="flex justify-center items-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              <p className="ml-2">Loading summary...</p>
+            </div>
+          ) : filteredReceipts.length === 0 && allReceipts.length > 0 ? (
+            <p className="text-muted-foreground text-center py-4">No receipts match the current filters.</p>
+          ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <h4 className="font-semibold mb-2">By Cost Type:</h4>
+              {Object.entries(expensesByCostType).map(([type, amount]) => (
+                (amount ?? 0) > 0 && ( // Only display if amount is greater than 0
+                  <div key={type} className="flex justify-between text-sm py-1 border-b last:border-b-0">
+                    <span>{type}:</span>
+                    <span className="font-medium">${(amount ?? 0).toFixed(2)}</span>
+                  </div>
+                )
+              ))}
+               {Object.values(expensesByCostType).every(val => (val ?? 0) === 0) && <p className="text-xs text-muted-foreground">No expenses for selected filters.</p>}
+            </div>
+            <div className="flex flex-col justify-end items-end">
+              <div className="text-lg font-semibold flex items-center">
+                <DollarSign className="mr-1 h-5 w-5 text-green-600" data-ai-hint="money cost"/>
+                Total (Filtered): ${totalExpenses.toFixed(2)}
+              </div>
+               <p className="text-xs text-muted-foreground">
+                 Total of {filteredReceipts.length} receipt(s) matching filters.
+              </p>
+            </div>
+          </div>
+          )}
+        </CardContent>
+      </Card>
+
+
       <Card>
         <CardHeader>
           <CardTitle>Uploaded Receipts</CardTitle>
         </CardHeader>
         <CardContent>
-          {receipts.length > 0 ? (
+          {isLoading && allReceipts.length === 0 ? (
+             <div className="flex justify-center items-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              <p className="ml-2">Loading receipts...</p>
+            </div>
+          ) : filteredReceipts.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -756,7 +894,7 @@ export default function ReceiptsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {receipts.map((receipt) => (
+                {filteredReceipts.map((receipt) => (
                   <TableRow key={receipt.id}>
                     <TableCell className="font-medium">{receipt.vendor}</TableCell>
                     <TableCell>{format(new Date(receipt.date), 'PP')}</TableCell>
@@ -772,11 +910,11 @@ export default function ReceiptsPage() {
                       {receipt.notes && <div className="italic">{receipt.notes}</div>}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="icon" onClick={() => openUploadDialog(receipt)} className="mr-1" disabled={isSaving}>
+                      <Button variant="ghost" size="icon" onClick={() => openUploadDialog(receipt)} className="mr-1" disabled={isSaving || isParsingReceipt}>
                         <Edit3 className="h-4 w-4" />
                         <span className="sr-only">Edit</span>
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={() => handleDeleteReceipt(receipt.id)} className="text-destructive hover:text-destructive" disabled={isSaving}>
+                      <Button variant="ghost" size="icon" onClick={() => handleDeleteReceipt(receipt.id)} className="text-destructive hover:text-destructive" disabled={isSaving || isParsingReceipt}>
                         <Trash2 className="h-4 w-4" />
                         <span className="sr-only">Delete</span>
                       </Button>
@@ -786,23 +924,11 @@ export default function ReceiptsPage() {
               </TableBody>
             </Table>
           ) : (
-            !isLoading && <p className="text-muted-foreground text-center py-8">No receipts uploaded yet. Start by adding your first expense!</p>
-          )}
-           {isLoading && (
-            <div className="flex justify-center items-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
-              <p className="ml-2">Loading receipts...</p>
-            </div>
+            <p className="text-muted-foreground text-center py-8">
+                {allReceipts.length === 0 ? "No receipts uploaded yet. Start by adding your first expense!" : "No receipts match the current filters. Try adjusting or clearing them."}
+            </p>
           )}
         </CardContent>
-         {receipts.length > 0 && (
-            <CardFooter className="flex flex-col items-end space-y-2 pt-4 border-t">
-                <div className="text-lg font-semibold flex items-center">
-                    <DollarSign className="mr-1 h-5 w-5 text-green-600" data-ai-hint="dollar money" />
-                    Total Expenses: ${totalExpenses.toFixed(2)}
-                </div>
-            </CardFooter>
-        )}
       </Card>
       
       <Card className="mt-8">
@@ -844,11 +970,13 @@ export default function ReceiptsPage() {
       </Alert>
 
       <div className="flex justify-end mt-6">
-        <Button onClick={handleExport} variant="outline" disabled={receipts.length === 0}>
-          <Download className="mr-2 h-5 w-5" /> Export Data (CSV/Xero)
+        <Button onClick={handleExport} variant="outline" disabled={filteredReceipts.length === 0}>
+          <Download className="mr-2 h-5 w-5" /> Export Filtered Data (CSV)
         </Button>
       </div>
     </div>
   );
 }
+    
+
     
