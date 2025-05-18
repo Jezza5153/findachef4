@@ -1,8 +1,48 @@
 
+'use client';
+
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { ShieldAlert, ListChecks, UserCog, FileWarning, UserCheck, FileSearch2, BadgeCheck, MessageCircleWarning, Gavel, Award, MessageSquare, LockKeyhole, CalendarX2, UsersRound, Banknote, PauseCircle, Undo2, ClipboardCheck, FileCheck2, BotMessageSquare, ShieldBan, CreditCard, CalendarCheck2 as CalendarCheckIcon, Download, AlertTriangle, CalendarClock } from 'lucide-react';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
+import { ShieldAlert, ListChecks, UserCog, FileWarning, UserCheck, FileSearch2, BadgeCheck, MessageCircleWarning, Gavel, Award, MessageSquare, LockKeyhole, CalendarX2, UsersRound, Banknote, PauseCircle, Undo2, ClipboardCheck, FileCheck2, BotMessageSquare, ShieldBan, CreditCard, CalendarCheck2 as CalendarCheckIcon, Download, AlertTriangle, CalendarClock, Loader2 } from 'lucide-react';
+import { db } from '@/lib/firebase';
+import { collection, getDocs, orderBy, Timestamp } from 'firebase/firestore';
+import type { ChefProfile, CustomerProfile } from '@/types';
+import { format } from 'date-fns';
+
+type UserView = Partial<ChefProfile & CustomerProfile>;
 
 export default function AdminPage() {
+  const [allUsers, setAllUsers] = useState<UserView[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(true);
+
+  useEffect(() => {
+    const fetchUsers = async () => {
+      setIsLoadingUsers(true);
+      try {
+        const usersCollectionRef = collection(db, "users");
+        const q = query(usersCollectionRef, orderBy("createdAt", "desc"));
+        const querySnapshot = await getDocs(q);
+        const fetchedUsers = querySnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : undefined),
+          } as UserView;
+        });
+        setAllUsers(fetchedUsers);
+      } catch (error) {
+        console.error("Error fetching users:", error);
+        // In a real app, you'd handle this error more gracefully
+      } finally {
+        setIsLoadingUsers(false);
+      }
+    };
+    fetchUsers();
+  }, []);
+
   const adminFeatures = [
     { name: "Approve Co-hosted Events", description: "Confirm both chefs are approved and willing to collaborate on the event.", icon: <ClipboardCheck className="mr-2 h-5 w-5 text-purple-600" /> },
     { name: "Approve Menus", description: "Verify menu content, accurate pricing, no personal branding/links, and ensure chef identity remains hidden pre-booking.", icon: <ListChecks className="mr-2 h-5 w-5 text-green-600" /> },
@@ -24,13 +64,13 @@ export default function AdminPage() {
     { name: "Review GPT resume parse accuracy", description: "Fix any resume to tag mismatches.", icon: <BotMessageSquare className="mr-2 h-5 w-5 text-indigo-600" /> },
     { name: "Review Published Chef Events", description: "Ensure event details on The Chef's Wall are clear, fair, and not duplicated.", icon: <CalendarCheckIcon className="mr-2 h-5 w-5 text-cyan-600" /> },
     { name: "Trust Score Override", description: "Monitor and, if necessary, manually override auto-generated chef trust scores based on platform activity, ratings, and warnings.", icon: <ShieldAlert className="mr-2 h-5 w-5 text-yellow-600" /> },
-    { name: "View All Chefs & Customers", icon: <UsersRound className="mr-2 h-5 w-5 text-primary" /> },
+    // { name: "View All Chefs & Customers", icon: <UsersRound className="mr-2 h-5 w-5 text-primary" /> }, // This is now implemented below
     { name: "View Flagged Resumes (Contact Info, Unsafe Content)", description: "Review resumes, especially those AI-flagged for containing direct contact information or inappropriate content.", icon: <FileSearch2 className="mr-2 h-5 w-5 text-destructive" /> },
   ];
 
   return (
     <div className="container mx-auto py-12 px-4 sm:px-6 lg:px-8">
-      <Card className="shadow-lg">
+      <Card className="shadow-lg mb-8">
         <CardHeader className="text-center">
           <div className="mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
             <UserCog className="h-8 w-8" />
@@ -60,16 +100,80 @@ export default function AdminPage() {
               ))}
             </ul>
           </div>
-
-          <div className="mt-8 p-4 border-l-4 border-yellow-500 bg-yellow-500/10 rounded-md">
-            <h4 className="font-semibold text-yellow-700">Development Note:</h4>
-            <p className="text-sm text-yellow-600">
-              This is a placeholder page. Full admin functionality, including authentication, data management, moderation queues, and action logs, 
-              requires significant backend development and secure access controls.
-            </p>
-          </div>
         </CardContent>
       </Card>
+
+      <Card className="shadow-lg">
+        <CardHeader>
+          <CardTitle className="flex items-center"><UsersRound className="mr-2 h-6 w-6 text-primary"/> All Platform Users</CardTitle>
+          <CardDescription>View and manage all registered users on the platform.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isLoadingUsers ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="ml-3 text-muted-foreground">Loading users...</p>
+            </div>
+          ) : allUsers.length === 0 ? (
+            <p className="text-muted-foreground text-center py-8">No users found.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Role</TableHead>
+                    <TableHead>Joined</TableHead>
+                    <TableHead>Chef Approved</TableHead>
+                    <TableHead>Chef Subscribed</TableHead>
+                    <TableHead>User ID</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {allUsers.map((user) => (
+                    <TableRow key={user.id}>
+                      <TableCell className="font-medium">{user.name || 'N/A'}</TableCell>
+                      <TableCell>{user.email}</TableCell>
+                      <TableCell>
+                        <Badge variant={user.role === 'chef' ? 'default' : 'secondary'} className="capitalize">
+                          {user.role || 'N/A'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {user.createdAt ? format(user.createdAt, 'PP') : 'N/A'}
+                      </TableCell>
+                      <TableCell>
+                        {user.role === 'chef' ? (
+                          user.isApproved ? <Badge variant="default" className="bg-green-500 hover:bg-green-600">Yes</Badge> : <Badge variant="destructive">No</Badge>
+                        ) : (
+                          'N/A'
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {user.role === 'chef' ? (
+                           user.isSubscribed ? <Badge variant="default" className="bg-green-500 hover:bg-green-600">Yes</Badge> : <Badge variant="secondary">No</Badge>
+                        ) : (
+                          'N/A'
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground truncate max-w-[100px]" title={user.id}>{user.id?.substring(0, 10)}...</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="mt-8 p-4 border-l-4 border-yellow-500 bg-yellow-500/10 rounded-md">
+        <h4 className="font-semibold text-yellow-700">Development Note:</h4>
+        <p className="text-sm text-yellow-600">
+          This is a basic admin view. Full admin functionality, including secure role-based access control, user actions (approve, ban, etc.),
+          and detailed logs, requires significant backend development and secure infrastructure.
+        </p>
+      </div>
     </div>
   );
 }
