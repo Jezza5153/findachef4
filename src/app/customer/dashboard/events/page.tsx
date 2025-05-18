@@ -11,25 +11,23 @@ import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
 import { collection, query, where, onSnapshot, orderBy, Timestamp } from 'firebase/firestore';
 import { format } from 'date-fns';
-import { CalendarCheck2, User, Users, DollarSign, QrCode, Info, Loader2, ChefHat, MapPin } from 'lucide-react';
+import { CalendarCheck2, Users, DollarSign, QrCode, Info, Loader2, ChefHat, MapPin } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation'; // Import useRouter
-import { useToast } from '@/hooks/use-toast'; // Import useToast
-
-// MOCK_BOOKED_EVENTS is removed as we are fetching real data
+import { useRouter } from 'next/navigation';
+import { useToast } from '@/hooks/use-toast';
 
 export default function CustomerBookedEventsPage() {
   const { user } = useAuth();
-  const router = useRouter(); // Initialize useRouter
-  const { toast } = useToast(); // Initialize useToast
+  const router = useRouter();
+  const { toast } = useToast();
   const [bookedEvents, setBookedEvents] = useState<Booking[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     if (!user) {
       setIsLoading(false);
-      setBookedEvents([]); 
+      setBookedEvents([]);
       return;
     }
     setIsLoading(true);
@@ -39,7 +37,7 @@ export default function CustomerBookedEventsPage() {
       where('customerId', '==', user.uid),
       orderBy('eventDate', 'desc')
     );
-    
+
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
       const fetchedEvents = querySnapshot.docs.map(docSnap => {
         const data = docSnap.data();
@@ -84,20 +82,17 @@ export default function CustomerBookedEventsPage() {
   };
 
   const handleCancelBooking = (bookingId: string) => {
-    // Placeholder for cancel booking logic
-    toast({ 
-        title: "Cancel Booking (Placeholder)", 
-        description: `Cancelling booking ${bookingId.substring(0,6)}... requires backend logic.`,
+    toast({
+        title: "Cancel Booking (Placeholder)",
+        description: `Cancelling booking ${bookingId.substring(0,6)}... requires backend logic and policy enforcement.`,
         variant: "default"
     });
-    // This would involve updating the booking status in Firestore and handling refund logic.
   };
-  
+
   const handleViewReceipts = (bookingId: string) => {
-    // Placeholder for viewing receipts related to this booking
-     toast({ 
-        title: "View Receipts (Placeholder)", 
-        description: `Viewing receipts for booking ${bookingId.substring(0,6)}... requires further implementation.`,
+     toast({
+        title: "View Receipts/Invoice (Placeholder)",
+        description: `Functionality to view invoice for booking ${bookingId.substring(0,6)}... is coming soon.`,
         variant: "default"
     });
   };
@@ -108,7 +103,7 @@ export default function CustomerBookedEventsPage() {
     } else {
       toast({
         title: "Messaging Not Available",
-        description: "Direct messaging for this type of booking (e.g., from Chef Wall) is not yet fully integrated.",
+        description: "Direct messaging for this type of booking is not yet fully integrated.",
         variant: "default",
       });
     }
@@ -191,10 +186,13 @@ export default function CustomerBookedEventsPage() {
                 {booking.status === 'confirmed' && !booking.qrCodeScannedAt && (
                   <Alert variant="default" className="mt-4 bg-blue-500/10 border-blue-500/30">
                      <QrCode className="h-5 w-5 text-blue-600" data-ai-hint="qr code" />
-                    <AlertTitle className="text-blue-700 font-semibold">Event Completion</AlertTitle>
-                    <AlertDescription className="text-blue-600 text-xs">
-                      On the day of your event, the chef will scan a QR code that will be displayed here to confirm completion.
-                      Please have this page ready or your confirmation email. (QR code display coming soon).
+                    <AlertTitle className="text-blue-700 font-semibold">Event Completion QR Code</AlertTitle>
+                    <AlertDescription className="text-blue-600 text-xs space-y-1">
+                      <p>On the day of your event, show this QR code area and the Booking ID below to your chef. They will scan it (or enter the ID) to confirm completion.</p>
+                      <div className="flex flex-col items-center justify-center p-2 bg-white rounded-md my-2">
+                        <Image src="https://placehold.co/150x150.png?text=SCAN+ME" alt="QR Code Placeholder" width={120} height={120} data-ai-hint="qr code scan" />
+                        <p className="text-xs font-mono mt-1 text-black">Booking ID: <span className="font-bold">{booking.id}</span></p>
+                      </div>
                     </AlertDescription>
                   </Alert>
                 )}
@@ -237,5 +235,3 @@ export default function CustomerBookedEventsPage() {
     </div>
   );
 }
-    
-    
