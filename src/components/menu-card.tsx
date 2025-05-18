@@ -7,18 +7,19 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ChefHat, DollarSign, Eye, EyeOff, Leaf, Users, WheatOff, Vegan as VeganIcon, ShoppingCart, Star } from 'lucide-react';
+import React from 'react'; // Import React
 
 interface MenuCardProps {
   menu: Menu;
-  showChefDetails?: boolean; // To control anonymity
+  showChefDetails?: boolean; 
   onEdit?: (menuId: string) => void;
   onDelete?: (menuId: string) => void;
-  onRequest?: (menuId: string) => void; // For customer requesting a menu
-  onAddToShoppingList?: (menu: Menu) => void; // Changed to pass full menu object
-  isChefOwner?: boolean; // If the current user is the chef who owns this menu
+  onRequest?: (menu: Menu) => void; // Pass full menu object
+  onAddToShoppingList?: (menu: Menu) => void;
+  isChefOwner?: boolean; 
 }
 
-export function MenuCard({ 
+export const MenuCard = React.memo(function MenuCard({ 
   menu, 
   showChefDetails = false, 
   onEdit, 
@@ -144,11 +145,13 @@ export function MenuCard({
           </div>
         )}
         {!isChefOwner && onRequest && (
-          <Button onClick={() => onRequest(menu.id)} className="w-full" variant="default">
+          <Button onClick={() => onRequest(menu)} className="w-full" variant="default">
             View Availability / Request Menu
           </Button>
         )}
       </CardFooter>
     </Card>
   );
-}
+});
+
+MenuCard.displayName = 'MenuCard';

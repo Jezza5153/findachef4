@@ -20,11 +20,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
+// import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { MenuCard } from '@/components/menu-card';
 import type { Menu, Option, ShoppingListItem, MenuIngredient } from '@/types';
 import { useToast } from '@/hooks/use-toast';
-import { PlusCircle, Edit, Trash2, NotebookText, Eye, EyeOff, ShoppingCart, AlertCircle, Sparkles, UploadCloud, Image as ImageIcon, Loader2, PackagePlus, PackageMinus, Calculator } from 'lucide-react';
+import { PlusCircle, Edit, Trash2, NotebookText, Eye, EyeOff, ShoppingCart, AlertCircle, Sparkles, UploadCloud, Image as ImageIconLucide, Loader2, PackagePlus, PackageMinus, Calculator } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
@@ -32,7 +32,16 @@ import { collection, addDoc, doc, updateDoc, deleteDoc, query, where, serverTime
 import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import Image from 'next/image';
 import { assistMenuItem } from '@/ai/flows/menu-item-assist-flow';
-import { v4 as uuidv4 } from 'uuid'; // For generating unique IDs for ingredients
+import { v4 as uuidv4 } from 'uuid';
+import dynamic from 'next/dynamic';
+
+const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false });
+const DialogContent = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogContent), { ssr: false });
+const DialogHeader = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogHeader), { ssr: false });
+const DialogTitle = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogTitle), { ssr: false });
+const DialogFooter = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogFooter), { ssr: false });
+const DialogClose = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogClose), { ssr: false });
+
 
 const dietaryOptions: Option[] = [
   { value: 'Vegetarian', label: 'Vegetarian' },
@@ -48,7 +57,7 @@ const menuIngredientSchema = z.object({
   quantity: z.coerce.number().min(0.01, { message: "Quantity must be positive." }),
   unit: z.string().min(1, { message: "Unit is required." }),
   costPerUnit: z.coerce.number().min(0, { message: "Cost per unit must be non-negative." }),
-  totalCost: z.coerce.number().optional(), // Will be calculated
+  totalCost: z.coerce.number().optional(), 
   notes: z.string().optional(),
 });
 
@@ -56,9 +65,9 @@ const menuFormSchema = z.object({
   title: z.string().min(3, { message: 'Title must be at least 3 characters.' }),
   description: z.string().min(10, { message: 'Description must be at least 10 characters.' }),
   cuisine: z.string().min(2, { message: 'Cuisine type is required.' }),
-  pricePerHead: z.coerce.number().min(0, { message: 'Sale price must be a positive number.' }), // Sale Price
+  pricePerHead: z.coerce.number().min(0, { message: 'Sale price must be a positive number.' }),
   pax: z.coerce.number().min(1, { message: 'PAX must be at least 1.' }).optional(),
-  costPrice: z.coerce.number().min(0, { message: 'Cost price must be positive.'}).optional(), // Chef's final determined cost per head
+  costPrice: z.coerce.number().min(0, { message: 'Cost price must be positive.'}).optional(),
   dietaryInfo: z.array(z.string()).optional(),
   isPublic: z.boolean().default(false),
   menuImageFile: z.instanceof(File).optional()
@@ -96,14 +105,14 @@ export default function MenuManagementPage() {
       dietaryInfo: [],
       isPublic: false,
       menuImageFile: undefined,
-      pax: 1, // Default PAX to 1
+      pax: 1,
       costPrice: 0,
       dataAiHint: '',
       menuIngredients: [],
     },
   });
   
-  const { fields: ingredientFields, append: appendIngredient, remove: removeIngredient, update: updateIngredient } = useFieldArray({
+  const { fields: ingredientFields, append: appendIngredient, remove: removeIngredient } = useFieldArray({
     control: form.control,
     name: "menuIngredients",
   });
@@ -120,7 +129,7 @@ export default function MenuManagementPage() {
   }, [watchedIngredients]);
 
   const calculatedCostPricePerHead = useMemo(() => {
-    const pax = Number(watchedPax) || 1; // Ensure pax is at least 1 to avoid division by zero
+    const pax = Number(watchedPax) || 1; 
     return calculatedTotalIngredientCost / Math.max(1, pax);
   }, [calculatedTotalIngredientCost, watchedPax]);
 
@@ -128,6 +137,7 @@ export default function MenuManagementPage() {
   useEffect(() => {
     if (!user) {
       setIsLoading(false);
+      setMenus([]);
       return;
     }
     setIsLoading(true);
@@ -135,12 +145,15 @@ export default function MenuManagementPage() {
     const q = query(menusCollectionRef, where("chefId", "==", user.uid), orderBy("createdAt", "desc"));
     
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const fetchedMenus = querySnapshot.docs.map(docSnap => ({ 
-        id: docSnap.id, 
-        ...docSnap.data(),
-        createdAt: docSnap.data().createdAt ? (docSnap.data().createdAt as Timestamp).toDate() : undefined,
-        updatedAt: docSnap.data().updatedAt ? (docSnap.data().updatedAt as Timestamp).toDate() : undefined,
-      } as Menu));
+      const fetchedMenus = querySnapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+         return { 
+          id: docSnap.id, 
+          ...data,
+          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : undefined),
+          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt) : undefined),
+        } as Menu
+      });
       setMenus(fetchedMenus);
       setIsLoading(false);
     }, (error) => {
@@ -181,7 +194,7 @@ export default function MenuManagementPage() {
 
     try {
       if (menuImageFile) {
-        if (editingMenu && editingMenu.imageUrl) {
+        if (editingMenu && editingMenu.imageUrl && editingMenu.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
             const oldImageRef = storageRef(storage, editingMenu.imageUrl);
             await deleteObject(oldImageRef).catch(e => console.warn("Old image not found or could not be deleted for menu:", e));
@@ -217,13 +230,13 @@ export default function MenuManagementPage() {
       const paxForCalc = Math.max(1, Number(data.pax) || 1);
       const costPerHeadFromIngredients = totalIngredientCost / paxForCalc;
 
-      const menuDataToSave = {
+      const menuDataToSave: Partial<Menu> & { chefId: string; chefName: string; updatedAt: any; } = {
         title: data.title,
         description: data.description,
         cuisine: data.cuisine,
-        pricePerHead: data.pricePerHead, // Sale price
+        pricePerHead: data.pricePerHead,
         pax: data.pax,
-        costPrice: data.costPrice, // Chef's final determined cost price
+        costPrice: data.costPrice,
         dietaryInfo: data.dietaryInfo || [],
         isPublic: data.isPublic,
         imageUrl: imageUrlToSave,
@@ -234,6 +247,7 @@ export default function MenuManagementPage() {
         menuIngredients: finalMenuIngredients,
         calculatedTotalIngredientCost: totalIngredientCost,
         calculatedCostPricePerHead: costPerHeadFromIngredients,
+        adminStatus: editingMenu?.adminStatus || 'pending', // Preserve existing or default
         updatedAt: serverTimestamp(),
       };
 
@@ -292,19 +306,12 @@ export default function MenuManagementPage() {
     if (window.confirm(`Are you sure you want to delete the menu "${menuToDelete?.title}"?`)) {
       setIsSaving(true);
       try {
-        if (menuToDelete.imageUrl) {
+        if (menuToDelete.imageUrl && menuToDelete.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
-            const imagePath = `users/${user.uid}/menus/${menuToDelete.id}/image.${menuToDelete.imageUrl.split('.').pop()?.split('?')[0]}`;
-            const imageRef = storageRef(storage, imagePath);
-            await deleteObject(imageRef);
+            const imageRefToDelete = storageRef(storage, menuToDelete.imageUrl);
+            await deleteObject(imageRefToDelete);
           } catch (e) {
-            // Try deleting based on direct URL if path based fails (older entries might use full URL)
-            try {
-                const directImageRef = storageRef(storage, menuToDelete.imageUrl);
-                await deleteObject(directImageRef);
-            } catch (e2) {
-                console.warn("Could not delete menu image from storage (tried path and direct URL):", menuToDelete.imageUrl, e, e2);
-            }
+            console.warn("Could not delete menu image from storage:", menuToDelete.imageUrl, e);
           }
         }
         await deleteDoc(doc(db, "menus", menuId));
@@ -328,13 +335,13 @@ export default function MenuManagementPage() {
     const determinedPax = menu.pax ?? 1;
 
     const newItem: Omit<ShoppingListItem, 'id' | 'createdAt' | 'updatedAt'> = {
+      chefId: user.uid,
       name: `Ingredients for ${menu.title}`,
       quantity: determinedPax, 
       unit: 'Servings', 
       estimatedCost: determinedCostPrice * determinedPax, 
       notes: `For menu: ${menu.title} (ID: ${menu.id}). Cost per head: $${determinedCostPrice.toFixed(2)} for ${determinedPax} PAX.`,
       purchased: false,
-      chefId: user.uid,
       menuId: menu.id,
     };
 
@@ -377,7 +384,7 @@ export default function MenuManagementPage() {
   };
 
   const handleAiAssist = async () => {
-    const { title, description, cuisine } = form.getValues();
+    const { title, description, cuisine, menuIngredients } = form.getValues();
     if (!title || !cuisine) {
       toast({
         title: "Missing Information for AI",
@@ -390,10 +397,12 @@ export default function MenuManagementPage() {
     setIsAiAssisting(true);
     toast({ title: "AI Menu Assist", description: "Generating suggestions..." });
     try {
+      const keyIngredientsString = menuIngredients?.map(ing => ing.name).filter(Boolean).join(', ');
       const result = await assistMenuItem({
         menuTitle: title,
         currentDescription: description,
         cuisine: cuisine,
+        keyIngredients: keyIngredientsString,
       });
       if (result && result.suggestedDescription) {
         form.setValue('description', result.suggestedDescription, { shouldValidate: true });
@@ -433,13 +442,12 @@ export default function MenuManagementPage() {
             setEditingMenu(null);
           }
       }}>
-        <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto"> {/* Increased max-width */}
+        <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingMenu ? 'Edit Menu' : 'Create New Menu'}</DialogTitle>
           </DialogHeader>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 p-1">
-              {/* Basic Menu Details */}
               <FormField
                 control={form.control}
                 name="title"
@@ -541,7 +549,6 @@ export default function MenuManagementPage() {
                 )}
               />
               
-              {/* Menu Ingredients & Costing Section */}
               <div className="space-y-4 pt-4 border-t">
                 <h3 className="text-lg font-semibold flex items-center"><Calculator className="mr-2 h-5 w-5"/>Ingredients & Costing</h3>
                 {ingredientFields.map((field, index) => (
@@ -646,7 +653,6 @@ export default function MenuManagementPage() {
               </div>
 
 
-              {/* Dietary Information & Publishing */}
               <FormItem className="pt-4 border-t">
                 <FormLabel>Dietary Information (Flags)</FormLabel>
                 <Controller
@@ -764,4 +770,3 @@ export default function MenuManagementPage() {
     </div>
   );
 }
-

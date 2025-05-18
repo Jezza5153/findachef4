@@ -19,17 +19,27 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
+// import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import type { ChefWallEvent, CalendarEvent } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
-import { PlusCircle, Edit3, Trash2, LayoutGrid, Users, CalendarClock, DollarSign, MapPin, Globe, Lock, AlertCircle, ChefHat, Loader2, InfoIcon, UploadCloud } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, LayoutGrid, Users, CalendarClock, DollarSign, MapPin, Globe, Lock, AlertCircle, ChefHat, Loader2, InfoIcon, UploadCloud, Image as ImageIconLucide } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where, serverTimestamp, Timestamp, setDoc, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, addDoc, getDoc, doc, updateDoc, deleteDoc, query, where, serverTimestamp, Timestamp, setDoc, onSnapshot, orderBy } from 'firebase/firestore';
 import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
+import { format } from 'date-fns';
+import dynamic from 'next/dynamic';
+
+const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false });
+const DialogContent = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogContent), { ssr: false });
+const DialogHeader = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogHeader), { ssr: false });
+const DialogTitle = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogTitle), { ssr: false });
+const DialogFooter = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogFooter), { ssr: false });
+const DialogClose = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogClose), { ssr: false });
+
 
 const wallEventFormSchema = z.object({
   title: z.string().min(5, { message: 'Event title must be at least 5 characters.' }),
@@ -89,6 +99,7 @@ export default function ChefWallPage() {
   useEffect(() => {
     if (!user) {
       setIsLoading(false);
+      setWallEvents([]);
       return;
     }
     setIsLoading(true);
@@ -96,12 +107,16 @@ export default function ChefWallPage() {
     const q = query(eventsCollectionRef, where("chefId", "==", user.uid), orderBy("createdAt", "desc"));
     
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const fetchedEvents = querySnapshot.docs.map(doc => ({ 
-        id: doc.id, 
-        ...doc.data(),
-        createdAt: doc.data().createdAt ? (doc.data().createdAt as Timestamp).toDate() : undefined,
-        updatedAt: doc.data().updatedAt ? (doc.data().updatedAt as Timestamp).toDate() : undefined,
-       } as ChefWallEvent));
+      const fetchedEvents = querySnapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        return { 
+          id: docSnap.id, 
+          ...data,
+          eventDateTime: data.eventDateTime instanceof Timestamp ? data.eventDateTime.toDate().toISOString() : data.eventDateTime as string,
+          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : undefined),
+          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt) : undefined),
+        } as ChefWallEvent
+      });
       setWallEvents(fetchedEvents);
       setIsLoading(false);
     }, (error) => {
@@ -147,7 +162,7 @@ export default function ChefWallPage() {
 
     try {
       if (eventImageFile) {
-        if (editingEvent && editingEvent.imageUrl) {
+        if (editingEvent && editingEvent.imageUrl && editingEvent.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
             const oldImageRef = storageRef(storage, editingEvent.imageUrl);
             await deleteObject(oldImageRef).catch(e => console.warn("Old image not found or cannot be deleted for wall event:", e));
@@ -156,10 +171,10 @@ export default function ChefWallPage() {
         
         const fileExtension = eventImageFile.name.split('.').pop();
         const imagePath = `users/${user.uid}/chefWallEvents/${eventIdForPath}/eventImage.${fileExtension}`;
-        const imageStorageRef = storageRef(storage, imagePath);
+        const imageStorageRefInstance = storageRef(storage, imagePath);
         
         toast({ title: "Uploading image...", description: "Please wait." });
-        const uploadTask = uploadBytesResumable(imageStorageRef, eventImageFile);
+        const uploadTask = uploadBytesResumable(imageStorageRefInstance, eventImageFile);
         await new Promise<void>((resolve, reject) => {
           uploadTask.on('state_changed', null,
             (error) => { console.error("Wall event image upload error:", error); reject(error); },
@@ -171,7 +186,7 @@ export default function ChefWallPage() {
         });
       }
 
-      const finalEventData: Omit<ChefWallEvent, 'id' | 'createdAt' | 'updatedAt'> & { chefId: string, chefName: string, chefAvatarUrl?: string, updatedAt: Timestamp, createdAt?: Timestamp } = {
+      const finalEventData: Omit<ChefWallEvent, 'id' | 'createdAt' | 'updatedAt'> & { chefId: string, chefName: string, chefAvatarUrl?: string, updatedAt: any, createdAt?: any } = {
         title: data.title,
         description: data.description,
         maxPax: data.maxPax,
@@ -186,11 +201,11 @@ export default function ChefWallPage() {
         chefId: user.uid,
         chefName: userProfile.name || user.displayName || "Chef",
         chefAvatarUrl: userProfile.profilePictureUrl || user.photoURL || undefined,
-        updatedAt: Timestamp.now(),
+        updatedAt: serverTimestamp(),
       };
       
       const calendarEventData: Omit<CalendarEvent, 'id' | 'createdAt' | 'updatedAt'> & {id: string} = {
-        id: eventIdForPath, // Use the same ID for calendar event
+        id: eventIdForPath,
         title: finalEventData.title,
         date: Timestamp.fromDate(eventDate),
         location: finalEventData.location,
@@ -213,9 +228,9 @@ export default function ChefWallPage() {
 
         toast({ title: 'Event Post Updated', description: `"${finalEventData.title}" has been successfully updated.` });
       } else {
-        finalEventData.createdAt = Timestamp.now();
+        finalEventData.createdAt = serverTimestamp();
         const newDocRef = doc(db, "chefWallEvents", eventIdForPath); 
-        await setDoc(newDocRef, finalEventData);
+        await setDoc(newDocRef, {...finalEventData, id: newDocRef.id});
         
         const calendarEventDocRef = doc(db, `users/${user.uid}/calendarEvents`, eventIdForPath);
         await setDoc(calendarEventDocRef, { ...calendarEventData, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
@@ -240,7 +255,13 @@ export default function ChefWallPage() {
   const handleEditEventPost = (eventToEdit: ChefWallEvent) => {
     setEditingEvent(eventToEdit);
     const eventDate = new Date(eventToEdit.eventDateTime);
-    const formattedDateTime = `${eventDate.getFullYear()}-${('0' + (eventDate.getMonth() + 1)).slice(-2)}-${('0' + eventDate.getDate()).slice(-2)}T${('0' + eventDate.getHours()).slice(-2)}:${('0' + eventDate.getMinutes()).slice(-2)}`;
+    // Format for datetime-local input: YYYY-MM-DDTHH:MM
+    const year = eventDate.getFullYear();
+    const month = ('0' + (eventDate.getMonth() + 1)).slice(-2);
+    const day = ('0' + eventDate.getDate()).slice(-2);
+    const hours = ('0' + eventDate.getHours()).slice(-2);
+    const minutes = ('0' + eventDate.getMinutes()).slice(-2);
+    const formattedDateTime = `${year}-${month}-${day}T${hours}:${minutes}`;
     
     form.reset({
       title: eventToEdit.title,
@@ -268,10 +289,10 @@ export default function ChefWallPage() {
     if (window.confirm(`Are you sure you want to delete the event post "${eventToDelete?.title}"? This will also remove it from your calendar.`)) {
       setIsSaving(true);
       try {
-        if (eventToDelete.imageUrl) {
+        if (eventToDelete.imageUrl && eventToDelete.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
-            const imageRef = storageRef(storage, eventToDelete.imageUrl);
-            await deleteObject(imageRef);
+            const imageRefToDelete = storageRef(storage, eventToDelete.imageUrl);
+            await deleteObject(imageRefToDelete);
           } catch (e) {
              console.warn("Could not delete wall event image from storage, it might not exist or path is incorrect:", e);
           }
@@ -312,13 +333,14 @@ export default function ChefWallPage() {
     setIsPostDialogOpen(true);
   };
   
-  const formatEventDateTimeForDisplay = (dateTimeString: string) => {
+  const formatEventDateTimeForDisplay = (dateTimeString: string | undefined) => {
+    if (!dateTimeString) return "Date TBD";
     try {
       const date = new Date(dateTimeString);
       if (isNaN(date.getTime())) return "Invalid Date";
-      return new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+      return format(date, "MMM d, yyyy 'at' h:mm a");
     } catch (e) {
-      return dateTimeString; 
+      return String(dateTimeString); 
     }
   };
 
@@ -573,7 +595,7 @@ export default function ChefWallPage() {
                 <p className="line-clamp-3">{event.description}</p>
                 <div className="flex items-center"><CalendarClock className="mr-2 h-4 w-4 text-primary" /> {formatEventDateTimeForDisplay(event.eventDateTime)}</div>
                 <div className="flex items-center"><MapPin className="mr-2 h-4 w-4 text-primary" /> {event.location}</div>
-                <div className="flex items-center"><DollarSign className="mr-2 h-4 w-4 text-green-600" /> ${event.pricePerPerson}/person</div>
+                <div className="flex items-center"><DollarSign className="mr-2 h-4 w-4 text-green-600" /> ${event.pricePerPerson.toFixed(2)}/person</div>
                 <div className="flex items-center"><Users className="mr-2 h-4 w-4 text-primary" /> Max {event.maxPax} guests</div>
                 {event.chefsInvolved && event.chefsInvolved.length > 0 && (
                   <div className="flex items-center text-xs">

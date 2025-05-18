@@ -1825,21 +1825,10 @@ body {
   background-image: linear-gradient(to right, var(--tw-gradient-stops));
 }
 
-.from-blue-100 {
-  --tw-gradient-from: #dbeafe var(--tw-gradient-from-position);
-  --tw-gradient-to: #dbeafe00 var(--tw-gradient-to-position);
-  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
-}
-
 .from-primary\/10 {
   --tw-gradient-from: hsl(var(--primary) / .1) var(--tw-gradient-from-position);
   --tw-gradient-to: hsl(var(--primary) / 0) var(--tw-gradient-to-position);
   --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
-}
-
-.via-slate-50 {
-  --tw-gradient-to: #f8fafc00 var(--tw-gradient-to-position);
-  --tw-gradient-stops: var(--tw-gradient-from), #f8fafc var(--tw-gradient-via-position), var(--tw-gradient-to);
 }
 
 .via-secondary\/10 {
@@ -1849,10 +1838,6 @@ body {
 
 .to-accent\/10 {
   --tw-gradient-to: hsl(var(--accent) / .1) var(--tw-gradient-to-position);
-}
-
-.to-orange-100 {
-  --tw-gradient-to: #ffedd5 var(--tw-gradient-to-position);
 }
 
 .fill-current {

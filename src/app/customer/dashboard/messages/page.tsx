@@ -27,20 +27,26 @@ import {
 } from "@/components/ui/alert-dialog";
 import { loadStripe, type Stripe } from '@stripe/stripe-js';
 import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import dynamic from 'next/dynamic';
 
-// Initialize Stripe outside of the component to avoid re-creating it on every render
-const stripePromise = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
-  ? loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY)
-  : null;
+const StripeElementsProvider = dynamic(() =>
+  Promise.all([
+    import('@stripe/react-stripe-js'),
+    import('@stripe/stripe-js').then(mod => loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!))
+  ]).then(([{ Elements }, stripePromise]) => ({ default: ({children}: {children: React.ReactNode}) => 
+    stripePromise ? <Elements stripe={stripePromise}>{children}</Elements> : <p>Loading payment gateway...</p> 
+  })), { ssr: false, loading: () => <p>Loading payment gateway...</p> }
+);
 
 interface StripePaymentFormProps {
   totalPrice: number;
   onPaymentSuccess: (paymentIntentId: string) => void;
   onPaymentError: (errorMessage: string) => void;
+  isProcessingPayment: boolean;
   setIsProcessingPayment: (isProcessing: boolean) => void;
 }
 
-const StripePaymentForm: React.FC<StripePaymentFormProps> = ({ totalPrice, onPaymentSuccess, onPaymentError, setIsProcessingPayment }) => {
+const StripePaymentForm: React.FC<StripePaymentFormProps> = ({ totalPrice, onPaymentSuccess, onPaymentError, isProcessingPayment, setIsProcessingPayment }) => {
   const stripe = useStripe();
   const elements = useElements();
   const { toast } = useToast();
@@ -65,11 +71,10 @@ const StripePaymentForm: React.FC<StripePaymentFormProps> = ({ totalPrice, onPay
     toast({ title: "Processing Payment...", description: "Please wait." });
 
     try {
-      // 1. Create a PaymentIntent on your backend
       const response = await fetch('/api/create-payment-intent', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: Math.round(totalPrice * 100), currency: 'aud' }), // amount in cents
+        body: JSON.stringify({ amount: Math.round(totalPrice * 100), currency: 'aud' }),
       });
 
       const paymentIntentData = await response.json();
@@ -78,12 +83,9 @@ const StripePaymentForm: React.FC<StripePaymentFormProps> = ({ totalPrice, onPay
         throw new Error(paymentIntentData.error || 'Failed to create payment intent.');
       }
 
-      // 2. Confirm the card payment with Stripe.js
       const { error, paymentIntent } = await stripe.confirmCardPayment(paymentIntentData.clientSecret, {
         payment_method: {
           card: cardElement,
-          // You can add billing_details here if needed
-          // billing_details: { name: customerName },
         },
       });
 
@@ -108,13 +110,13 @@ const StripePaymentForm: React.FC<StripePaymentFormProps> = ({ totalPrice, onPay
     style: {
       base: {
         fontSize: '16px',
-        color: '#424770',
+        color: '#424770', // Example color, adjust with HSL from theme if needed
         '::placeholder': {
-          color: '#aab7c4',
+          color: '#aab7c4', // Example color
         },
       },
       invalid: {
-        color: '#9e2146',
+        color: '#9e2146', // Example color
       },
     },
   };
@@ -124,9 +126,9 @@ const StripePaymentForm: React.FC<StripePaymentFormProps> = ({ totalPrice, onPay
       <div className="my-4 p-3 border rounded-md">
         <CardElement options={cardElementOptions} />
       </div>
-      <Button type="submit" disabled={!stripe || setIsProcessingPayment === undefined} className="w-full">
-        { setIsProcessingPayment === undefined ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CreditCard className="mr-2 h-4 w-4" /> }
-        Pay AUD {(totalPrice).toFixed(2)}
+      <Button type="submit" disabled={!stripe || isProcessingPayment} className="w-full">
+        { isProcessingPayment ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CreditCard className="mr-2 h-4 w-4" /> }
+        {isProcessingPayment ? "Processing..." : `Pay AUD ${(totalPrice).toFixed(2)}`}
       </Button>
     </form>
   );
@@ -150,7 +152,7 @@ export default function CustomerMessagesPage() {
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [isProcessingProposalAction, setIsProcessingProposalAction] = useState(false);
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
-  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [isActuallyProcessingPayment, setIsActuallyProcessingPayment] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
@@ -186,7 +188,7 @@ export default function CustomerMessagesPage() {
         let enrichedData: EnrichedCustomerRequest = { 
           id: docSnap.id, 
           ...data,
-          eventDate: convertTimestamp(data.eventDate)!, // Assume eventDate is always present for a request
+          eventDate: convertTimestamp(data.eventDate)!,
           createdAt: convertTimestamp(data.createdAt),
           updatedAt: convertTimestamp(data.updatedAt),
         };
@@ -221,9 +223,6 @@ export default function CustomerMessagesPage() {
       } else if (selectedRequest && resolvedRequests.length > 0) { 
         const updatedSelectedRequest = resolvedRequests.find(r => r.id === selectedRequest.id);
         setSelectedRequest(updatedSelectedRequest || null);
-      } else if (resolvedRequests.length > 0 && !selectedRequest) {
-        // Optionally select the first request if none is selected and URL param is not present
-        // setSelectedRequest(resolvedRequests[0]);
       }
       setIsLoadingRequests(false);
 
@@ -234,7 +233,7 @@ export default function CustomerMessagesPage() {
     });
 
     return () => unsubscribe();
-  }, [user, toast, searchParams, selectedRequest?.id]); // Added selectedRequest.id to re-evaluate if it changes externally
+  }, [user, toast, searchParams, selectedRequest?.id]);
 
   useEffect(() => {
     if (!selectedRequest) {
@@ -297,7 +296,7 @@ export default function CustomerMessagesPage() {
       
       let newStatus = selectedRequest.status;
       if (selectedRequest.status === 'proposal_sent' || selectedRequest.status === 'chef_accepted') {
-        newStatus = 'awaiting_customer_response'; // Customer replied to a proposal/acceptance
+        newStatus = 'awaiting_customer_response';
       }
       await updateDoc(requestDocRef, { updatedAt: serverTimestamp(), status: newStatus });
       setNewMessageText('');
@@ -311,12 +310,21 @@ export default function CustomerMessagesPage() {
   };
   
   const proceedWithBookingCreation = async (paymentIntentId?: string) => {
-    if (!selectedRequest || !selectedRequest.activeProposal || !user || !userProfile) return;
+    if (!selectedRequest || !selectedRequest.activeProposal || !user || !userProfile) {
+      setIsProcessingProposalAction(false);
+      setIsActuallyProcessingPayment(false);
+      setIsPaymentDialogOpen(false);
+      toast({ title: "Booking Error", description: "Missing critical information to create booking.", variant: "destructive"});
+      return;
+    }
     
-    setIsProcessingProposalAction(true); // Reuse this for overall booking process
+    // This state is managed by the payment form
+    // setIsActuallyProcessingPayment(true); // Already true when this is called from payment success
+    // await new Promise(resolve => setTimeout(resolve, 2500)); // Artificial delay for payment processing feel
+
 
     const requestDocRef = doc(db, "customerRequests", selectedRequest.id);
-    const systemMessageText = `Customer ${userProfile.name || 'You'} accepted the proposal from Chef ${selectedRequest.activeProposal.chefName}. Booking created (Payment ID: ${paymentIntentId || 'N/A'}).`;
+    const systemMessageText = `You accepted the proposal from Chef ${selectedRequest.activeProposal.chefName}. Booking created. Payment ID: ${paymentIntentId || 'N/A'}.`;
 
     try {
       const batch = writeBatch(db);
@@ -328,7 +336,7 @@ export default function CustomerMessagesPage() {
       
       const eventDateAsTimestamp = selectedRequest.eventDate instanceof Date 
                                    ? Timestamp.fromDate(selectedRequest.eventDate) 
-                                   : selectedRequest.eventDate;
+                                   : selectedRequest.eventDate; // Assume it's already a Timestamp if not Date
 
       const newBookingData: Omit<Booking, 'id'> = {
         customerId: user.uid,
@@ -341,11 +349,11 @@ export default function CustomerMessagesPage() {
         pax: selectedRequest.pax,
         totalPrice: selectedRequest.activeProposal.menuPricePerHead * selectedRequest.pax,
         pricePerHead: selectedRequest.activeProposal.menuPricePerHead,
-        status: 'confirmed', 
+        status: 'confirmed',
         menuTitle: selectedRequest.activeProposal.menuTitle,
         location: selectedRequest.location || undefined,
         requestId: selectedRequest.id,
-        paymentIntentId: paymentIntentId, // Store the Stripe PaymentIntent ID
+        paymentIntentId: paymentIntentId,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
@@ -363,7 +371,7 @@ export default function CustomerMessagesPage() {
           location: newBookingData.location,
           notes: `Booking confirmed for request ID: ${selectedRequest.id}. Booking ID: ${bookingDocRef.id}`,
           status: 'Confirmed',
-          isWallEvent: false, 
+          isWallEvent: false,
       };
       const chefCalendarEventDocRef = doc(db, `users/${newBookingData.chefId}/calendarEvents`, bookingDocRef.id);
       batch.set(chefCalendarEventDocRef, { ...calendarEventData, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
@@ -392,6 +400,7 @@ export default function CustomerMessagesPage() {
       toast({ title: "Error", description: `Could not complete booking. Details: ${(error as Error).message}`, variant: "destructive" });
     } finally {
       setIsProcessingProposalAction(false);
+      setIsActuallyProcessingPayment(false);
       setIsPaymentDialogOpen(false);
     }
   };
@@ -401,6 +410,7 @@ export default function CustomerMessagesPage() {
     if (!selectedRequest || !selectedRequest.activeProposal || !user || !userProfile) return;
 
     if (action === 'accept') {
+      setIsProcessingProposalAction(true); // Set this to disable other buttons while payment dialog is open
       setIsPaymentDialogOpen(true); 
       return;
     }
@@ -408,7 +418,7 @@ export default function CustomerMessagesPage() {
     // Handle 'decline'
     setIsProcessingProposalAction(true);
     const requestDocRef = doc(db, "customerRequests", selectedRequest.id);
-    const systemMessageText = `Customer ${userProfile.name || 'You'} declined the proposal from Chef ${selectedRequest.activeProposal.chefName}.`;
+    const systemMessageText = `You declined the proposal from Chef ${selectedRequest.activeProposal.chefName}.`;
     
     try {
         const batch = writeBatch(db);
@@ -455,7 +465,7 @@ export default function CustomerMessagesPage() {
   const isConversationFinalized = selectedRequest && 
                                   (selectedRequest.status === 'customer_confirmed' || 
                                    selectedRequest.status === 'proposal_declined' ||
-                                   selectedRequest.status === 'booked' || // Booked status might be set by backend later
+                                   selectedRequest.status === 'booked' ||
                                    selectedRequest.status === 'cancelled_by_customer');
 
 
@@ -598,11 +608,12 @@ export default function CustomerMessagesPage() {
                 </CardContent>
                 {canTakeProposalAction && (
                   <CardFooter className="p-0 pt-3 flex gap-2">
-                    <Button onClick={() => handleProposalAction('accept')} size="sm" className="bg-green-600 hover:bg-green-700" disabled={isProcessingProposalAction || isProcessingPayment}>
-                      {isProcessingProposalAction ? <Loader2 className="animate-spin h-4 w-4 mr-1.5"/> : <CheckCircle className="h-4 w-4 mr-1.5"/>} Accept & Proceed to Pay
+                    <Button onClick={() => handleProposalAction('accept')} size="sm" className="bg-green-600 hover:bg-green-700" disabled={isProcessingProposalAction || isActuallyProcessingPayment}>
+                      {(isProcessingProposalAction && !isPaymentDialogOpen) || isActuallyProcessingPayment ? <Loader2 className="animate-spin h-4 w-4 mr-1.5"/> : <CheckCircle className="h-4 w-4 mr-1.5"/>} 
+                      {isActuallyProcessingPayment ? "Processing..." : "Accept & Proceed to Pay"}
                     </Button>
-                    <Button onClick={() => handleProposalAction('decline')} size="sm" variant="outline" disabled={isProcessingProposalAction || isProcessingPayment}>
-                      {isProcessingProposalAction ? <Loader2 className="animate-spin h-4 w-4 mr-1.5"/> : <XCircle className="h-4 w-4 mr-1.5"/>} Decline Proposal
+                    <Button onClick={() => handleProposalAction('decline')} size="sm" variant="outline" disabled={isProcessingProposalAction || isActuallyProcessingPayment}>
+                      {isProcessingProposalAction && !isPaymentDialogOpen ? <Loader2 className="animate-spin h-4 w-4 mr-1.5"/> : <XCircle className="h-4 w-4 mr-1.5"/>} Decline Proposal
                     </Button>
                   </CardFooter>
                 )}
@@ -632,7 +643,7 @@ export default function CustomerMessagesPage() {
                 onChange={(e) => setNewMessageText(e.target.value)}
                 className="flex-1 min-h-[40px] max-h-[120px]"
                 rows={1}
-                disabled={isSendingMessage || isConversationFinalized || isProcessingPayment}
+                disabled={isSendingMessage || isConversationFinalized || isActuallyProcessingPayment || isProcessingProposalAction}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
@@ -640,7 +651,7 @@ export default function CustomerMessagesPage() {
                   }
                 }}
               />
-              <Button type="submit" size="icon" onClick={handleSendMessage} disabled={isSendingMessage || !newMessageText.trim() || isConversationFinalized || isProcessingPayment}>
+              <Button type="submit" size="icon" onClick={handleSendMessage} disabled={isSendingMessage || !newMessageText.trim() || isConversationFinalized || isActuallyProcessingPayment || isProcessingProposalAction}>
                 {isSendingMessage ? <Loader2 className="animate-spin h-5 w-5"/> : <Send className="h-5 w-5" />}
                 <span className="sr-only">Send</span>
               </Button>
@@ -655,8 +666,12 @@ export default function CustomerMessagesPage() {
         </div>
       )}
 
-      {selectedRequest && selectedRequest.activeProposal && stripePromise && (
-        <AlertDialog open={isPaymentDialogOpen} onOpenChange={setIsPaymentDialogOpen}>
+      {selectedRequest && selectedRequest.activeProposal && (
+        <AlertDialog open={isPaymentDialogOpen} onOpenChange={(open) => {
+            if (isActuallyProcessingPayment && open) return; // Prevent closing while payment is processing
+            setIsPaymentDialogOpen(open);
+            if (!open) setIsProcessingProposalAction(false); // Reset this if dialog is closed manually
+        }}>
             <AlertDialogContent>
                 <AlertDialogHeader>
                     <AlertDialogTitle className="flex items-center"><CreditCard className="mr-2 h-5 w-5 text-primary"/>Confirm Booking & Payment</AlertDialogTitle>
@@ -665,23 +680,24 @@ export default function CustomerMessagesPage() {
                         <p>Total Price: <strong className="text-lg">AUD {(selectedRequest.activeProposal.menuPricePerHead * selectedRequest.pax).toFixed(2)}</strong>.</p>
                     </AlertDialogDescription>
                 </AlertDialogHeader>
-                <Elements stripe={stripePromise}>
+                <StripeElementsProvider>
                   <StripePaymentForm
                     totalPrice={selectedRequest.activeProposal.menuPricePerHead * selectedRequest.pax}
                     onPaymentSuccess={(paymentIntentId) => {
                       toast({ title: "Payment Successful!", description: `Payment ID: ${paymentIntentId.substring(0,10)}...`});
-                      proceedWithBookingCreation(paymentIntentId); // This now happens after payment
+                      proceedWithBookingCreation(paymentIntentId);
                     }}
                     onPaymentError={(errorMessage) => {
                       toast({ title: "Payment Failed", description: errorMessage, variant: "destructive" });
-                      setIsProcessingPayment(false); // Ensure this is reset on error
+                      setIsActuallyProcessingPayment(false); 
+                      setIsProcessingProposalAction(false); // Also reset this
                     }}
-                    setIsProcessingPayment={setIsProcessingPayment}
+                    isProcessingPayment={isActuallyProcessingPayment}
+                    setIsProcessingPayment={setIsActuallyProcessingPayment}
                   />
-                </Elements>
-                <AlertDialogFooter className="mt-2"> {/* Added mt-2 for spacing */}
-                    <AlertDialogCancel onClick={() => setIsPaymentDialogOpen(false)} disabled={isProcessingPayment}>Cancel</AlertDialogCancel>
-                    {/* The submit button is now inside StripePaymentForm */}
+                </StripeElementsProvider>
+                <AlertDialogFooter className="mt-2"> 
+                    <AlertDialogCancel onClick={() => {setIsPaymentDialogOpen(false); setIsProcessingProposalAction(false);}} disabled={isActuallyProcessingPayment}>Cancel</AlertDialogCancel>
                 </AlertDialogFooter>
             </AlertDialogContent>
         </AlertDialog>

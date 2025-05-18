@@ -17,18 +17,28 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 import { QRCodeSVG } from 'qrcode.react';
-import { BookingInvoiceDialog } from '@/components/booking-invoice-dialog';
+// import { BookingInvoiceDialog } from '@/components/booking-invoice-dialog'; // Dynamically import
 import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
-  AlertDialogDescription as ShadAlertDialogDescription, // Renamed to avoid conflict
+  AlertDialogDescription as ShadAlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import dynamic from 'next/dynamic';
+
+const BookingInvoiceDialog = dynamic(() =>
+  import('@/components/booking-invoice-dialog').then((mod) => mod.BookingInvoiceDialog),
+  { 
+    ssr: false,
+    loading: () => <p>Loading invoice viewer...</p> 
+  }
+);
+
 
 export default function CustomerBookedEventsPage() {
   const { user, userProfile } = useAuth();
@@ -62,7 +72,7 @@ export default function CustomerBookedEventsPage() {
           id: docSnap.id,
           ...data,
           eventDate: data.eventDate instanceof Timestamp ? data.eventDate.toDate() : new Date(data.eventDate as any),
-          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : new Date(data.createdAt as any),
+          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
           updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
           qrCodeScannedAt: data.qrCodeScannedAt instanceof Timestamp ? data.qrCodeScannedAt.toDate() : (data.qrCodeScannedAt ? new Date(data.qrCodeScannedAt as any) : undefined),
         } as Booking;
@@ -104,12 +114,10 @@ export default function CustomerBookedEventsPage() {
       toast({ title: "Error", description: "Booking not found.", variant: "destructive" });
       return;
     }
-    // Check if cancellation is allowed based on status and potentially event date
     if (bookingToCancel.status !== 'confirmed') {
       toast({ title: "Cancellation Not Allowed", description: "This booking cannot be cancelled at its current stage.", variant: "destructive" });
       return;
     }
-    // Add logic for date-based cancellation policy if needed (e.g., no cancellations within 24h)
 
     setIsCancelling(bookingId);
     try {
@@ -122,7 +130,6 @@ export default function CustomerBookedEventsPage() {
         title: "Booking Cancelled",
         description: `Your booking for "${bookingToCancel.eventTitle}" has been cancelled.`,
       });
-      // The UI will update via onSnapshot
     } catch (error) {
       console.error("Error cancelling booking:", error);
       toast({ title: "Error", description: "Could not cancel booking. Please try again.", variant: "destructive" });
@@ -142,14 +149,14 @@ export default function CustomerBookedEventsPage() {
     } else {
       toast({
         title: "Messaging Not Available",
-        description: "Direct messaging for this type of booking is not yet fully integrated.",
+        description: "Direct messaging for this event type is not yet fully integrated.",
         variant: "default",
       });
     }
   };
 
   const isCancellable = (status?: Booking['status']) => {
-    return status === 'confirmed'; // Simple rule for now
+    return status === 'confirmed';
   };
 
   if (isLoading) {
@@ -305,12 +312,14 @@ export default function CustomerBookedEventsPage() {
           </ShadAlertDialogDescription>
         </Alert>
 
-        <BookingInvoiceDialog 
+       {isInvoiceDialogOpen && selectedBookingForInvoice && (
+         <BookingInvoiceDialog 
             isOpen={isInvoiceDialogOpen}
             onOpenChange={setIsInvoiceDialogOpen}
             booking={selectedBookingForInvoice}
             customerName={userProfile?.name || user?.displayName || 'Valued Customer'}
         />
+       )}
     </div>
   );
 }
