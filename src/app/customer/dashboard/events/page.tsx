@@ -9,20 +9,26 @@ import { Button } from '@/components/ui/button';
 import type { Booking } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { collection, query, where, onSnapshot, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, Timestamp, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { format } from 'date-fns';
-import { CalendarCheck2, Users, DollarSign, QrCode, Info, Loader2, ChefHat, MapPin } from 'lucide-react';
+import { CalendarCheck2, Users, DollarSign, QrCode, Info, Loader2, ChefHat, MapPin, FileText, MessageSquare } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
+import { QRCodeSVG } from 'qrcode.react';
+import { BookingInvoiceDialog } from '@/components/booking-invoice-dialog'; // Import the new dialog
 
 export default function CustomerBookedEventsPage() {
-  const { user } = useAuth();
+  const { user, userProfile } = useAuth(); // Get userProfile for customer name
   const router = useRouter();
   const { toast } = useToast();
   const [bookedEvents, setBookedEvents] = useState<Booking[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isCancelling, setIsCancelling] = useState<string | null>(null); // For loading state on cancel button
+
+  const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = useState(false);
+  const [selectedBookingForInvoice, setSelectedBookingForInvoice] = useState<Booking | null>(null);
 
   useEffect(() => {
     if (!user) {
@@ -64,7 +70,6 @@ export default function CustomerBookedEventsPage() {
     });
 
     return () => unsubscribe();
-
   }, [user, toast]);
 
   const getStatusVariant = (status?: Booking['status']): 'default' | 'secondary' | 'destructive' | 'outline' => {
@@ -81,20 +86,40 @@ export default function CustomerBookedEventsPage() {
     }
   };
 
-  const handleCancelBooking = (bookingId: string) => {
-    toast({
-        title: "Cancel Booking (Placeholder)",
-        description: `Cancelling booking ${bookingId.substring(0,6)}... requires backend logic and policy enforcement.`,
-        variant: "default"
-    });
+  const handleCancelBooking = async (bookingId: string) => {
+    if (!user) return;
+    const bookingToCancel = bookedEvents.find(b => b.id === bookingId);
+    if (!bookingToCancel || bookingToCancel.status !== 'confirmed') {
+      toast({ title: "Cancellation Not Allowed", description: "This booking cannot be cancelled at its current stage.", variant: "destructive" });
+      return;
+    }
+
+    if (!window.confirm("Are you sure you want to cancel this booking? Review cancellation policy in Terms of Service.")) {
+        return;
+    }
+
+    setIsCancelling(bookingId);
+    try {
+      const bookingDocRef = doc(db, "bookings", bookingId);
+      await updateDoc(bookingDocRef, {
+        status: 'cancelled_by_customer',
+        updatedAt: serverTimestamp()
+      });
+      toast({
+        title: "Booking Cancelled",
+        description: `Your booking for "${bookingToCancel.eventTitle}" has been cancelled.`,
+      });
+    } catch (error) {
+      console.error("Error cancelling booking:", error);
+      toast({ title: "Error", description: "Could not cancel booking. Please try again.", variant: "destructive" });
+    } finally {
+      setIsCancelling(null);
+    }
   };
 
-  const handleViewReceipts = (bookingId: string) => {
-     toast({
-        title: "View Receipts/Invoice (Placeholder)",
-        description: `Functionality to view invoice for booking ${bookingId.substring(0,6)}... is coming soon.`,
-        variant: "default"
-    });
+  const handleViewInvoice = (booking: Booking) => {
+    setSelectedBookingForInvoice(booking);
+    setIsInvoiceDialogOpen(true);
   };
 
   const handleMessageChef = (booking: Booking) => {
@@ -148,7 +173,7 @@ export default function CustomerBookedEventsPage() {
                 <div className="flex justify-between items-start">
                   <CardTitle className="text-xl">{booking.eventTitle}</CardTitle>
                   <Badge variant={getStatusVariant(booking.status)} className="capitalize">
-                    {booking.status.replace(/_/g, ' ')}
+                    {booking.status?.replace(/_/g, ' ') || 'Unknown'}
                   </Badge>
                 </div>
                 {booking.chefName && (
@@ -166,7 +191,7 @@ export default function CustomerBookedEventsPage() {
               <CardContent className="space-y-3 text-sm">
                 <div className="flex items-center text-muted-foreground">
                   <CalendarCheck2 className="h-4 w-4 mr-2 text-primary" data-ai-hint="calendar event" />
-                  Date: <span className="font-medium text-foreground ml-1">{booking.eventDate ? format(booking.eventDate, 'PPpp') : 'Date TBD'}</span>
+                  Date: <span className="font-medium text-foreground ml-1">{booking.eventDate ? format(new Date(booking.eventDate as any), 'PPpp') : 'Date TBD'}</span>
                 </div>
                 <div className="flex items-center text-muted-foreground">
                   <Users className="h-4 w-4 mr-2 text-primary" data-ai-hint="people group" />
@@ -188,32 +213,43 @@ export default function CustomerBookedEventsPage() {
                      <QrCode className="h-5 w-5 text-blue-600" data-ai-hint="qr code" />
                     <AlertTitle className="text-blue-700 font-semibold">Event Completion QR Code</AlertTitle>
                     <AlertDescription className="text-blue-600 text-xs space-y-1">
-                      <p>On the day of your event, show this QR code area and the Booking ID below to your chef. They will scan it (or enter the ID) to confirm completion.</p>
-                      <div className="flex flex-col items-center justify-center p-2 bg-white rounded-md my-2">
-                        <Image src="https://placehold.co/150x150.png?text=SCAN+ME" alt="QR Code Placeholder" width={120} height={120} data-ai-hint="qr code scan" />
-                        <p className="text-xs font-mono mt-1 text-black">Booking ID: <span className="font-bold">{booking.id}</span></p>
+                      <p>On the day of your event, show this QR code area and the Booking ID below to your chef. They will scan it or enter the ID to confirm completion.</p>
+                      <div className="flex flex-col items-center justify-center p-2 bg-white rounded-md my-2 shadow">
+                        <QRCodeSVG value={booking.id} size={120} bgColor={"#ffffff"} fgColor={"#000000"} level={"L"} />
+                        <p className="text-xs font-mono mt-1.5 text-black">Booking ID: <span className="font-bold">{booking.id}</span></p>
                       </div>
                     </AlertDescription>
                   </Alert>
                 )}
                 {booking.status === 'completed' && booking.qrCodeScannedAt && (
-                    <p className="text-xs text-green-600 flex items-center"><Info className="h-3 w-3 mr-1" data-ai-hint="information circle" />Event marked complete on {format(booking.qrCodeScannedAt, 'PP')}.</p>
+                    <p className="text-xs text-green-700 flex items-center"><Info className="h-3 w-3 mr-1" data-ai-hint="information circle" />Event marked complete on {format(new Date(booking.qrCodeScannedAt as any), 'PP')}.</p>
                 )}
-
               </CardContent>
-              <CardFooter className="flex flex-col sm:flex-row justify-between items-center pt-4 border-t space-y-2 sm:space-y-0">
-                <Button variant="outline" size="sm" onClick={() => handleMessageChef(booking)}>
-                    Message Chef
+              <CardFooter className="flex flex-col sm:flex-row justify-between items-center pt-4 border-t space-y-2 sm:space-y-0 sm:gap-2">
+                <Button variant="outline" size="sm" onClick={() => handleMessageChef(booking)} className="w-full sm:w-auto">
+                    <MessageSquare className="mr-2 h-4 w-4"/> Message Chef
                 </Button>
-                <div className="flex space-x-2">
+                <div className="flex space-x-2 w-full sm:w-auto">
                     {booking.status === 'confirmed' && (
-                        <Button variant="destructive" size="sm" onClick={() => handleCancelBooking(booking.id)}>
+                        <Button 
+                            variant="destructive" 
+                            size="sm" 
+                            onClick={() => handleCancelBooking(booking.id)} 
+                            disabled={isCancelling === booking.id}
+                            className="flex-1 sm:flex-none"
+                        >
+                            {isCancelling === booking.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : null}
                             Cancel Booking
                         </Button>
                     )}
                     {(booking.status === 'completed' || booking.status === 'confirmed') && (
-                         <Button variant="link" size="sm" className="p-0 h-auto text-xs" onClick={() => handleViewReceipts(booking.id)}>
-                            View Related Receipts/Invoice
+                         <Button 
+                            variant="link" 
+                            size="sm" 
+                            className="p-0 h-auto text-xs flex-1 sm:flex-none justify-center" 
+                            onClick={() => handleViewInvoice(booking)}
+                        >
+                            <FileText className="mr-1 h-4 w-4"/> View Confirmation / Invoice
                          </Button>
                     )}
                 </div>
@@ -232,6 +268,13 @@ export default function CustomerBookedEventsPage() {
             Cancellation policies apply as per our <Link href="/terms" className="underline hover:text-primary">Terms of Service</Link>.
           </AlertDescription>
         </Alert>
+
+        <BookingInvoiceDialog 
+            isOpen={isInvoiceDialogOpen}
+            onOpenChange={setIsInvoiceDialogOpen}
+            booking={selectedBookingForInvoice}
+            customerName={userProfile?.name || user?.displayName || 'Valued Customer'}
+        />
     </div>
   );
 }
