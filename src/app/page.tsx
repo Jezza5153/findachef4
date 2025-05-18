@@ -1,10 +1,13 @@
 
+'use client'; // Make it a client component to use hooks
+
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Lock, MessagesSquare, ShieldCheck } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import type { Testimonial } from '@/types';
+import { useAuth } from '@/context/AuthContext'; // Import useAuth
 
 const benefits = [
   {
@@ -49,10 +52,15 @@ const testimonials: Testimonial[] = [
 ];
 
 export default function Home() {
+  const { user, userProfile } = useAuth();
+  const isCustomer = userProfile?.role === 'customer';
+
+  const customerCtaLink = user && isCustomer ? '/customer/dashboard' : '/login';
+
   return (
     <div className="flex flex-col">
       {/* Hero Section */}
-      <section className="relative py-20 md:py-32 bg-gradient-to-br from-blue-100 via-slate-50 to-orange-100">
+      <section className="relative py-20 md:py-32 bg-gradient-to-br from-primary/10 via-secondary/10 to-accent/10">
         <div className="absolute inset-0">
             <Image
               src="https://placehold.co/1920x1080.png"
@@ -60,7 +68,7 @@ export default function Home() {
               fill
               className="object-cover opacity-20"
               data-ai-hint="gourmet food"
-              priority
+              priority // Ensures hero image has priority
             />
         </div>
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
@@ -73,7 +81,7 @@ export default function Home() {
           </p>
           <div className="mt-10 flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4">
             <Button asChild size="lg" className="text-lg px-8 py-4 bg-primary hover:bg-primary/90 text-primary-foreground">
-              <Link href="/login">I’m a Customer</Link>
+              <Link href={customerCtaLink}>I’m a Customer</Link>
             </Button>
             <Button asChild size="lg" variant="outline" className="text-lg px-8 py-4 border-primary text-primary hover:bg-primary/10">
               <Link href="/chef/signup">I’m a Chef</Link>
@@ -91,7 +99,7 @@ export default function Home() {
               We provide a seamless, secure, and inspiring platform for all your culinary needs.
             </p>
           </div>
-          <div className="mt-16 grid grid-cols-1 gap-8 md:grid-cols-3"> {/* Changed to md:grid-cols-3 for 3 benefits */}
+          <div className="mt-16 grid grid-cols-1 gap-8 md:grid-cols-3">
             {benefits.map((benefit) => (
               <Card key={benefit.title} className="text-center shadow-lg hover:shadow-xl transition-shadow duration-300">
                 <CardHeader className="items-center">
@@ -152,7 +160,7 @@ export default function Home() {
                     width={50}
                     height={50}
                     className="rounded-full"
-                    data-ai-hint="person avatar"
+                    data-ai-hint="person avatar" // Ensures hint is present
                   />
                   <div>
                     <p className="font-semibold text-foreground">{testimonial.customerName}</p>

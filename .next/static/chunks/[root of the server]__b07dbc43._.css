@@ -1950,6 +1950,11 @@ body {
   --tw-gradient-stops: var(--tw-gradient-from), #f8fafc var(--tw-gradient-via-position), var(--tw-gradient-to);
 }
 
+.via-secondary\/10 {
+  --tw-gradient-to: hsl(var(--secondary) / 0) var(--tw-gradient-to-position);
+  --tw-gradient-stops: var(--tw-gradient-from), hsl(var(--secondary) / .1) var(--tw-gradient-via-position), var(--tw-gradient-to);
+}
+
 .to-accent\/10 {
   --tw-gradient-to: hsl(var(--accent) / .1) var(--tw-gradient-to-position);
 }
