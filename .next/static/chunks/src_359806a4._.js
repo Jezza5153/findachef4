@@ -219,7 +219,7 @@ function AuthProvider({ children }) {
     const [user, setUser] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(null);
     const [userProfile, setUserProfile] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(null);
     const [loading, setLoading] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(true); // For initial Firebase Auth check
-    const [profileLoading, setProfileLoading] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(true); // Default to true until profile and claims are resolved
+    const [profileLoading, setProfileLoading] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(true);
     const [isAdmin, setIsAdmin] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(false);
     const [isChef, setIsChef] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(false);
     const [isCustomer, setIsCustomer] = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$index$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["useState"])(false);
@@ -230,17 +230,20 @@ function AuthProvider({ children }) {
             const unsubscribeAuth = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$firebase$2f$node_modules$2f40$firebase$2f$auth$2f$dist$2f$esm2017$2f$index$2d$683d5879$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__$3c$export__z__as__onAuthStateChanged$3e$__["onAuthStateChanged"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$firebase$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["auth"], {
                 "AuthProvider.useEffect.unsubscribeAuth": async (currentUser)=>{
                     setUser(currentUser);
-                    setProfileLoading(true); // Reset profileLoading when auth state changes
+                    setProfileLoading(true);
                     if (currentUser) {
                         let claimsAdmin = false;
                         try {
-                            console.log("AuthContext: Current user found, fetching ID token result...");
+                            console.log("AuthContext: Current user found, fetching ID token result for UID:", currentUser.uid);
                             const idTokenResult = await currentUser.getIdTokenResult(true); // Force refresh
-                            console.log("AuthContext: ID Token Claims:", idTokenResult.claims);
+                            console.log("AuthContext: ID Token Claims for user", currentUser.uid, ":", idTokenResult.claims);
                             claimsAdmin = idTokenResult.claims.admin === true;
+                            if (!claimsAdmin) {
+                                console.warn("AuthContext: 'admin' custom claim not found or not true for user:", currentUser.uid, "Claims found:", idTokenResult.claims);
+                            }
                             setIsAdmin(claimsAdmin);
                         } catch (error) {
-                            console.error("AuthContext: Error fetching ID token result for custom claims:", error);
+                            console.error("AuthContext: Error fetching ID token result for custom claims for UID:", currentUser.uid, error);
                             setIsAdmin(false);
                         }
                         const userDocRef = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$firebase$2f$firestore$2f$dist$2f$index$2e$esm2017$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["doc"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$firebase$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["db"], "users", currentUser.uid);
@@ -251,9 +254,6 @@ function AuthProvider({ children }) {
                                     setUserProfile(profileData);
                                     const currentIsChef = profileData.role === 'chef';
                                     const currentIsCustomer = profileData.role === 'customer';
-                                    // Admin status is now primarily from claims.
-                                    // If you also want a Firestore 'role: admin' to grant admin, you could OR it here:
-                                    // setIsAdmin(claimsAdmin || profileData.role === 'admin'); 
                                     setIsChef(currentIsChef);
                                     setIsCustomer(currentIsCustomer);
                                     if (currentIsChef && profileData.role === 'chef') {
@@ -263,31 +263,28 @@ function AuthProvider({ children }) {
                                         setIsChefApproved(false);
                                         setIsChefSubscribed(false);
                                     }
-                                    console.log("AuthContext: Profile data loaded/updated:", profileData);
+                                    console.log("AuthContext: Profile data loaded/updated for UID:", currentUser.uid, profileData);
                                 } else {
                                     console.warn("AuthContext: No such user profile document in Firestore for UID:", currentUser.uid);
                                     setUserProfile(null);
                                     setIsChef(false);
                                     setIsCustomer(false);
-                                    // isAdmin remains based on claims
                                     setIsChefApproved(false);
                                     setIsChefSubscribed(false);
                                 }
-                                setProfileLoading(false); // Profile and claims loading finished
+                                setProfileLoading(false);
                             }
                         }["AuthProvider.useEffect.unsubscribeAuth.unsubscribeProfile"], {
                             "AuthProvider.useEffect.unsubscribeAuth.unsubscribeProfile": (error)=>{
-                                console.error("AuthContext: Error with profile snapshot listener:", error);
+                                console.error("AuthContext: Error with profile snapshot listener for UID:", currentUser.uid, error);
                                 setUserProfile(null);
                                 setIsChef(false);
                                 setIsCustomer(false);
-                                // isAdmin remains based on claims
                                 setIsChefApproved(false);
                                 setIsChefSubscribed(false);
                                 setProfileLoading(false);
                             }
                         }["AuthProvider.useEffect.unsubscribeAuth.unsubscribeProfile"]);
-                        // Return cleanup for profile listener
                         return ({
                             "AuthProvider.useEffect.unsubscribeAuth": ()=>{
                                 console.log("AuthContext: Cleaning up profile listener for UID:", currentUser.uid);
@@ -304,7 +301,7 @@ function AuthProvider({ children }) {
                         setIsChefSubscribed(false);
                         setProfileLoading(false);
                     }
-                    setLoading(false); // Initial Firebase auth check finished
+                    setLoading(false);
                 }
             }["AuthProvider.useEffect.unsubscribeAuth"]);
             return ({
@@ -330,7 +327,7 @@ function AuthProvider({ children }) {
         children: children
     }, void 0, false, {
         fileName: "[project]/src/context/AuthContext.tsx",
-        lineNumber: 123,
+        lineNumber: 120,
         columnNumber: 5
     }, this);
 }
