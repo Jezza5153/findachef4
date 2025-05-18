@@ -5,10 +5,10 @@ import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { ShieldAlert, ListChecks, UserCog, FileWarning, UserCheck, FileSearch2, BadgeCheck, MessageCircleWarning, Gavel, Award, MessageSquare, LockKeyhole, CalendarX2, UsersRound, Banknote, PauseCircle, Undo2, ClipboardCheck, FileCheck2, BotMessageSquare, ShieldBan, CreditCard, CalendarCheck2 as CalendarCheckIcon, Download, AlertTriangle, CalendarClock, Loader2 } from 'lucide-react';
+import { ShieldAlert, ListChecks, UserCog, FileWarning, UserCheck, FileSearch2, BadgeCheck, MessageCircleWarning, Gavel, Award, MessageSquare, LockKeyhole, CalendarX2, UsersRound, Banknote, PauseCircle, Undo2, ClipboardCheck, FileCheck2, BotMessageSquare, ShieldBan, CreditCard, CalendarCheck2 as CalendarCheckIcon, Download, AlertTriangle, CalendarClock, Loader2, Utensils } from 'lucide-react';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, orderBy, Timestamp } from 'firebase/firestore';
-import type { ChefProfile, CustomerProfile } from '@/types';
+import { collection, getDocs, orderBy, Timestamp, query } from 'firebase/firestore';
+import type { ChefProfile, CustomerProfile, Menu } from '@/types';
 import { format } from 'date-fns';
 
 type UserView = Partial<ChefProfile & CustomerProfile>;
@@ -16,15 +16,18 @@ type UserView = Partial<ChefProfile & CustomerProfile>;
 export default function AdminPage() {
   const [allUsers, setAllUsers] = useState<UserView[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
+  const [allMenus, setAllMenus] = useState<Menu[]>([]);
+  const [isLoadingMenus, setIsLoadingMenus] = useState(true);
 
   useEffect(() => {
-    const fetchUsers = async () => {
+    const fetchAdminData = async () => {
+      // Fetch Users
       setIsLoadingUsers(true);
       try {
         const usersCollectionRef = collection(db, "users");
-        const q = query(usersCollectionRef, orderBy("createdAt", "desc"));
-        const querySnapshot = await getDocs(q);
-        const fetchedUsers = querySnapshot.docs.map(doc => {
+        const usersQuery = query(usersCollectionRef, orderBy("createdAt", "desc"));
+        const usersSnapshot = await getDocs(usersQuery);
+        const fetchedUsers = usersSnapshot.docs.map(doc => {
           const data = doc.data();
           return {
             id: doc.id,
@@ -35,12 +38,33 @@ export default function AdminPage() {
         setAllUsers(fetchedUsers);
       } catch (error) {
         console.error("Error fetching users:", error);
-        // In a real app, you'd handle this error more gracefully
       } finally {
         setIsLoadingUsers(false);
       }
+
+      // Fetch Menus
+      setIsLoadingMenus(true);
+      try {
+        const menusCollectionRef = collection(db, "menus");
+        const menusQuery = query(menusCollectionRef, orderBy("createdAt", "desc"));
+        const menusSnapshot = await getDocs(menusQuery);
+        const fetchedMenus = menusSnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            ...data,
+            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : undefined),
+            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt) : undefined),
+          } as Menu;
+        });
+        setAllMenus(fetchedMenus);
+      } catch (error) {
+        console.error("Error fetching menus:", error);
+      } finally {
+        setIsLoadingMenus(false);
+      }
     };
-    fetchUsers();
+    fetchAdminData();
   }, []);
 
   const adminFeatures = [
@@ -64,7 +88,6 @@ export default function AdminPage() {
     { name: "Review GPT resume parse accuracy", description: "Fix any resume to tag mismatches.", icon: <BotMessageSquare className="mr-2 h-5 w-5 text-indigo-600" /> },
     { name: "Review Published Chef Events", description: "Ensure event details on The Chef's Wall are clear, fair, and not duplicated.", icon: <CalendarCheckIcon className="mr-2 h-5 w-5 text-cyan-600" /> },
     { name: "Trust Score Override", description: "Monitor and, if necessary, manually override auto-generated chef trust scores based on platform activity, ratings, and warnings.", icon: <ShieldAlert className="mr-2 h-5 w-5 text-yellow-600" /> },
-    // { name: "View All Chefs & Customers", icon: <UsersRound className="mr-2 h-5 w-5 text-primary" /> }, // This is now implemented below
     { name: "View Flagged Resumes (Contact Info, Unsafe Content)", description: "Review resumes, especially those AI-flagged for containing direct contact information or inappropriate content.", icon: <FileSearch2 className="mr-2 h-5 w-5 text-destructive" /> },
   ];
 
@@ -83,7 +106,7 @@ export default function AdminPage() {
         <CardContent className="space-y-6">
           <p className="text-muted-foreground">
             This area is for platform administrators to manage users, content, and ensure the smooth operation of FindAChef.
-            Access is restricted.
+            Access is restricted. (Note: True role-based access control requires backend implementation).
           </p>
           
           <div>
@@ -103,7 +126,7 @@ export default function AdminPage() {
         </CardContent>
       </Card>
 
-      <Card className="shadow-lg">
+      <Card className="shadow-lg mb-8">
         <CardHeader>
           <CardTitle className="flex items-center"><UsersRound className="mr-2 h-6 w-6 text-primary"/> All Platform Users</CardTitle>
           <CardDescription>View and manage all registered users on the platform.</CardDescription>
@@ -158,6 +181,62 @@ export default function AdminPage() {
                         )}
                       </TableCell>
                       <TableCell className="text-xs text-muted-foreground truncate max-w-[100px]" title={user.id}>{user.id?.substring(0, 10)}...</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="shadow-lg">
+        <CardHeader>
+          <CardTitle className="flex items-center"><Utensils className="mr-2 h-6 w-6 text-primary"/> All Platform Menus</CardTitle>
+          <CardDescription>Review all menus created by chefs.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isLoadingMenus ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="ml-3 text-muted-foreground">Loading menus...</p>
+            </div>
+          ) : allMenus.length === 0 ? (
+            <p className="text-muted-foreground text-center py-8">No menus found.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Menu Title</TableHead>
+                    <TableHead>Chef Name</TableHead>
+                    <TableHead>Cuisine</TableHead>
+                    <TableHead className="text-right">Price/Head</TableHead>
+                    <TableHead>Public</TableHead>
+                    <TableHead>Created At</TableHead>
+                    <TableHead>Actions</TableHead> 
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {allMenus.map((menu) => (
+                    <TableRow key={menu.id}>
+                      <TableCell className="font-medium">{menu.title}</TableCell>
+                      <TableCell>{menu.chefName || 'N/A'}</TableCell>
+                      <TableCell>{menu.cuisine}</TableCell>
+                      <TableCell className="text-right">${menu.pricePerHead.toFixed(2)}</TableCell>
+                      <TableCell>
+                        <Badge variant={menu.isPublic ? 'default' : 'secondary'}>
+                          {menu.isPublic ? 'Yes' : 'No'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {menu.createdAt ? format(menu.createdAt, 'PP') : 'N/A'}
+                      </TableCell>
+                      <TableCell>
+                        <Button variant="outline" size="sm" onClick={() => alert(`Reviewing menu: ${menu.title}`)}>
+                          Review
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
