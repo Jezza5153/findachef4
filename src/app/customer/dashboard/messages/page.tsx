@@ -43,7 +43,7 @@ export default function CustomerMessagesPage() {
     const q = query(
       requestsCollectionRef,
       where("customerId", "==", user.uid),
-      orderBy("createdAt", "desc")
+      orderBy("updatedAt", "desc") // Order by updatedAt to see most recent interactions first
     );
 
     const unsubscribe = onSnapshot(q, async (querySnapshot) => {
@@ -52,7 +52,9 @@ export default function CustomerMessagesPage() {
         let enrichedData: EnrichedCustomerRequest = { 
           id: docSnap.id, 
           ...data,
-          eventDate: data.eventDate instanceof Timestamp ? data.eventDate.toDate() : new Date(data.eventDate)
+          eventDate: data.eventDate instanceof Timestamp ? data.eventDate.toDate() : new Date(data.eventDate),
+          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
         };
 
         if (data.activeProposal?.chefId) {
@@ -76,6 +78,18 @@ export default function CustomerMessagesPage() {
       const resolvedRequests = await Promise.all(fetchedRequestsPromises);
       setCustomerRequests(resolvedRequests);
       setIsLoadingRequests(false);
+
+      // If a request was selected, update its state from the new fetch
+      if (selectedRequest) {
+        const updatedSelectedRequest = resolvedRequests.find(r => r.id === selectedRequest.id);
+        if (updatedSelectedRequest) {
+          setSelectedRequest(updatedSelectedRequest);
+        } else {
+          // The previously selected request might have been deleted or its status changed such that it's no longer fetched
+          setSelectedRequest(null); 
+        }
+      }
+
     }, (error) => {
       console.error("Error fetching customer requests:", error);
       toast({ title: "Error", description: "Could not fetch your requests.", variant: "destructive" });
@@ -83,7 +97,7 @@ export default function CustomerMessagesPage() {
     });
 
     return () => unsubscribe();
-  }, [user, toast]);
+  }, [user, toast, selectedRequest?.id]); // Added selectedRequest.id to re-evaluate if it changes elsewhere
 
   useEffect(() => {
     if (!selectedRequest) {
@@ -93,12 +107,13 @@ export default function CustomerMessagesPage() {
 
     setIsLoadingMessages(true);
     const messagesCollectionRef = collection(db, "customerRequests", selectedRequest.id, "messages");
-    const q = query(messagesCollectionRef, orderBy("timestamp", "asc"));
+    const qMessages = query(messagesCollectionRef, orderBy("timestamp", "asc"));
 
-    const unsubscribeMessages = onSnapshot(q, (querySnapshot) => {
+    const unsubscribeMessages = onSnapshot(qMessages, (querySnapshot) => {
       const fetchedMessages = querySnapshot.docs.map(docSnap => ({
         id: docSnap.id,
-        ...docSnap.data()
+        ...docSnap.data(),
+        timestamp: docSnap.data().timestamp instanceof Timestamp ? docSnap.data().timestamp.toDate() : new Date(docSnap.data().timestamp)
       } as RequestMessage));
       setMessages(fetchedMessages);
       setIsLoadingMessages(false);
@@ -120,8 +135,9 @@ export default function CustomerMessagesPage() {
     if (!user || !userProfile || !selectedRequest || !newMessageText.trim()) return;
 
     setIsSendingMessage(true);
+    const requestDocRef = doc(db, "customerRequests", selectedRequest.id);
     try {
-      const messagesCollectionRef = collection(db, "customerRequests", selectedRequest.id, "messages");
+      const messagesCollectionRef = collection(requestDocRef, "messages");
       await addDoc(messagesCollectionRef, {
         requestId: selectedRequest.id,
         senderId: user.uid,
@@ -132,10 +148,12 @@ export default function CustomerMessagesPage() {
         timestamp: serverTimestamp()
       });
       setNewMessageText('');
-      // Optionally update request status if this is the first customer reply to a proposal
+      
+      // Update request status if customer is replying to a proposal
       if(selectedRequest.status === 'proposal_sent' || selectedRequest.status === 'chef_accepted') {
-         const requestDocRef = doc(db, "customerRequests", selectedRequest.id);
          await updateDoc(requestDocRef, { status: 'awaiting_customer_response', updatedAt: serverTimestamp() });
+      } else if (selectedRequest.status === 'new' || selectedRequest.status === 'awaiting_customer_response') {
+          await updateDoc(requestDocRef, { updatedAt: serverTimestamp() }); // Just update timestamp for sorting
       }
 
     } catch (error) {
@@ -147,31 +165,32 @@ export default function CustomerMessagesPage() {
   };
 
   const handleProposalAction = async (action: 'accept' | 'decline') => {
-    if (!selectedRequest || !selectedRequest.activeProposal || !user) return;
+    if (!selectedRequest || !selectedRequest.activeProposal || !user || !userProfile) return;
 
     setIsProcessingProposalAction(true);
     const requestDocRef = doc(db, "customerRequests", selectedRequest.id);
     const systemMessageText = action === 'accept' 
-      ? `Customer ${userProfile?.name || 'You'} accepted the proposal from Chef ${selectedRequest.activeProposal.chefName}.`
-      : `Customer ${userProfile?.name || 'You'} declined the proposal from Chef ${selectedRequest.activeProposal.chefName}.`;
+      ? `Customer ${userProfile.name || 'You'} accepted the proposal from Chef ${selectedRequest.activeProposal.chefName}. Next step: Booking & Payment.`
+      : `Customer ${userProfile.name || 'You'} declined the proposal from Chef ${selectedRequest.activeProposal.chefName}.`;
 
     try {
       if (action === 'accept') {
         await updateDoc(requestDocRef, {
-          status: 'customer_confirmed', // This would lead to booking flow
+          status: 'customer_confirmed', 
           updatedAt: serverTimestamp()
+          // In a real system, activeProposal might be moved to a 'confirmedProposal' field or a new 'bookings' document created
         });
-        toast({ title: "Proposal Accepted!", description: "Next steps for booking will appear soon." });
+        toast({ title: "Proposal Accepted!", description: "Awaiting booking finalization." });
       } else { // Decline
         await updateDoc(requestDocRef, {
           status: 'proposal_declined',
-          activeProposal: null, // Clear the active proposal
+          activeProposal: null, 
           updatedAt: serverTimestamp()
         });
-        toast({ title: "Proposal Declined", variant: "default" });
+        toast({ title: "Proposal Declined", variant: "default", description: "The chef has been notified." });
       }
-      // Add system message
-      const messagesCollectionRef = collection(db, "customerRequests", selectedRequest.id, "messages");
+      
+      const messagesCollectionRef = collection(requestDocRef, "messages");
       await addDoc(messagesCollectionRef, {
         requestId: selectedRequest.id,
         senderId: 'system',
@@ -190,13 +209,18 @@ export default function CustomerMessagesPage() {
   
   const filteredRequests = customerRequests.filter(req =>
     req.eventType.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (req.activeProposal?.chefName && req.activeProposal.chefName.toLowerCase().includes(searchTerm.toLowerCase()))
+    (req.activeProposal?.chefName && req.activeProposal.chefName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+    (req.proposingChef?.name && req.proposingChef.name.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   const getStatusDisplay = (status?: CustomerRequest['status']) => {
     if (!status) return 'Unknown';
     return status.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
   };
+
+  const canTakeProposalAction = selectedRequest && selectedRequest.activeProposal && 
+                               (selectedRequest.status === 'proposal_sent' || selectedRequest.status === 'chef_accepted');
+
 
   return (
     <div className="h-[calc(100vh-var(--header-height,10rem))] flex flex-col md:flex-row gap-6">
@@ -233,7 +257,7 @@ export default function CustomerMessagesPage() {
                     <Avatar className="h-10 w-10">
                       <AvatarImage src={req.proposingChef?.profilePictureUrl || undefined} alt={req.proposingChef?.name || req.eventType.charAt(0)} data-ai-hint="chef avatar"/>
                       <AvatarFallback>
-                        {req.proposingChef ? req.proposingChef.name?.substring(0,1) : req.eventType.substring(0,1)}
+                        {req.proposingChef ? req.proposingChef.name?.substring(0,1).toUpperCase() : req.eventType.substring(0,1).toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
                     <div className="flex-1 min-w-0">
@@ -242,7 +266,7 @@ export default function CustomerMessagesPage() {
                           {req.proposingChef?.name ? `Chef ${req.proposingChef.name}` : req.eventType}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {req.createdAt instanceof Timestamp ? format(req.createdAt.toDate(), 'PP') : (req.createdAt ? format(new Date(req.createdAt as any), 'PP') : 'N/A')}
+                           {req.updatedAt ? format(new Date(req.updatedAt), 'PP') : (req.createdAt ? format(new Date(req.createdAt), 'PP') : 'N/A')}
                         </p>
                       </div>
                       <p className="text-xs font-medium text-primary">{getStatusDisplay(req.status)}</p>
@@ -267,7 +291,7 @@ export default function CustomerMessagesPage() {
               <Avatar className="h-10 w-10">
                 <AvatarImage src={selectedRequest.proposingChef?.profilePictureUrl || undefined} alt={selectedRequest.proposingChef?.name || selectedRequest.eventType.charAt(0)} data-ai-hint="chef avatar" />
                 <AvatarFallback>
-                  {selectedRequest.proposingChef ? selectedRequest.proposingChef.name?.substring(0,1) : selectedRequest.eventType.substring(0,1)}
+                  {selectedRequest.proposingChef ? selectedRequest.proposingChef.name?.substring(0,1).toUpperCase() : selectedRequest.eventType.substring(0,1).toUpperCase()}
                 </AvatarFallback>
               </Avatar>
               <div>
@@ -277,34 +301,36 @@ export default function CustomerMessagesPage() {
                 <CardDescription className="text-xs">Request ID: {selectedRequest.id.substring(0,8)}... | Status: {getStatusDisplay(selectedRequest.status)}</CardDescription>
               </div>
             </div>
-            {/* Button to view full request details could go here */}
           </CardHeader>
 
           <CardContent className="p-6 flex-grow overflow-y-auto space-y-4">
             {isLoadingMessages ? (
                 <div className="flex justify-center items-center h-full"><Loader2 className="h-5 w-5 animate-spin mr-2"/>Loading messages...</div>
             ) : messages.length === 0 && !selectedRequest.activeProposal ? (
-                <div className="text-center text-muted-foreground py-8">No messages yet. Send a message to start the conversation.</div>
+                <div className="text-center text-muted-foreground py-8">No messages yet for this request.</div>
             ) : (
               messages.map(msg => (
                 <div key={msg.id} className={`flex ${msg.senderId === user?.uid ? 'justify-end' : 'justify-start'}`}>
                   <div className={`flex items-end gap-2 max-w-[75%]`}>
-                    {msg.senderId !== user?.uid && (
+                    {msg.senderId !== user?.uid && msg.senderRole !== 'system' && (
                        <Avatar className="h-6 w-6">
                          <AvatarImage src={msg.senderAvatarUrl || undefined} alt={msg.senderName || 'U'} data-ai-hint="user avatar"/>
-                         <AvatarFallback>{msg.senderName ? msg.senderName.charAt(0) : (msg.senderRole === 'chef' ? 'C' : 'S')}</AvatarFallback>
+                         <AvatarFallback>{msg.senderName ? msg.senderName.charAt(0).toUpperCase() : (msg.senderRole === 'chef' ? 'C' : 'S')}</AvatarFallback>
                        </Avatar>
                     )}
-                    <div className={`px-3 py-2 rounded-xl ${msg.senderId === user?.uid ? 'bg-primary text-primary-foreground' : (msg.senderRole === 'system' ? 'bg-amber-100 text-amber-800 text-xs italic text-center w-full' : 'bg-muted')}`}>
+                     {msg.senderRole === 'system' && (
+                        <Info className="h-5 w-5 text-muted-foreground flex-shrink-0 self-center mr-1" />
+                    )}
+                    <div className={`px-3 py-2 rounded-xl ${msg.senderId === user?.uid ? 'bg-primary text-primary-foreground' : (msg.senderRole === 'system' ? 'bg-amber-100 text-amber-700 text-xs italic text-center w-full' : 'bg-muted')}`}>
                       <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
                       <p className={`text-xs mt-1 ${msg.senderId === user?.uid ? 'text-primary-foreground/70 text-right' : (msg.senderRole === 'system' ? 'hidden' : 'text-muted-foreground/70 text-left')}`}>
-                        {msg.timestamp ? format(msg.timestamp.toDate(), 'p') : 'Sending...'}
+                        {msg.timestamp ? format(new Date(msg.timestamp), 'p') : 'Sending...'}
                       </p>
                     </div>
                      {msg.senderId === user?.uid && userProfile && (
                        <Avatar className="h-6 w-6">
                          <AvatarImage src={userProfile.profilePictureUrl || undefined} alt={userProfile.name || 'Me'} data-ai-hint="user avatar"/>
-                         <AvatarFallback>{userProfile.name ? userProfile.name.charAt(0) : 'M'}</AvatarFallback>
+                         <AvatarFallback>{userProfile.name ? userProfile.name.charAt(0).toUpperCase() : 'M'}</AvatarFallback>
                        </Avatar>
                     )}
                   </div>
@@ -312,18 +338,30 @@ export default function CustomerMessagesPage() {
               ))
             )}
 
-            {/* Active Proposal Display */}
-            {selectedRequest.activeProposal && (selectedRequest.status === 'proposal_sent' || selectedRequest.status === 'chef_accepted' || selectedRequest.status === 'customer_confirmed' || selectedRequest.status === 'booked') && (
-              <Card className="my-4 p-4 bg-sky-50 border border-sky-200 shadow-md">
+            {selectedRequest.activeProposal && (
+              <Card className={`my-4 p-4 border shadow-md ${
+                selectedRequest.status === 'customer_confirmed' ? 'bg-green-50 border-green-200' : 
+                selectedRequest.status === 'proposal_declined' ? 'bg-red-50 border-red-200 opacity-70' :
+                'bg-sky-50 border-sky-200'
+              }`}>
                 <CardHeader className="p-0 pb-2">
-                  <CardTitle className="text-md flex items-center"><FileText className="mr-2 h-5 w-5 text-sky-600"/>Proposal from Chef {selectedRequest.activeProposal.chefName}</CardTitle>
+                  <CardTitle className={`text-md flex items-center ${
+                     selectedRequest.status === 'customer_confirmed' ? 'text-green-700' : 
+                     selectedRequest.status === 'proposal_declined' ? 'text-red-700' :
+                     'text-sky-600'
+                  }`}>
+                    <FileText className="mr-2 h-5 w-5"/>
+                    Proposal from Chef {selectedRequest.activeProposal.chefName}
+                    {selectedRequest.status === 'proposal_declined' && " (Declined)"}
+                    {selectedRequest.status === 'customer_confirmed' && " (Accepted!)"}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0 text-sm space-y-1">
                   <p><Briefcase className="inline h-4 w-4 mr-1 text-muted-foreground"/>Menu: <strong>{selectedRequest.activeProposal.menuTitle}</strong></p>
                   <p><DollarSign className="inline h-4 w-4 mr-1 text-muted-foreground"/>Price: <strong>${selectedRequest.activeProposal.menuPricePerHead.toFixed(2)} per head</strong></p>
                   {selectedRequest.activeProposal.notes && <p><Info className="inline h-4 w-4 mr-1 text-muted-foreground"/>Notes: {selectedRequest.activeProposal.notes}</p>}
                 </CardContent>
-                {selectedRequest.status === 'proposal_sent' || selectedRequest.status === 'chef_accepted' && (
+                {canTakeProposalAction && (
                   <CardFooter className="p-0 pt-3 flex gap-2">
                     <Button onClick={() => handleProposalAction('accept')} size="sm" className="bg-green-600 hover:bg-green-700" disabled={isProcessingProposalAction}>
                       {isProcessingProposalAction ? <Loader2 className="animate-spin h-4 w-4 mr-1.5"/> : <CheckCircle className="h-4 w-4 mr-1.5"/>} Accept Proposal
@@ -332,6 +370,9 @@ export default function CustomerMessagesPage() {
                       {isProcessingProposalAction ? <Loader2 className="animate-spin h-4 w-4 mr-1.5"/> : <XCircle className="h-4 w-4 mr-1.5"/>} Decline Proposal
                     </Button>
                   </CardFooter>
+                )}
+                 {selectedRequest.status === 'customer_confirmed' && (
+                    <p className="text-sm text-green-700 mt-2 font-medium">Thank you for confirming! The chef will finalize booking details soon. This may involve payment arrangements.</p>
                 )}
               </Card>
             )}
@@ -349,7 +390,7 @@ export default function CustomerMessagesPage() {
                 onChange={(e) => setNewMessageText(e.target.value)}
                 className="flex-1 min-h-[40px] max-h-[120px]"
                 rows={1}
-                disabled={isSendingMessage || !selectedRequest || selectedRequest.status === 'booked' || selectedRequest.status === 'cancelled_by_customer' || selectedRequest.status === 'proposal_declined'}
+                disabled={isSendingMessage || !selectedRequest || selectedRequest.status === 'booked' || selectedRequest.status === 'cancelled_by_customer' || selectedRequest.status === 'proposal_declined' || selectedRequest.status === 'customer_confirmed'}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
@@ -357,7 +398,7 @@ export default function CustomerMessagesPage() {
                   }
                 }}
               />
-              <Button type="submit" size="icon" onClick={handleSendMessage} disabled={isSendingMessage || !newMessageText.trim() || !selectedRequest || selectedRequest.status === 'booked' || selectedRequest.status === 'cancelled_by_customer' || selectedRequest.status === 'proposal_declined'}>
+              <Button type="submit" size="icon" onClick={handleSendMessage} disabled={isSendingMessage || !newMessageText.trim() || !selectedRequest || selectedRequest.status === 'booked' || selectedRequest.status === 'cancelled_by_customer' || selectedRequest.status === 'proposal_declined' || selectedRequest.status === 'customer_confirmed'}>
                 {isSendingMessage ? <Loader2 className="animate-spin h-5 w-5"/> : <Send className="h-5 w-5" />}
                 <span className="sr-only">Send</span>
               </Button>
@@ -374,3 +415,5 @@ export default function CustomerMessagesPage() {
     </div>
   );
 }
+
+    

@@ -1168,12 +1168,13 @@ function ChefSignupPage() {
             abn: '',
             bio: '',
             specialties: '',
-            agreedToTerms: false
+            agreedToTerms: false,
+            profilePicture: undefined
         }
     });
     const handleResumeParsed = (data)=>{
         setResumeParsedData(data.parsedData);
-        setResumeFile(data.file);
+        setResumeFile(data.file); // Store the actual File object
         setIsResumeUploaded(true);
         if (data.parsedData.experience && form.getValues('bio') === '') {
             form.setValue('bio', data.parsedData.experience.substring(0, 500));
@@ -1185,7 +1186,9 @@ function ChefSignupPage() {
     const handleProfilePictureChange = (event)=>{
         const file = event.target.files?.[0];
         if (file) {
-            form.setValue('profilePicture', file);
+            form.setValue('profilePicture', file, {
+                shouldValidate: true
+            });
             const reader = new FileReader();
             reader.onloadend = ()=>{
                 setProfilePicturePreview(reader.result);
@@ -1207,60 +1210,47 @@ function ChefSignupPage() {
         }
         setIsLoading(true);
         try {
+            console.log("Attempting to create user with email:", data.email);
             const userCredential = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$firebase$2f$node_modules$2f40$firebase$2f$auth$2f$dist$2f$esm2017$2f$index$2d$683d5879$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__$3c$export__ab__as__createUserWithEmailAndPassword$3e$__["createUserWithEmailAndPassword"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$firebase$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["auth"], data.email, data.password);
             const user = userCredential.user;
+            console.log("Firebase Auth user created successfully:", user.uid);
             let profilePictureUrl = '';
             let resumeFileUrl = '';
-            // 1. Upload Profile Picture (if provided)
             if (data.profilePicture) {
                 const file = data.profilePicture;
                 const fileExtension = file.name.split('.').pop();
-                const profilePicRef = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$firebase$2f$storage$2f$dist$2f$index$2e$esm2017$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["ref"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$firebase$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["storage"], `users/${user.uid}/profilePicture.${fileExtension}`);
-                try {
-                    toast({
-                        title: "Uploading Profile Picture...",
-                        description: "Please wait.",
-                        duration: 2000
-                    });
-                    const uploadTaskSnapshot = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$firebase$2f$storage$2f$dist$2f$index$2e$esm2017$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["uploadBytesResumable"])(profilePicRef, file);
-                    profilePictureUrl = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$firebase$2f$storage$2f$dist$2f$index$2e$esm2017$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["getDownloadURL"])(uploadTaskSnapshot.ref);
-                } catch (uploadError) {
-                    console.error("Profile picture upload error:", uploadError);
-                    toast({
-                        title: "Profile Picture Upload Failed",
-                        description: "Could not upload profile picture. It can be updated later.",
-                        variant: "destructive"
-                    });
-                }
+                const profilePicRefPath = `users/${user.uid}/profilePicture.${fileExtension}`;
+                const profilePicRef = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$firebase$2f$storage$2f$dist$2f$index$2e$esm2017$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["ref"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$firebase$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["storage"], profilePicRefPath);
+                toast({
+                    title: "Uploading Profile Picture...",
+                    description: "Please wait.",
+                    duration: 2000
+                });
+                const uploadTaskSnapshot = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$firebase$2f$storage$2f$dist$2f$index$2e$esm2017$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["uploadBytesResumable"])(profilePicRef, file);
+                profilePictureUrl = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$firebase$2f$storage$2f$dist$2f$index$2e$esm2017$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["getDownloadURL"])(uploadTaskSnapshot.ref);
+                console.log("Profile picture uploaded:", profilePictureUrl);
             }
-            // 2. Upload Resume File
-            try {
+            if (resumeFile) {
                 toast({
                     title: "Uploading Resume...",
                     description: "Please wait.",
                     duration: 2000
                 });
-                const resumeStorageRefPath = `users/${user.uid}/resume.pdf`; // Standardize to PDF, ensure conversion if other formats were allowed
-                const resumeStorageRef = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$firebase$2f$storage$2f$dist$2f$index$2e$esm2017$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["ref"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$firebase$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["storage"], resumeStorageRefPath);
-                const resumeUploadTask = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$firebase$2f$storage$2f$dist$2f$index$2e$esm2017$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["uploadBytesResumable"])(resumeStorageRef, resumeFile);
+                const resumeFileExtension = resumeFile.name.split('.').pop() || 'pdf';
+                const resumeStorageRefPath = `users/${user.uid}/resume.${resumeFileExtension}`;
+                const resumeStorageRefInstance = (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$firebase$2f$storage$2f$dist$2f$index$2e$esm2017$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["ref"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$firebase$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["storage"], resumeStorageRefPath);
+                const resumeUploadTask = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$firebase$2f$storage$2f$dist$2f$index$2e$esm2017$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["uploadBytesResumable"])(resumeStorageRefInstance, resumeFile);
                 resumeFileUrl = await (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$firebase$2f$storage$2f$dist$2f$index$2e$esm2017$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["getDownloadURL"])(resumeUploadTask.ref);
-            } catch (resumeUploadError) {
-                console.error("Resume upload error:", resumeUploadError);
-                toast({
-                    title: "Resume Upload Failed",
-                    description: "Could not upload your resume file. It can be updated later.",
-                    variant: "destructive"
-                });
+                console.log("Resume uploaded:", resumeFileUrl);
             }
-            // 3. Update Firebase Auth Profile
             await (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$firebase$2f$node_modules$2f40$firebase$2f$auth$2f$dist$2f$esm2017$2f$index$2d$683d5879$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__$3c$export__al__as__updateProfile$3e$__["updateProfile"])(user, {
                 displayName: data.name,
                 photoURL: profilePictureUrl || null
             });
-            // 4. Save additional chef profile data to Firestore
+            console.log("Firebase Auth profile updated with displayName and photoURL.");
             const userProfileData = {
                 id: user.uid,
-                email: user.email || '',
+                email: user.email,
                 name: data.name,
                 abn: data.abn,
                 bio: data.bio,
@@ -1275,13 +1265,19 @@ function ChefSignupPage() {
                 isSubscribed: false,
                 trustScore: 3.0,
                 trustScoreBasis: "New chef - awaiting activity",
+                hasCompletedFirstCoOp: false,
+                collaboratorIds: [],
+                outgoingCollaborationRequests: [],
+                incomingCollaborationRequests: [],
                 createdAt: (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$firebase$2f$firestore$2f$dist$2f$index$2e$esm2017$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["serverTimestamp"])(),
                 updatedAt: (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$firebase$2f$firestore$2f$dist$2f$index$2e$esm2017$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["serverTimestamp"])()
             };
+            console.log("Attempting to set Firestore document for user:", user.uid, "with data:", userProfileData);
             await (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$firebase$2f$firestore$2f$dist$2f$index$2e$esm2017$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["setDoc"])((0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f40$firebase$2f$firestore$2f$dist$2f$index$2e$esm2017$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["doc"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$firebase$2e$ts__$5b$app$2d$client$5d$__$28$ecmascript$29$__["db"], "users", user.uid), userProfileData);
+            console.log("Firestore document created successfully for user:", user.uid);
             toast({
                 title: 'Signup Successful!',
-                description: 'Your chef account has been created. You will be redirected to login. Your account requires admin approval.',
+                description: 'Your chef account has been created. Your account requires admin approval before full access.',
                 duration: 7000
             });
             form.reset();
@@ -1289,12 +1285,15 @@ function ChefSignupPage() {
             setResumeFile(null);
             setIsResumeUploaded(false);
             setProfilePicturePreview(null);
+            // Redirect to login or a pending approval page
             router.push('/login');
         } catch (error) {
             console.error('Signup error:', error);
             let errorMessage = 'Failed to create account.';
             if (error.code === 'auth/email-already-in-use') {
                 errorMessage = 'This email address is already in use.';
+            } else if (error.code === 'permission-denied' || error.message?.toLowerCase().includes('permission-denied')) {
+                errorMessage = 'Failed to save profile data due to permissions. Please contact support.';
             } else if (error.code) {
                 errorMessage = `An error occurred: ${error.message}`;
             }
@@ -1322,12 +1321,12 @@ function ChefSignupPage() {
                                 className: "h-8 w-8"
                             }, void 0, false, {
                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                lineNumber: 218,
+                                lineNumber: 221,
                                 columnNumber: 13
                             }, this)
                         }, void 0, false, {
                             fileName: "[project]/src/app/chef/signup/page.tsx",
-                            lineNumber: 217,
+                            lineNumber: 220,
                             columnNumber: 11
                         }, this),
                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$card$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["CardTitle"], {
@@ -1335,7 +1334,7 @@ function ChefSignupPage() {
                             children: "Become a Chef on FindAChef"
                         }, void 0, false, {
                             fileName: "[project]/src/app/chef/signup/page.tsx",
-                            lineNumber: 220,
+                            lineNumber: 223,
                             columnNumber: 11
                         }, this),
                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$card$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["CardDescription"], {
@@ -1343,13 +1342,13 @@ function ChefSignupPage() {
                             children: "Join our platform to showcase your skills, manage bookings, and connect with clients."
                         }, void 0, false, {
                             fileName: "[project]/src/app/chef/signup/page.tsx",
-                            lineNumber: 221,
+                            lineNumber: 224,
                             columnNumber: 11
                         }, this)
                     ]
                 }, void 0, true, {
                     fileName: "[project]/src/app/chef/signup/page.tsx",
-                    lineNumber: 216,
+                    lineNumber: 219,
                     columnNumber: 9
                 }, this),
                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$card$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["CardContent"], {
@@ -1360,7 +1359,7 @@ function ChefSignupPage() {
                             initialData: resumeParsedData ?? undefined
                         }, void 0, false, {
                             fileName: "[project]/src/app/chef/signup/page.tsx",
-                            lineNumber: 226,
+                            lineNumber: 229,
                             columnNumber: 11
                         }, this),
                         /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Form"], {
@@ -1374,7 +1373,7 @@ function ChefSignupPage() {
                                         children: "Account Information"
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                        lineNumber: 233,
+                                        lineNumber: 236,
                                         columnNumber: 15
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1389,7 +1388,7 @@ function ChefSignupPage() {
                                                                 children: "Email Address"
                                                             }, void 0, false, {
                                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                lineNumber: 240,
+                                                                lineNumber: 243,
                                                                 columnNumber: 23
                                                             }, void 0),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormControl"], {
@@ -1398,28 +1397,28 @@ function ChefSignupPage() {
                                                                     ...field
                                                                 }, void 0, false, {
                                                                     fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                    lineNumber: 242,
+                                                                    lineNumber: 245,
                                                                     columnNumber: 25
                                                                 }, void 0)
                                                             }, void 0, false, {
                                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                lineNumber: 241,
+                                                                lineNumber: 244,
                                                                 columnNumber: 23
                                                             }, void 0),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormMessage"], {}, void 0, false, {
                                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                lineNumber: 244,
+                                                                lineNumber: 247,
                                                                 columnNumber: 23
                                                             }, void 0)
                                                         ]
                                                     }, void 0, true, {
                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                        lineNumber: 239,
+                                                        lineNumber: 242,
                                                         columnNumber: 21
                                                     }, void 0)
                                             }, void 0, false, {
                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                lineNumber: 235,
+                                                lineNumber: 238,
                                                 columnNumber: 17
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormField"], {
@@ -1431,7 +1430,7 @@ function ChefSignupPage() {
                                                                 children: "Full Name"
                                                             }, void 0, false, {
                                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                lineNumber: 253,
+                                                                lineNumber: 256,
                                                                 columnNumber: 23
                                                             }, void 0),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormControl"], {
@@ -1440,28 +1439,28 @@ function ChefSignupPage() {
                                                                     ...field
                                                                 }, void 0, false, {
                                                                     fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                    lineNumber: 255,
+                                                                    lineNumber: 258,
                                                                     columnNumber: 25
                                                                 }, void 0)
                                                             }, void 0, false, {
                                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                lineNumber: 254,
+                                                                lineNumber: 257,
                                                                 columnNumber: 23
                                                             }, void 0),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormMessage"], {}, void 0, false, {
                                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                lineNumber: 257,
+                                                                lineNumber: 260,
                                                                 columnNumber: 23
                                                             }, void 0)
                                                         ]
                                                     }, void 0, true, {
                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                        lineNumber: 252,
+                                                        lineNumber: 255,
                                                         columnNumber: 21
                                                     }, void 0)
                                             }, void 0, false, {
                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                lineNumber: 248,
+                                                lineNumber: 251,
                                                 columnNumber: 18
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormField"], {
@@ -1473,7 +1472,7 @@ function ChefSignupPage() {
                                                                 children: "Password"
                                                             }, void 0, false, {
                                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                lineNumber: 266,
+                                                                lineNumber: 269,
                                                                 columnNumber: 23
                                                             }, void 0),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormControl"], {
@@ -1483,28 +1482,28 @@ function ChefSignupPage() {
                                                                     ...field
                                                                 }, void 0, false, {
                                                                     fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                    lineNumber: 268,
+                                                                    lineNumber: 271,
                                                                     columnNumber: 25
                                                                 }, void 0)
                                                             }, void 0, false, {
                                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                lineNumber: 267,
+                                                                lineNumber: 270,
                                                                 columnNumber: 23
                                                             }, void 0),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormMessage"], {}, void 0, false, {
                                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                lineNumber: 270,
+                                                                lineNumber: 273,
                                                                 columnNumber: 23
                                                             }, void 0)
                                                         ]
                                                     }, void 0, true, {
                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                        lineNumber: 265,
+                                                        lineNumber: 268,
                                                         columnNumber: 21
                                                     }, void 0)
                                             }, void 0, false, {
                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                lineNumber: 261,
+                                                lineNumber: 264,
                                                 columnNumber: 17
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormField"], {
@@ -1516,7 +1515,7 @@ function ChefSignupPage() {
                                                                 children: "Confirm Password"
                                                             }, void 0, false, {
                                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                lineNumber: 279,
+                                                                lineNumber: 282,
                                                                 columnNumber: 23
                                                             }, void 0),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormControl"], {
@@ -1526,28 +1525,28 @@ function ChefSignupPage() {
                                                                     ...field
                                                                 }, void 0, false, {
                                                                     fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                    lineNumber: 281,
+                                                                    lineNumber: 284,
                                                                     columnNumber: 25
                                                                 }, void 0)
                                                             }, void 0, false, {
                                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                lineNumber: 280,
+                                                                lineNumber: 283,
                                                                 columnNumber: 23
                                                             }, void 0),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormMessage"], {}, void 0, false, {
                                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                lineNumber: 283,
+                                                                lineNumber: 286,
                                                                 columnNumber: 23
                                                             }, void 0)
                                                         ]
                                                     }, void 0, true, {
                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                        lineNumber: 278,
+                                                        lineNumber: 281,
                                                         columnNumber: 21
                                                     }, void 0)
                                             }, void 0, false, {
                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                lineNumber: 274,
+                                                lineNumber: 277,
                                                 columnNumber: 17
                                             }, this),
                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormField"], {
@@ -1559,7 +1558,7 @@ function ChefSignupPage() {
                                                                 children: "ABN (Australian Business Number)"
                                                             }, void 0, false, {
                                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                lineNumber: 292,
+                                                                lineNumber: 295,
                                                                 columnNumber: 23
                                                             }, void 0),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormControl"], {
@@ -1568,34 +1567,34 @@ function ChefSignupPage() {
                                                                     ...field
                                                                 }, void 0, false, {
                                                                     fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                    lineNumber: 294,
+                                                                    lineNumber: 297,
                                                                     columnNumber: 25
                                                                 }, void 0)
                                                             }, void 0, false, {
                                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                lineNumber: 293,
+                                                                lineNumber: 296,
                                                                 columnNumber: 23
                                                             }, void 0),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormMessage"], {}, void 0, false, {
                                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                lineNumber: 296,
+                                                                lineNumber: 299,
                                                                 columnNumber: 23
                                                             }, void 0)
                                                         ]
                                                     }, void 0, true, {
                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                        lineNumber: 291,
+                                                        lineNumber: 294,
                                                         columnNumber: 21
                                                     }, void 0)
                                             }, void 0, false, {
                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                lineNumber: 287,
+                                                lineNumber: 290,
                                                 columnNumber: 18
                                             }, this)
                                         ]
                                     }, void 0, true, {
                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                        lineNumber: 234,
+                                        lineNumber: 237,
                                         columnNumber: 15
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("h3", {
@@ -1603,19 +1602,19 @@ function ChefSignupPage() {
                                         children: "Profile Details"
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                        lineNumber: 302,
+                                        lineNumber: 305,
                                         columnNumber: 15
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormField"], {
                                         control: form.control,
                                         name: "profilePicture",
-                                        render: ({ field })=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormItem"], {
+                                        render: ()=>/*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormItem"], {
                                                 children: [
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormLabel"], {
                                                         children: "Profile Picture"
                                                     }, void 0, false, {
                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                        lineNumber: 308,
+                                                        lineNumber: 311,
                                                         columnNumber: 23
                                                     }, void 0),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormControl"], {
@@ -1631,7 +1630,7 @@ function ChefSignupPage() {
                                                                     "data-ai-hint": "person avatar"
                                                                 }, void 0, false, {
                                                                     fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                    lineNumber: 312,
+                                                                    lineNumber: 315,
                                                                     columnNumber: 29
                                                                 }, void 0) : /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
                                                                     className: "h-20 w-20 rounded-full bg-muted flex items-center justify-center text-muted-foreground",
@@ -1640,12 +1639,12 @@ function ChefSignupPage() {
                                                                         className: "h-10 w-10"
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                        lineNumber: 315,
+                                                                        lineNumber: 318,
                                                                         columnNumber: 31
                                                                     }, void 0)
                                                                 }, void 0, false, {
                                                                     fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                    lineNumber: 314,
+                                                                    lineNumber: 317,
                                                                     columnNumber: 29
                                                                 }, void 0),
                                                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$input$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Input"], {
@@ -1656,7 +1655,7 @@ function ChefSignupPage() {
                                                                     id: "profilePictureUpload"
                                                                 }, void 0, false, {
                                                                     fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                    lineNumber: 318,
+                                                                    lineNumber: 321,
                                                                     columnNumber: 27
                                                                 }, void 0),
                                                                 /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$button$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Button"], {
@@ -1671,53 +1670,53 @@ function ChefSignupPage() {
                                                                                 className: "mr-2 h-4 w-4"
                                                                             }, void 0, false, {
                                                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                                lineNumber: 327,
+                                                                                lineNumber: 330,
                                                                                 columnNumber: 31
                                                                             }, void 0),
                                                                             " Upload Photo"
                                                                         ]
                                                                     }, void 0, true, {
                                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                        lineNumber: 326,
+                                                                        lineNumber: 329,
                                                                         columnNumber: 29
                                                                     }, void 0)
                                                                 }, void 0, false, {
                                                                     fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                    lineNumber: 325,
+                                                                    lineNumber: 328,
                                                                     columnNumber: 27
                                                                 }, void 0)
                                                             ]
                                                         }, void 0, true, {
                                                             fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                            lineNumber: 310,
+                                                            lineNumber: 313,
                                                             columnNumber: 25
                                                         }, void 0)
                                                     }, void 0, false, {
                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                        lineNumber: 309,
+                                                        lineNumber: 312,
                                                         columnNumber: 23
                                                     }, void 0),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormDescription"], {
                                                         children: "Upload a professional headshot (JPG, PNG, WEBP, max 2MB)."
                                                     }, void 0, false, {
                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                        lineNumber: 332,
+                                                        lineNumber: 335,
                                                         columnNumber: 23
                                                     }, void 0),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormMessage"], {}, void 0, false, {
                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                        lineNumber: 333,
+                                                        lineNumber: 336,
                                                         columnNumber: 23
                                                     }, void 0)
                                                 ]
                                             }, void 0, true, {
                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                lineNumber: 307,
+                                                lineNumber: 310,
                                                 columnNumber: 21
                                             }, void 0)
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                        lineNumber: 303,
+                                        lineNumber: 306,
                                         columnNumber: 15
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormField"], {
@@ -1729,7 +1728,7 @@ function ChefSignupPage() {
                                                         children: "Short Bio"
                                                     }, void 0, false, {
                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                        lineNumber: 342,
+                                                        lineNumber: 345,
                                                         columnNumber: 21
                                                     }, void 0),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormControl"], {
@@ -1739,35 +1738,35 @@ function ChefSignupPage() {
                                                             ...field
                                                         }, void 0, false, {
                                                             fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                            lineNumber: 344,
+                                                            lineNumber: 347,
                                                             columnNumber: 23
                                                         }, void 0)
                                                     }, void 0, false, {
                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                        lineNumber: 343,
+                                                        lineNumber: 346,
                                                         columnNumber: 21
                                                     }, void 0),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormDescription"], {
                                                         children: "Max 500 characters. This will be shown on your public profile."
                                                     }, void 0, false, {
                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                        lineNumber: 350,
+                                                        lineNumber: 353,
                                                         columnNumber: 22
                                                     }, void 0),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormMessage"], {}, void 0, false, {
                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                        lineNumber: 351,
+                                                        lineNumber: 354,
                                                         columnNumber: 21
                                                     }, void 0)
                                                 ]
                                             }, void 0, true, {
                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                lineNumber: 341,
+                                                lineNumber: 344,
                                                 columnNumber: 19
                                             }, void 0)
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                        lineNumber: 337,
+                                        lineNumber: 340,
                                         columnNumber: 15
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormField"], {
@@ -1779,7 +1778,7 @@ function ChefSignupPage() {
                                                         children: "Specialties / Cuisine Types (Tags)"
                                                     }, void 0, false, {
                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                        lineNumber: 360,
+                                                        lineNumber: 363,
                                                         columnNumber: 21
                                                     }, void 0),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormControl"], {
@@ -1788,35 +1787,35 @@ function ChefSignupPage() {
                                                             ...field
                                                         }, void 0, false, {
                                                             fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                            lineNumber: 362,
+                                                            lineNumber: 365,
                                                             columnNumber: 23
                                                         }, void 0)
                                                     }, void 0, false, {
                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                        lineNumber: 361,
+                                                        lineNumber: 364,
                                                         columnNumber: 21
                                                     }, void 0),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormDescription"], {
                                                         children: "Comma-separated list of your culinary specialties or tags."
                                                     }, void 0, false, {
                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                        lineNumber: 364,
+                                                        lineNumber: 367,
                                                         columnNumber: 21
                                                     }, void 0),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormMessage"], {}, void 0, false, {
                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                        lineNumber: 365,
+                                                        lineNumber: 368,
                                                         columnNumber: 21
                                                     }, void 0)
                                                 ]
                                             }, void 0, true, {
                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                lineNumber: 359,
+                                                lineNumber: 362,
                                                 columnNumber: 19
                                             }, void 0)
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                        lineNumber: 355,
+                                        lineNumber: 358,
                                         columnNumber: 15
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormField"], {
@@ -1831,12 +1830,12 @@ function ChefSignupPage() {
                                                             onCheckedChange: field.onChange
                                                         }, void 0, false, {
                                                             fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                            lineNumber: 376,
+                                                            lineNumber: 379,
                                                             columnNumber: 23
                                                         }, void 0)
                                                     }, void 0, false, {
                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                        lineNumber: 375,
+                                                        lineNumber: 378,
                                                         columnNumber: 21
                                                     }, void 0),
                                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("div", {
@@ -1849,14 +1848,14 @@ function ChefSignupPage() {
                                                                         className: "mr-2 h-4 w-4 text-muted-foreground"
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                        lineNumber: 383,
+                                                                        lineNumber: 386,
                                                                         columnNumber: 25
                                                                     }, void 0),
                                                                     "Agreement & Policies"
                                                                 ]
                                                             }, void 0, true, {
                                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                lineNumber: 382,
+                                                                lineNumber: 385,
                                                                 columnNumber: 23
                                                             }, void 0),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormDescription"], {
@@ -1868,7 +1867,7 @@ function ChefSignupPage() {
                                                                         children: "Terms of Service"
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                        lineNumber: 387,
+                                                                        lineNumber: 390,
                                                                         columnNumber: 50
                                                                     }, void 0),
                                                                     ", ",
@@ -1878,7 +1877,7 @@ function ChefSignupPage() {
                                                                         children: "Chef Program Policies"
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                        lineNumber: 387,
+                                                                        lineNumber: 390,
                                                                         columnNumber: 136
                                                                     }, void 0),
                                                                     ", and acknowledge the ",
@@ -1888,36 +1887,36 @@ function ChefSignupPage() {
                                                                         children: "Privacy Policy"
                                                                     }, void 0, false, {
                                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                        lineNumber: 387,
+                                                                        lineNumber: 390,
                                                                         columnNumber: 255
                                                                     }, void 0),
                                                                     ". This includes keeping all communications and payments on the platform."
                                                                 ]
                                                             }, void 0, true, {
                                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                lineNumber: 386,
+                                                                lineNumber: 389,
                                                                 columnNumber: 23
                                                             }, void 0),
                                                             /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$form$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["FormMessage"], {}, void 0, false, {
                                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                                lineNumber: 389,
+                                                                lineNumber: 392,
                                                                 columnNumber: 23
                                                             }, void 0)
                                                         ]
                                                     }, void 0, true, {
                                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                        lineNumber: 381,
+                                                        lineNumber: 384,
                                                         columnNumber: 21
                                                     }, void 0)
                                                 ]
                                             }, void 0, true, {
                                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                lineNumber: 374,
+                                                lineNumber: 377,
                                                 columnNumber: 19
                                             }, void 0)
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                        lineNumber: 370,
+                                        lineNumber: 373,
                                         columnNumber: 15
                                     }, this),
                                     /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$components$2f$ui$2f$button$2e$tsx__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Button"], {
@@ -1929,7 +1928,7 @@ function ChefSignupPage() {
                                             className: "mr-2 h-5 w-5 animate-spin"
                                         }, void 0, false, {
                                             fileName: "[project]/src/app/chef/signup/page.tsx",
-                                            lineNumber: 396,
+                                            lineNumber: 399,
                                             columnNumber: 30
                                         }, this) : /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])(__TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["Fragment"], {
                                             children: [
@@ -1937,7 +1936,7 @@ function ChefSignupPage() {
                                                     className: "mr-2 h-5 w-5"
                                                 }, void 0, false, {
                                                     fileName: "[project]/src/app/chef/signup/page.tsx",
-                                                    lineNumber: 396,
+                                                    lineNumber: 399,
                                                     columnNumber: 84
                                                 }, this),
                                                 " Create Chef Account"
@@ -1945,7 +1944,7 @@ function ChefSignupPage() {
                                         }, void 0, true)
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                        lineNumber: 395,
+                                        lineNumber: 398,
                                         columnNumber: 15
                                     }, this),
                                     !isResumeUploaded && /*#__PURE__*/ (0, __TURBOPACK__imported__module__$5b$project$5d2f$node_modules$2f$next$2f$dist$2f$compiled$2f$react$2f$jsx$2d$dev$2d$runtime$2e$js__$5b$app$2d$client$5d$__$28$ecmascript$29$__["jsxDEV"])("p", {
@@ -1953,35 +1952,35 @@ function ChefSignupPage() {
                                         children: "Please upload and parse your resume above to enable account creation."
                                     }, void 0, false, {
                                         fileName: "[project]/src/app/chef/signup/page.tsx",
-                                        lineNumber: 399,
+                                        lineNumber: 402,
                                         columnNumber: 17
                                     }, this)
                                 ]
                             }, void 0, true, {
                                 fileName: "[project]/src/app/chef/signup/page.tsx",
-                                lineNumber: 232,
+                                lineNumber: 235,
                                 columnNumber: 13
                             }, this)
                         }, void 0, false, {
                             fileName: "[project]/src/app/chef/signup/page.tsx",
-                            lineNumber: 231,
+                            lineNumber: 234,
                             columnNumber: 11
                         }, this)
                     ]
                 }, void 0, true, {
                     fileName: "[project]/src/app/chef/signup/page.tsx",
-                    lineNumber: 225,
+                    lineNumber: 228,
                     columnNumber: 9
                 }, this)
             ]
         }, void 0, true, {
             fileName: "[project]/src/app/chef/signup/page.tsx",
-            lineNumber: 215,
+            lineNumber: 218,
             columnNumber: 7
         }, this)
     }, void 0, false, {
         fileName: "[project]/src/app/chef/signup/page.tsx",
-        lineNumber: 214,
+        lineNumber: 217,
         columnNumber: 5
     }, this);
 }
