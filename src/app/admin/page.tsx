@@ -6,10 +6,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ShieldAlert, ListChecks, UserCog, FileWarning, UserCheck, FileSearch2, BadgeCheck, MessageCircleWarning, Gavel, Award, MessageSquare, LockKeyhole, CalendarX2, UsersRound, Banknote, PauseCircle, Undo2, ClipboardCheck, FileCheck2, BotMessageSquare, ShieldBan, CreditCard, CalendarCheck2 as CalendarCheckIcon, Download, AlertTriangle, CalendarClock, Loader2, Utensils, CheckCircle, XCircle } from 'lucide-react';
+import { ShieldAlert, ListChecks, UserCog, FileWarning, UserCheck, FileSearch2, BadgeCheck, MessageCircleWarning, Gavel, Award, MessageSquare, LockKeyhole, CalendarX2, UsersRound, Banknote, PauseCircle, Undo2, ClipboardCheck, FileCheck2, BotMessageSquare, ShieldBan, CreditCard, CalendarCheck2 as CalendarCheckIcon, Download, AlertTriangle, CalendarClock, Loader2, Utensils, CheckCircle, XCircle, Send } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, orderBy, Timestamp, query, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import type { ChefProfile, CustomerProfile, Menu } from '@/types';
+import type { ChefProfile, CustomerProfile, Menu, CustomerRequest } from '@/types';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 
@@ -21,6 +21,8 @@ export default function AdminPage() {
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
   const [allMenus, setAllMenus] = useState<Menu[]>([]);
   const [isLoadingMenus, setIsLoadingMenus] = useState(true);
+  const [allCustomerRequests, setAllCustomerRequests] = useState<CustomerRequest[]>([]);
+  const [isLoadingCustomerRequests, setIsLoadingCustomerRequests] = useState(true);
   const [isProcessingAction, setIsProcessingAction] = useState(false);
 
 
@@ -59,7 +61,7 @@ export default function AdminPage() {
           return {
             id: docSnap.id,
             ...data,
-            adminStatus: data.adminStatus || 'pending', // Default to pending if not set
+            adminStatus: data.adminStatus || 'pending', 
             createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
             updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
           } as Menu;
@@ -70,6 +72,29 @@ export default function AdminPage() {
         toast({ title: "Error", description: "Could not fetch menus.", variant: "destructive" });
       } finally {
         setIsLoadingMenus(false);
+      }
+
+      // Fetch Customer Requests
+      setIsLoadingCustomerRequests(true);
+      try {
+        const requestsCollectionRef = collection(db, "customerRequests");
+        const requestsQuery = query(requestsCollectionRef, orderBy("createdAt", "desc"));
+        const requestsSnapshot = await getDocs(requestsQuery);
+        const fetchedRequests = requestsSnapshot.docs.map(docSnap => {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id,
+            ...data,
+            eventDate: data.eventDate instanceof Timestamp ? data.eventDate.toDate() : new Date(data.eventDate),
+            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+          } as CustomerRequest;
+        });
+        setAllCustomerRequests(fetchedRequests);
+      } catch (error) {
+        console.error("Error fetching customer requests:", error);
+        toast({ title: "Error", description: "Could not fetch customer requests.", variant: "destructive" });
+      } finally {
+        setIsLoadingCustomerRequests(false);
       }
     };
     fetchAdminData();
@@ -91,14 +116,10 @@ export default function AdminPage() {
   };
 
   const handleRejectUser = async (userId: string) => {
-    // For now, this is conceptual. In a real system, you might set isApproved to false
-    // or add them to a "rejected" list, potentially with a reason.
     setIsProcessingAction(true);
     try {
-      // Conceptual: Maybe set a 'rejectedReason' field or simply log it.
-      // For now, we'll just show a toast and ensure isApproved remains false or is set to false.
       const userDocRef = doc(db, "users", userId);
-      await updateDoc(userDocRef, { isApproved: false, updatedAt: serverTimestamp() }); // Ensure it's false
+      await updateDoc(userDocRef, { isApproved: false, updatedAt: serverTimestamp() }); 
       setAllUsers(prevUsers => prevUsers.map(u => u.id === userId ? { ...u, isApproved: false } : u));
       toast({ title: "Chef Rejected (Conceptual)", description: `Chef ID ${userId.substring(0,6)}... action noted.` });
     } catch (error) {
@@ -290,7 +311,7 @@ export default function AdminPage() {
         </CardContent>
       </Card>
 
-      <Card className="shadow-lg">
+      <Card className="shadow-lg mb-8">
         <CardHeader>
           <CardTitle className="flex items-center"><Utensils className="mr-2 h-6 w-6 text-primary"/> All Platform Menus</CardTitle>
           <CardDescription>Review and manage all menus created by chefs.</CardDescription>
@@ -338,7 +359,7 @@ export default function AdminPage() {
                           }
                           className={
                             menu.adminStatus === 'approved' ? 'bg-green-500 hover:bg-green-600' :
-                            menu.adminStatus === 'rejected' ? '' : '' // default destructive is fine
+                            menu.adminStatus === 'rejected' ? '' : '' 
                           }
                         >
                           {menu.adminStatus?.charAt(0).toUpperCase() + menu.adminStatus?.slice(1) || 'Pending'}
@@ -383,6 +404,67 @@ export default function AdminPage() {
           )}
         </CardContent>
       </Card>
+
+      <Card className="shadow-lg">
+        <CardHeader>
+          <CardTitle className="flex items-center"><Send className="mr-2 h-6 w-6 text-primary"/> All Customer Requests</CardTitle>
+          <CardDescription>Review all event requests made by customers.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isLoadingCustomerRequests ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="ml-3 text-muted-foreground">Loading customer requests...</p>
+            </div>
+          ) : allCustomerRequests.length === 0 ? (
+            <p className="text-muted-foreground text-center py-8">No customer requests found.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Request ID</TableHead>
+                    <TableHead>Event Type</TableHead>
+                    <TableHead>Customer ID</TableHead>
+                    <TableHead>Event Date</TableHead>
+                    <TableHead className="text-right">PAX</TableHead>
+                    <TableHead className="text-right">Budget</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Actions</TableHead> 
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {allCustomerRequests.map((request) => (
+                    <TableRow key={request.id}>
+                      <TableCell className="font-mono text-xs">{request.id.substring(0,8)}...</TableCell>
+                      <TableCell className="font-medium">{request.eventType}</TableCell>
+                      <TableCell className="text-xs">{request.customerId.substring(0,8)}...</TableCell>
+                      <TableCell>{format(request.eventDate, 'PP')}</TableCell>
+                      <TableCell className="text-right">{request.pax}</TableCell>
+                      <TableCell className="text-right">${request.budget.toFixed(2)}</TableCell>
+                      <TableCell>
+                        <Badge variant={
+                            request.status === 'booked' || request.status === 'customer_confirmed' ? 'default' :
+                            request.status === 'cancelled_by_customer' || request.status === 'chef_declined' ? 'destructive' :
+                            'secondary'
+                        } className="capitalize">
+                            {request.status?.replace(/_/g, ' ') || 'Unknown'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                         <Button variant="outline" size="sm" onClick={() => alert(`Viewing request: ${request.id}`)} className="text-xs">
+                           View/Moderate
+                         </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
 
       <div className="mt-8 p-4 border-l-4 border-yellow-500 bg-yellow-500/10 rounded-md">
         <h4 className="font-semibold text-yellow-700">Development Note:</h4>
