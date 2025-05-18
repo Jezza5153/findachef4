@@ -38,6 +38,8 @@ export default function ChefCalendarPage() {
   useEffect(() => {
     if (!user) {
       setIsLoadingCalendarData(false);
+      setAllEvents([]);
+      setBlockedDates([]);
       return;
     }
 
@@ -45,7 +47,6 @@ export default function ChefCalendarPage() {
     let unsubscribeUserProfile: (() => void) | undefined;
     let unsubscribeCalendarEvents: (() => void) | undefined;
 
-    // Fetch blocked dates from user profile and listen for updates
     const userDocRef = doc(db, "users", user.uid);
     unsubscribeUserProfile = onSnapshot(userDocRef, (docSnap) => {
       if (docSnap.exists()) {
@@ -56,40 +57,47 @@ export default function ChefCalendarPage() {
           setBlockedDates([]);
         }
       }
+      // Ensure calendar events are fetched/refetched after profile data is loaded if needed
+      // For this setup, events are fetched independently, but this ensures loading state is accurate
+      if (unsubscribeCalendarEvents === undefined) fetchCalendarEvents();
     }, (error) => {
       console.error("Error fetching user profile for blocked dates:", error);
       toast({ title: "Error", description: "Could not fetch blocked dates.", variant: "destructive" });
     });
 
-    // Fetch calendar events and listen for updates
-    const eventsCollectionRef = collection(db, `users/${user.uid}/calendarEvents`);
-    const q = query(eventsCollectionRef, orderBy("date", "asc")); // Order by date
-    
-    unsubscribeCalendarEvents = onSnapshot(q, (querySnapshot) => {
-      const fetchedEvents = querySnapshot.docs.map(docSnap => {
-        const data = docSnap.data();
-        return {
-          id: docSnap.id,
-          ...data,
-          date: (data.date as Timestamp).toDate(), 
-          createdAt: data.createdAt ? (data.createdAt as Timestamp).toDate() : undefined,
-          updatedAt: data.updatedAt ? (data.updatedAt as Timestamp).toDate() : undefined,
-        } as CalendarEvent;
+    const fetchCalendarEvents = () => {
+      const eventsCollectionRef = collection(db, `users/${user.uid}/calendarEvents`);
+      const q = query(eventsCollectionRef, orderBy("date", "asc"));
+      
+      unsubscribeCalendarEvents = onSnapshot(q, (querySnapshot) => {
+        const fetchedEvents = querySnapshot.docs.map(docSnap => {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id,
+            ...data,
+            date: (data.date as Timestamp).toDate(), 
+            createdAt: data.createdAt ? (data.createdAt as Timestamp).toDate() : undefined,
+            updatedAt: data.updatedAt ? (data.updatedAt as Timestamp).toDate() : undefined,
+          } as CalendarEvent;
+        });
+        setAllEvents(fetchedEvents);
+        setIsLoadingCalendarData(false); 
+      }, (error) => {
+        console.error("Error fetching calendar events:", error);
+        toast({ title: "Error", description: "Could not fetch calendar events.", variant: "destructive" });
+        setIsLoadingCalendarData(false);
       });
-      setAllEvents(fetchedEvents);
-      setIsLoadingCalendarData(false); 
-    }, (error) => {
-      console.error("Error fetching calendar events:", error);
-      toast({ title: "Error", description: "Could not fetch calendar events.", variant: "destructive" });
-      setIsLoadingCalendarData(false);
-    });
+    };
+    
+    // Initial fetch of events if user profile is already available through AuthContext on first load
+    if(userProfile) fetchCalendarEvents();
     
     return () => {
       if (unsubscribeUserProfile) unsubscribeUserProfile();
       if (unsubscribeCalendarEvents) unsubscribeCalendarEvents();
     };
 
-  }, [user, toast]);
+  }, [user, userProfile, toast]);
 
   const eventsForSelectedDate = useMemo(() => {
     if (!selectedDate) return [];
@@ -158,7 +166,7 @@ export default function ChefCalendarPage() {
     
     try {
       const userDocRef = doc(db, "users", user.uid);
-      await updateDoc(userDocRef, { blockedDates: newBlockedDatesIso });
+      await updateDoc(userDocRef, { blockedDates: newBlockedDatesIso, updatedAt: serverTimestamp() });
       toast({ 
         title: alreadyBlocked ? "Date Unblocked" : "Date Blocked", 
         description: `${format(dateToToggle, 'PPP')} is now ${alreadyBlocked ? 'available' : 'marked as unavailable.'}` 
@@ -187,7 +195,7 @@ export default function ChefCalendarPage() {
     <div className="space-y-8">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-3xl font-bold flex items-center">
-          <CalendarDays className="mr-3 h-8 w-8 text-primary" data-ai-hint="calendar icon" /> My Calendar & Events
+          <CalendarDays className="mr-3 h-8 w-8 text-primary" data-ai-hint="calendar icon" /> My Calendar &amp; Events
         </h1>
         <div className="flex flex-col sm:flex-row gap-2">
           <Button onClick={handleGoogleCalendarSync} variant="outline" className="text-sm">
@@ -320,8 +328,8 @@ export default function ChefCalendarPage() {
                         </>
                     )}
                     {(event.status === 'Confirmed' || event.status === 'Pending' || event.status === 'WallEvent') && (
-                        <Button variant="link" size="sm" onClick={() => openEventDetailsDialog(event)} className="p-0 h-auto text-xs text-blue-500 hover:underline">
-                          View/Edit Details
+                        <Button variant="outline" size="sm" onClick={() => openEventDetailsDialog(event)} className="w-full sm:w-auto mt-2">
+                          View Event Details
                         </Button>
                     )}
                     {event.status === 'Cancelled' && (
@@ -353,18 +361,35 @@ export default function ChefCalendarPage() {
       </div>
 
       <AlertDialog open={isEventDetailsDialogOpen} onOpenChange={setIsEventDetailsDialogOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="sm:max-w-lg">
           <AlertDialogHeader>
             <AlertDialogTitle>{selectedEventForDialog?.title || "Event Details"}</AlertDialogTitle>
-            <AlertDialogDescription>
-              Full event details and editing functionality will be available here soon.
-              For now, this serves as a placeholder.
-              {selectedEventForDialog && <p className="mt-2 text-xs">Event ID: {selectedEventForDialog.id}</p>}
-            </AlertDialogDescription>
           </AlertDialogHeader>
+            {selectedEventForDialog ? (
+              <div className="space-y-3 text-sm max-h-[60vh] overflow-y-auto p-1">
+                <p><strong>Date:</strong> {format(selectedEventForDialog.date, 'PPP p')}</p>
+                <p><strong>Status:</strong> <Badge variant={getStatusBadgeVariant(selectedEventForDialog.status)}>{selectedEventForDialog.status}</Badge></p>
+                {selectedEventForDialog.customerName && <p><strong>Customer:</strong> {selectedEventForDialog.customerName}</p>}
+                <p><strong>PAX:</strong> {selectedEventForDialog.pax}</p>
+                <p><strong>Menu:</strong> {selectedEventForDialog.menuName}</p>
+                <p><strong>Price:</strong> ${selectedEventForDialog.pricePerHead}/head</p>
+                {selectedEventForDialog.location && <p><strong>Location:</strong> {selectedEventForDialog.location}</p>}
+                {selectedEventForDialog.notes && <p><strong>Notes:</strong> {selectedEventForDialog.notes}</p>}
+                {selectedEventForDialog.coChefs && selectedEventForDialog.coChefs.length > 0 && (
+                    <p><strong>Co-Chefs:</strong> {selectedEventForDialog.coChefs.join(', ')}</p>
+                )}
+                {selectedEventForDialog.weather && <p><strong>Weather Forecast:</strong> {selectedEventForDialog.weather}</p>}
+                {selectedEventForDialog.toolsNeeded && selectedEventForDialog.toolsNeeded.length > 0 && (
+                     <p><strong>Tools Needed:</strong> {selectedEventForDialog.toolsNeeded.join(', ')}</p>
+                )}
+                 <p className="text-xs text-muted-foreground pt-2 border-t">Event ID: {selectedEventForDialog.id}</p>
+              </div>
+            ) : (
+              <AlertDialogDescription>Loading event details...</AlertDialogDescription>
+            )}
           <AlertDialogFooter>
             <AlertDialogCancel>Close</AlertDialogCancel>
-            {/* <AlertDialogAction>Edit (Placeholder)</AlertDialogAction> */}
+            {/* <AlertDialogAction disabled>Edit (Coming Soon)</AlertDialogAction> */}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

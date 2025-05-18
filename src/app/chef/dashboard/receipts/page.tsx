@@ -50,13 +50,12 @@ import { receiptParserFlow } from '@/ai/flows/receipt-parser-flow';
 import { getTaxAdvice } from '@/ai/flows/tax-advice-flow';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where, serverTimestamp, Timestamp, orderBy } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, deleteDoc, query, serverTimestamp, Timestamp, onSnapshot, orderBy } from 'firebase/firestore';
 import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 
 const costTypes: CostType[] = ['Ingredient', 'Equipment', 'Tax', 'BAS', 'Travel', 'Other'];
 
 const receiptFormSchema = z.object({
-  // File is handled by capturedImageDataUri, not directly in Zod schema for form submit
   vendor: z.string().min(1, { message: 'Vendor name is required.' }),
   date: z.date({ required_error: 'Receipt date is required.' }),
   totalAmount: z.coerce.number().min(0.01, { message: 'Total amount must be greater than 0.' }),
@@ -84,7 +83,7 @@ export default function ReceiptsPage() {
   const [isCameraDialogOpen, setIsCameraDialogOpen] = useState(false);
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [capturedImageDataUri, setCapturedImageDataUri] = useState<string | null>(null);
-  const [fileNameForForm, setFileNameForForm] = useState<string | null>(null); // For displaying original filename
+  const [fileNameForForm, setFileNameForForm] = useState<string | null>(null); 
   const [isPreviewCapture, setIsPreviewCapture] = useState(false);
   const [isParsingReceipt, setIsParsingReceipt] = useState(false);
   const [isTaxAdviceDialogOpen, setIsTaxAdviceDialogOpen] = useState(false);
@@ -119,33 +118,35 @@ export default function ReceiptsPage() {
   });
 
   useEffect(() => {
-    const fetchReceipts = async () => {
-      if (!user) {
-        setIsLoading(false);
-        return;
-      }
-      setIsLoading(true);
-      try {
-        const receiptsCollectionRef = collection(db, "users", user.uid, "receipts");
-        const q = query(receiptsCollectionRef, orderBy("date", "desc"));
-        const querySnapshot = await getDocs(q);
-        const fetchedReceipts = querySnapshot.docs.map(doc => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            ...data,
-            date: (data.date as Timestamp).toDate(), // Convert Firestore Timestamp to Date
-          } as Receipt;
-        });
-        setReceipts(fetchedReceipts);
-      } catch (error) {
-        console.error("Error fetching receipts:", error);
-        toast({ title: "Error", description: "Could not fetch your receipts.", variant: "destructive" });
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchReceipts();
+    if (!user) {
+      setIsLoading(false);
+      setReceipts([]);
+      return;
+    }
+    setIsLoading(true);
+    const receiptsCollectionRef = collection(db, "users", user.uid, "receipts");
+    const q = query(receiptsCollectionRef, orderBy("date", "desc"));
+    
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      const fetchedReceipts = querySnapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        return {
+          id: docSnap.id,
+          ...data,
+          date: (data.date as Timestamp).toDate(), 
+          createdAt: data.createdAt ? (data.createdAt as Timestamp).toDate() : undefined,
+          updatedAt: data.updatedAt ? (data.updatedAt as Timestamp).toDate() : undefined,
+        } as Receipt;
+      });
+      setReceipts(fetchedReceipts);
+      setIsLoading(false);
+    }, (error) => {
+      console.error("Error fetching receipts:", error);
+      toast({ title: "Error", description: "Could not fetch your receipts.", variant: "destructive" });
+      setIsLoading(false);
+    });
+    
+    return () => unsubscribe();
   }, [user, toast]);
 
   useEffect(() => {
@@ -224,7 +225,6 @@ export default function ReceiptsPage() {
 
   const handleUseCapturedImage = () => {
     setIsCameraDialogOpen(false);
-    // capturedImageDataUri and fileNameForForm are already set
   };
 
   const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -281,7 +281,6 @@ export default function ReceiptsPage() {
     }
   };
 
-  // Helper function to convert data URI to Blob
   const dataURIToBlob = (dataURI: string) => {
     const byteString = atob(dataURI.split(',')[1]);
     const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0];
@@ -298,31 +297,36 @@ export default function ReceiptsPage() {
       toast({ title: "Error", description: "You must be logged in.", variant: "destructive" });
       return;
     }
+    if (!capturedImageDataUri && !editingReceipt?.imageUrl) {
+      toast({ title: "Image Required", description: "Please capture or upload a receipt image.", variant: "destructive" });
+      return;
+    }
     setIsSaving(true);
-    let imageUrl = editingReceipt?.imageUrl || '';
+    let imageUrlToSave = editingReceipt?.imageUrl || '';
     const originalFileName = fileNameForForm || (editingReceipt?.fileName) || `receipt_${Date.now()}.jpg`;
 
     try {
+      const receiptIdForPath = editingReceipt?.id || doc(collection(db, 'temp')).id; // Generate ID upfront for path
+
       if (capturedImageDataUri && (!editingReceipt || capturedImageDataUri !== editingReceipt.imageUrl)) {
-        // New image or changed image
         if (editingReceipt?.imageUrl) {
           try {
-            const oldImageRef = storageRef(storage, editingReceipt.imageUrl);
+            const oldImageRef = storageRef(storage, editingReceipt.imageUrl); // Assumes imageUrl is the full path
             await deleteObject(oldImageRef).catch(e => console.warn("Old image not found or could not be deleted for receipt:", e));
           } catch (e) { console.warn("Error deleting old receipt image:", e); }
         }
 
         const blob = dataURIToBlob(capturedImageDataUri);
-        const imagePath = `users/${user.uid}/receipts/${editingReceipt?.id || doc(collection(db, 'temp')).id}/${originalFileName}`;
-        const imageStorageRef = storageRef(storage, imagePath);
+        const imagePath = `users/${user.uid}/receipts/${receiptIdForPath}/${originalFileName}`;
+        const imageStorageRefInstance = storageRef(storage, imagePath);
         
-        toast({ title: "Uploading receipt image...", description: "Please wait." });
-        const uploadTask = uploadBytesResumable(imageStorageRef, blob);
+        const uploadTask = uploadBytesResumable(imageStorageRefInstance, blob);
         await new Promise<void>((resolve, reject) => {
-          uploadTask.on('state_changed', null, 
+          uploadTask.on('state_changed', 
+            (snapshot) => { /* Optional: track progress */ }, 
             (error) => { console.error("Receipt image upload error:", error); reject(error); },
             async () => {
-              imageUrl = await getDownloadURL(uploadTask.snapshot.ref);
+              imageUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
               resolve();
             }
           );
@@ -333,7 +337,7 @@ export default function ReceiptsPage() {
         ...data,
         chefId: user.uid,
         date: Timestamp.fromDate(data.date),
-        imageUrl: imageUrl,
+        imageUrl: imageUrlToSave,
         fileName: originalFileName,
         updatedAt: serverTimestamp(),
       };
@@ -341,12 +345,11 @@ export default function ReceiptsPage() {
       if (editingReceipt) {
         const receiptDocRef = doc(db, "users", user.uid, "receipts", editingReceipt.id);
         await updateDoc(receiptDocRef, receiptDataToSave);
-        setReceipts(receipts.map(r => r.id === editingReceipt.id ? { ...editingReceipt, ...receiptDataToSave, date: data.date } : r));
         toast({ title: 'Receipt Updated', description: `Receipt from "${data.vendor}" has been updated.` });
       } else {
         const finalData = { ...receiptDataToSave, createdAt: serverTimestamp() };
-        const docRef = await addDoc(collection(db, "users", user.uid, "receipts"), finalData);
-        setReceipts([{ ...finalData, id: docRef.id, date: data.date }, ...receipts].sort((a,b) => b.date.getTime() - a.date.getTime()));
+        const newReceiptDocRef = doc(db, "users", user.uid, "receipts", receiptIdForPath);
+        await setDoc(newReceiptDocRef, finalData);
         toast({ title: 'Receipt Added', description: `Receipt from "${data.vendor}" has been added.` });
       }
       
@@ -375,14 +378,15 @@ export default function ReceiptsPage() {
       try {
         if (receiptToDelete.imageUrl) {
           try {
+            // Construct the path based on how it was saved. If imageUrl is already the full path, this might not be needed.
+            // For simplicity, assuming imageUrl might be the full gs:// path or a direct https URL from Firebase.
             const imageRef = storageRef(storage, receiptToDelete.imageUrl);
             await deleteObject(imageRef);
           } catch (e) {
-            console.warn("Could not delete receipt image from storage:", e);
+            console.warn("Could not delete receipt image from storage (it might use a direct URL or path might be different):", e);
           }
         }
         await deleteDoc(doc(db, "users", user.uid, "receipts", receiptId));
-        setReceipts(receipts.filter(r => r.id !== receiptId));
         toast({ title: 'Receipt Deleted', description: `Receipt from "${receiptToDelete?.vendor}" removed.`, variant: 'destructive' });
       } catch (error) {
         console.error("Error deleting receipt:", error);
@@ -398,10 +402,39 @@ export default function ReceiptsPage() {
   }, [receipts]);
 
   const handleExport = () => {
-    toast({
-      title: 'Export Initiated (Simulated)',
-      description: 'Your receipts data would be prepared for export to CSV/Xero here.',
-    });
+    if (receipts.length === 0) {
+      toast({ title: "No Data", description: "Receipt list is empty.", variant: "default" });
+      return;
+    }
+    const headers = ["Vendor", "Date", "Total Amount", "Cost Type", "Assigned to Event ID", "Assigned to Menu ID", "Notes", "File Name", "Image URL"];
+    const csvRows = [
+      headers.join(','),
+      ...receipts.map(receipt => [
+        `"${receipt.vendor.replace(/"/g, '""')}"`,
+        format(receipt.date, 'yyyy-MM-dd'),
+        receipt.totalAmount.toFixed(2),
+        `"${receipt.costType.replace(/"/g, '""')}"`,
+        `"${(receipt.assignedToEventId || '').replace(/"/g, '""')}"`,
+        `"${(receipt.assignedToMenuId || '').replace(/"/g, '""')}"`,
+        `"${(receipt.notes || '').replace(/"/g, '""')}"`,
+        `"${(receipt.fileName || '').replace(/"/g, '""')}"`,
+        `"${(receipt.imageUrl || '').replace(/"/g, '""')}"`,
+      ].join(','))
+    ];
+    const csvString = csvRows.join('\n');
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    if (link.download !== undefined) {
+      const url = URL.createObjectURL(blob);
+      link.setAttribute("href", url);
+      link.setAttribute("download", "receipts_export.csv");
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
+    toast({ title: 'Export Successful', description: 'Receipts exported to CSV.' });
   };
 
   const onSubmitTaxAdvice = async (data: TaxAdviceFormValues) => {
@@ -423,7 +456,7 @@ export default function ReceiptsPage() {
   if (isLoading) {
     return (
       <div className="flex justify-center items-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <Loader2 className="h-8 w-8 animate-spin text-primary" data-ai-hint="loading spinner"/>
         <p className="ml-2">Loading receipts...</p>
       </div>
     );
@@ -433,10 +466,10 @@ export default function ReceiptsPage() {
     <div className="space-y-8">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-3xl font-bold flex items-center">
-          <FileText className="mr-3 h-8 w-8 text-primary" data-ai-hint="document file"/> Receipts & Cost Management
+          <FileText className="mr-3 h-8 w-8 text-primary" data-ai-hint="document file"/> Receipts &amp; Cost Management
         </h1>
         <div className="flex space-x-2">
-            <Button onClick={() => openUploadDialog()} disabled={isSaving}>
+            <Button onClick={() => openUploadDialog()} disabled={isSaving || isParsingReceipt}>
                 <PlusCircle className="mr-2 h-5 w-5" /> Add New Receipt
             </Button>
             <Button variant="outline" onClick={() => { taxForm.reset(); setTaxAdviceResponse(null); setIsTaxAdviceDialogOpen(true);}}>
@@ -446,7 +479,7 @@ export default function ReceiptsPage() {
       </div>
 
       <Dialog open={isUploadDialogOpen} onOpenChange={(isOpen) => {
-          if (isSaving && isOpen) return;
+          if ((isSaving || isParsingReceipt) && isOpen) return;
           setIsUploadDialogOpen(isOpen);
           if (!isOpen) {
             setCapturedImageDataUri(null); 
@@ -607,7 +640,7 @@ export default function ReceiptsPage() {
               />
               <DialogFooter>
                 <DialogClose asChild>
-                  <Button type="button" variant="outline" disabled={isSaving}>Cancel</Button>
+                  <Button type="button" variant="outline" disabled={isSaving || isParsingReceipt}>Cancel</Button>
                 </DialogClose>
                 <Button type="submit" disabled={isSaving || isParsingReceipt}>
                   {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : (editingReceipt ? 'Save Changes' : 'Add Receipt')}
@@ -618,7 +651,6 @@ export default function ReceiptsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Camera Dialog */}
       <Dialog open={isCameraDialogOpen} onOpenChange={setIsCameraDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -654,7 +686,6 @@ export default function ReceiptsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Tax Advice Dialog */}
       <Dialog open={isTaxAdviceDialogOpen} onOpenChange={setIsTaxAdviceDialogOpen}>
         <DialogContent className="sm:max-w-lg">
             <DialogHeader>
@@ -776,7 +807,7 @@ export default function ReceiptsPage() {
       
       <Card className="mt-8">
         <CardHeader>
-            <CardTitle>Financial Tools & Future Features</CardTitle>
+            <CardTitle>Financial Tools &amp; Future Features</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 text-sm text-muted-foreground">
             <p>
@@ -793,11 +824,11 @@ export default function ReceiptsPage() {
 
       <Alert className="mt-8">
         <InfoIcon className="h-4 w-4" />
-        <AlertTitle>Payout & Financial Information</AlertTitle>
+        <AlertTitle>Payout &amp; Financial Information</AlertTitle>
         <AlertDescription>
           <ul className="list-disc list-inside text-xs space-y-1">
             <li><strong>Initial Fund Distribution:</strong> Upon customer booking confirmation, 46% of the event cost is released to the chef and 4% to FindAChef immediately.</li>
-            <li><strong>Escrow & Final Release:</strong> The remaining 50% is held by FindAChef. This portion is released to the chef after the event is confirmed complete by the customer (typically via QR code scan at the event).</li>
+            <li><strong>Escrow &amp; Final Release:</strong> The remaining 50% is held by FindAChef. This portion is released to the chef after the event is confirmed complete by the customer (typically via QR code scan at the event).</li>
             <li><strong>Public Ticketed Events:</strong> For events you host and sell tickets for via The Chef's Wall, payouts are generally scheduled 7 days *before* the event date to assist with upfront costs (subject to terms).</li>
             <li><strong>Cancellations by Chef:</strong> If a chef cancels an event, a full refund is issued to the customer. Admin will be notified to assist and manage chef accountability, which may include penalties if a replacement cannot be found.</li>
             <li><strong>Cancellations by Customer:</strong>
@@ -813,7 +844,7 @@ export default function ReceiptsPage() {
       </Alert>
 
       <div className="flex justify-end mt-6">
-        <Button onClick={handleExport} variant="outline">
+        <Button onClick={handleExport} variant="outline" disabled={receipts.length === 0}>
           <Download className="mr-2 h-5 w-5" /> Export Data (CSV/Xero)
         </Button>
       </div>

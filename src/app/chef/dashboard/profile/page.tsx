@@ -42,33 +42,35 @@ import { updateProfile as updateAuthProfile } from 'firebase/auth';
 
 const chefProfileSchema = z.object({
   name: z.string().min(2, { message: 'Name must be at least 2 characters.' }),
-  email: z.string().email({ message: 'Invalid email address.' }),
+  email: z.string().email({ message: 'Invalid email address.' }), // Will be read-only
   tagline: z.string().max(100, "Tagline cannot exceed 100 characters.").optional(),
   bio: z.string().min(20, {message: 'Bio must be at least 20 characters.'}).max(500, {message: "Bio cannot exceed 500 characters."}),
-  specialties: z.string().min(1, { message: 'Please list at least one specialty.' }), // Comma-separated
+  specialties: z.string().min(1, { message: 'Please list at least one specialty.' }), 
   profilePictureFile: z.instanceof(File).optional()
     .refine(file => !file || file.size <= 2 * 1024 * 1024, `Max file size is 2MB.`)
     .refine(file => !file || ['image/jpeg', 'image/png', 'image/webp'].includes(file.type), `Only JPG, PNG, WEBP files are allowed.`),
   experienceSummary: z.string().optional(),
   education: z.string().max(2000, "Education summary cannot exceed 2000 characters.").optional(),
-  skills: z.string().optional(), // Comma-separated skills
+  skills: z.string().optional(), 
   portfolioItem1Url: z.string().url({ message: "Invalid URL for portfolio item 1." }).optional().or(z.literal('')),
   portfolioItem1Caption: z.string().max(150, "Caption for item 1 cannot exceed 150 characters.").optional(),
   portfolioItem2Url: z.string().url({ message: "Invalid URL for portfolio item 2." }).optional().or(z.literal('')),
   portfolioItem2Caption: z.string().max(150, "Caption for item 2 cannot exceed 150 characters.").optional(),
-  teamName: z.string().optional(), // For display, not editable by chef directly here
+  teamName: z.string().optional(), 
 });
 
 type ChefProfileFormValues = z.infer<typeof chefProfileSchema>;
 
 export default function ChefProfilePage() {
   const { user, userProfile, loading: authLoading } = useAuth();
-  const [chefData, setChefData] = useState<ChefProfileType | null>(null);
+  const [chefData, setChefData] = useState<ChefProfileType | null>(null); // For storing fetched Firestore data
   const [profilePicturePreview, setProfilePicturePreview] = useState<string | null>(null);
   const [newProfilePictureFile, setNewProfilePictureFile] = useState<File | null>(null);
+  
   const [newResumeFile, setNewResumeFile] = useState<File | null>(null);
   const [resumeParsedDataForSave, setResumeParsedDataForSave] = useState<ParseResumeOutput | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+
+  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
 
@@ -82,7 +84,7 @@ export default function ChefProfilePage() {
       specialties: '',
       experienceSummary: "",
       education: "",
-      skills: "", // Initialize as string for input field
+      skills: "",
       portfolioItem1Url: '',
       portfolioItem1Caption: '',
       portfolioItem2Url: '',
@@ -93,55 +95,39 @@ export default function ChefProfilePage() {
 
   useEffect(() => {
     const fetchProfile = async () => {
-      if (!authLoading && user) {
-        setIsLoading(true);
-        try {
-          const userDocRef = doc(db, "users", user.uid);
-          const docSnap = await getDoc(userDocRef);
-          if (docSnap.exists()) {
-            const currentProfile = docSnap.data() as ChefProfileType;
-            setChefData(currentProfile);
-            form.reset({
-              name: currentProfile.name || '',
-              email: currentProfile.email || user.email || '',
-              tagline: currentProfile.tagline || '',
-              bio: currentProfile.bio || '',
-              specialties: currentProfile.specialties?.join(', ') || '',
-              experienceSummary: currentProfile.experienceSummary || '',
-              education: currentProfile.education || '',
-              skills: currentProfile.skills?.join(', ') || '',
-              portfolioItem1Url: currentProfile.portfolioItem1Url || '',
-              portfolioItem1Caption: currentProfile.portfolioItem1Caption || '',
-              portfolioItem2Url: currentProfile.portfolioItem2Url || '',
-              portfolioItem2Caption: currentProfile.portfolioItem2Caption || '',
-              teamName: currentProfile.teamName || '',
-            });
-            setProfilePicturePreview(currentProfile.profilePictureUrl || user.photoURL || null);
-          } else {
-            toast({ title: "Profile Not Found", description: "Could not load your profile data.", variant: "destructive"});
-            // Initialize with defaults if no profile found for some reason
-            form.reset({
-              name: user.displayName || '',
-              email: user.email || '',
-            });
-            setProfilePicturePreview(user.photoURL || null);
-          }
-        } catch (error) {
-          console.error("Error fetching profile:", error);
-          toast({ title: "Error", description: "Failed to load profile data.", variant: "destructive"});
-        } finally {
-          setIsLoading(false);
-        }
-      } else if (!authLoading && !user) {
-        setIsLoading(false); // Not logged in
+      if (user && userProfile) {
+        setChefData(userProfile as ChefProfileType);
+        form.reset({
+          name: userProfile.name || user.displayName || '',
+          email: userProfile.email || user.email || '',
+          tagline: (userProfile as ChefProfileType).tagline || '',
+          bio: userProfile.bio || '',
+          specialties: (userProfile as ChefProfileType).specialties?.join(', ') || '',
+          experienceSummary: (userProfile as ChefProfileType).experienceSummary || '',
+          education: (userProfile as ChefProfileType).education || '',
+          skills: (userProfile as ChefProfileType).skills?.join(', ') || '',
+          portfolioItem1Url: (userProfile as ChefProfileType).portfolioItem1Url || '',
+          portfolioItem1Caption: (userProfile as ChefProfileType).portfolioItem1Caption || '',
+          portfolioItem2Url: (userProfile as ChefProfileType).portfolioItem2Url || '',
+          portfolioItem2Caption: (userProfile as ChefProfileType).portfolioItem2Caption || '',
+          teamName: (userProfile as ChefProfileType).teamName || '',
+        });
+        setProfilePicturePreview(userProfile.profilePictureUrl || user.photoURL || null);
+      } else if (user && !userProfile) { // User exists, but profile data hasn't loaded or doesn't exist yet
+        form.reset({ name: user.displayName || '', email: user.email || ''});
+        setProfilePicturePreview(user.photoURL || null);
       }
+      setIsLoadingProfile(false);
     };
-    fetchProfile();
-  }, [user, authLoading, form, toast]);
+
+    if (!authLoading) {
+      fetchProfile();
+    }
+  }, [user, userProfile, authLoading, form]);
 
 
   const handleResumeProcessed = (data: { parsedData: ParseResumeOutput; file: File }) => {
-    setResumeParsedDataForSave(data.parsedData); // Store full parsed data for saving
+    setResumeParsedDataForSave(data.parsedData); 
     form.setValue('experienceSummary', data.parsedData.experience || '', { shouldValidate: true });
     form.setValue('skills', data.parsedData.skills?.join(', ') || '', { shouldValidate: true });
     if (data.parsedData.education) {
@@ -158,12 +144,12 @@ export default function ChefProfilePage() {
     const file = event.target.files?.[0];
     if (file) {
       form.setValue('profilePictureFile', file, {shouldValidate: true});
+      setNewProfilePictureFile(file);
       const reader = new FileReader();
       reader.onloadend = () => {
         setProfilePicturePreview(reader.result as string);
       };
       reader.readAsDataURL(file);
-      setNewProfilePictureFile(file);
     }
   };
 
@@ -180,20 +166,19 @@ export default function ChefProfilePage() {
     try {
       // 1. Upload new profile picture if one is staged
       if (newProfilePictureFile) {
-        if (profilePicUrlToSave && profilePicUrlToSave.startsWith('https://firebasestorage.googleapis.com')) { // Delete old one if exists and is a Firebase Storage URL
+        if (chefData?.profilePictureUrl && chefData.profilePictureUrl.startsWith('https://firebasestorage.googleapis.com')) { 
             try {
-                const oldImageRef = storageRef(storage, profilePicUrlToSave);
+                const oldImageRef = storageRef(storage, chefData.profilePictureUrl);
                 await deleteObject(oldImageRef).catch(e => console.warn("Old profile pic not found or cannot be deleted:", e));
             } catch (e) {console.warn("Error deleting old profile picture",e);}
         }
         const fileExtension = newProfilePictureFile.name.split('.').pop();
         const profilePicPath = `users/${user.uid}/profilePicture.${fileExtension}`;
-        const profilePicStorageRef = storageRef(storage, profilePicPath);
-        const uploadTask = uploadBytesResumable(profilePicStorageRef, newProfilePictureFile);
+        const profilePicStorageRefInstance = storageRef(storage, profilePicPath);
         
+        const uploadTask = uploadBytesResumable(profilePicStorageRefInstance, newProfilePictureFile);
         await new Promise<void>((resolve, reject) => {
-          uploadTask.on('state_changed', 
-            null,
+          uploadTask.on('state_changed', null,
             (error) => { console.error("Profile pic upload error", error); reject(error); },
             async () => {
               profilePicUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
@@ -205,20 +190,19 @@ export default function ChefProfilePage() {
 
       // 2. Upload new resume file if one is staged
       if (newResumeFile) {
-        if (resumeUrlToSave && resumeUrlToSave.startsWith('https://firebasestorage.googleapis.com')) { // Delete old one if exists and is a Firebase Storage URL
+        if (chefData?.resumeFileUrl && chefData.resumeFileUrl.startsWith('https://firebasestorage.googleapis.com')) { 
             try {
-                const oldResumeRef = storageRef(storage, resumeUrlToSave);
+                const oldResumeRef = storageRef(storage, chefData.resumeFileUrl);
                 await deleteObject(oldResumeRef).catch(e => console.warn("Old resume not found or cannot be deleted:", e));
             } catch (e) {console.warn("Error deleting old resume file",e);}
         }
         const resumeFileExtension = newResumeFile.name.split('.').pop() || 'pdf';
         const resumePath = `users/${user.uid}/resume.${resumeFileExtension}`;
-        const resumeStorageRef = storageRef(storage, resumePath);
-        const resumeUploadTask = uploadBytesResumable(resumeStorageRef, newResumeFile);
+        const resumeStorageRefInstance = storageRef(storage, resumePath);
+        const resumeUploadTask = uploadBytesResumable(resumeStorageRefInstance, newResumeFile);
 
         await new Promise<void>((resolve, reject) => {
-          resumeUploadTask.on('state_changed',
-            null,
+          resumeUploadTask.on('state_changed', null,
             (error) => { console.error("Resume upload error", error); reject(error); },
             async () => {
               resumeUrlToSave = await getDownloadURL(resumeUploadTask.snapshot.ref);
@@ -228,10 +212,9 @@ export default function ChefProfilePage() {
         });
       }
 
-      // 3. Prepare data for Firestore
       const updatedProfileData: Partial<ChefProfileType> = {
         name: formData.name,
-        email: user.email, // Email should be from auth user, not form
+        email: user.email!, // Ensure email is from auth
         tagline: formData.tagline,
         bio: formData.bio,
         specialties: formData.specialties.split(',').map(s => s.trim()).filter(s => s),
@@ -245,19 +228,27 @@ export default function ChefProfilePage() {
         portfolioItem2Caption: formData.portfolioItem2Caption,
         resumeFileUrl: resumeUrlToSave,
         updatedAt: serverTimestamp(),
-        // teamName is typically managed by an admin or a separate team management interface, not directly editable here.
-        // We can ensure chefData.teamName is preserved if it exists
+        role: 'chef', // Ensure role is set
+        ...(chefData?.abn && {abn: chefData.abn}), // Preserve ABN if it was set during signup
         ...(chefData?.teamName && { teamName: chefData.teamName }),
         ...(chefData?.teamId && { teamId: chefData.teamId }),
+        ...(chefData?.hasCompletedFirstCoOp !== undefined && { hasCompletedFirstCoOp: chefData.hasCompletedFirstCoOp }),
+        ...(chefData?.collaboratorIds && { collaboratorIds: chefData.collaboratorIds}),
+        ...(chefData?.incomingCollaborationRequests && { incomingCollaborationRequests: chefData.incomingCollaborationRequests }),
+        ...(chefData?.outgoingCollaborationRequests && { outgoingCollaborationRequests: chefData.outgoingCollaborationRequests }),
+        ...(chefData?.isApproved !== undefined && { isApproved: chefData.isApproved }),
+        ...(chefData?.isSubscribed !== undefined && { isSubscribed: chefData.isSubscribed }),
+        ...(chefData?.trustScore !== undefined && { trustScore: chefData.trustScore }),
+        ...(chefData?.trustScoreBasis && { trustScoreBasis: chefData.trustScoreBasis }),
       };
+      
+      if (!chefData?.createdAt && !userProfile?.createdAt) { // Only set createdAt if it's truly a new profile document
+        updatedProfileData.createdAt = serverTimestamp();
+      }
 
-      // 4. Save profile to Firestore
       const userDocRef = doc(db, "users", user.uid);
-      // Use setDoc with merge:true if creating for the first time, or updateDoc if sure it exists.
-      // Since signup creates a doc, updateDoc is fine, but setDoc({ ... }, { merge: true }) is safer if creation could fail.
-      await updateDoc(userDocRef, updatedProfileData); 
+      await setDoc(userDocRef, updatedProfileData, { merge: true }); 
 
-      // 5. Update Firebase Auth user profile (displayName, photoURL)
       if (user.displayName !== formData.name || (profilePicUrlToSave && user.photoURL !== profilePicUrlToSave)) {
         await updateAuthProfile(user, {
           displayName: formData.name,
@@ -268,7 +259,7 @@ export default function ChefProfilePage() {
       setChefData(prev => ({ ...prev, ...updatedProfileData, id: user.uid, email: user.email! } as ChefProfileType));
       setNewProfilePictureFile(null); 
       setNewResumeFile(null);
-      setResumeParsedDataForSave(null);
+      // setResumeParsedDataForSave(null); // Keep this data in case user wants to re-save without re-parsing immediately
 
       toast({
         title: 'Profile Updated Successfully',
@@ -295,13 +286,12 @@ export default function ChefProfilePage() {
     });
   };
 
-  if (isLoading || authLoading) {
+  if (authLoading || isLoadingProfile) {
     return <div className="flex h-screen items-center justify-center"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading Profile...</div>;
   }
   if (!user) { 
      return <div className="flex h-screen items-center justify-center">Please log in to view your profile.</div>;
   }
-  // ChefData might still be null briefly if Firestore fetch is slightly delayed after auth, form will show defaults.
 
   return (
     <div className="space-y-8">
@@ -316,13 +306,14 @@ export default function ChefProfilePage() {
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
                 <div className="md:col-span-1 flex flex-col items-center">
                   <Image
-                    src={profilePicturePreview || "https://placehold.co/150x150.png?text=Chef"}
+                    src={profilePicturePreview || "https://placehold.co/150x150.png"}
                     alt={form.getValues('name') || "Chef"}
                     width={150}
                     height={150}
                     className="rounded-full object-cover shadow-md mb-4"
                     data-ai-hint="chef portrait"
                     key={profilePicturePreview} 
+                    unoptimized={profilePicturePreview?.startsWith('blob:')} // Add this for blob URLs if needed
                   />
                    <FormField
                       control={form.control}
@@ -430,7 +421,6 @@ export default function ChefProfilePage() {
                 )}
               />
               
-              {/* Team Affiliation Placeholder */}
               <div className="pt-4 border-t">
                 <h3 className="text-lg font-semibold mb-3 flex items-center"><Users className="mr-2 h-5 w-5 text-primary" data-ai-hint="team users" /> Team Affiliation</h3>
                  <FormField
@@ -524,9 +514,9 @@ export default function ChefProfilePage() {
                     className="w-full sm:w-auto mb-4"
                     onClick={() => {
                         if (chefData?.resumeFileUrl) {
-                        window.open(chefData.resumeFileUrl, '_blank');
+                            window.open(chefData.resumeFileUrl, '_blank');
                         } else {
-                        toast({ title: "Resume Not Available", description: "No resume file URL is currently set for download.", variant: "destructive" });
+                            toast({ title: "Resume Not Available", description: "No resume file has been uploaded yet.", variant: "default" });
                         }
                     }}
                     disabled={!chefData?.resumeFileUrl || isSaving}
@@ -535,7 +525,7 @@ export default function ChefProfilePage() {
                 </Button>
                 <ResumeUploadForm
                     onResumeParsed={handleResumeProcessed}
-                    initialData={resumeParsedDataForSave || undefined}
+                    initialData={resumeParsedDataForSave || undefined} 
                 />
               </div>
 
@@ -559,7 +549,7 @@ export default function ChefProfilePage() {
                       />
                       {form.watch(`portfolioItem${itemNum}Url` as 'portfolioItem1Url' | 'portfolioItem2Url') && (
                         <Image
-                            src={form.watch(`portfolioItem${itemNum}Url` as 'portfolioItem1Url' | 'portfolioItem2Url') || "https://placehold.co/300x200.png?text=Preview"}
+                            src={form.watch(`portfolioItem${itemNum}Url` as 'portfolioItem1Url' | 'portfolioItem2Url') || "https://placehold.co/300x200.png"}
                             alt={`Portfolio Item ${itemNum} Preview`}
                             width={300}
                             height={200}
@@ -585,7 +575,7 @@ export default function ChefProfilePage() {
               </div>
 
               <div className="pt-6 border-t flex flex-col sm:flex-row items-center justify-center">
-                <Button type="submit" size="lg" className="w-full sm:w-auto" disabled={isSaving || isLoading}>
+                <Button type="submit" size="lg" className="w-full sm:w-auto" disabled={isSaving || isLoadingProfile || authLoading}>
                   {isSaving ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Save className="mr-2 h-5 w-5" />}
                   {isSaving ? 'Saving...' : 'Save Profile Changes'}
                 </Button>
@@ -621,5 +611,3 @@ export default function ChefProfilePage() {
     </div>
   );
 }
-
-    

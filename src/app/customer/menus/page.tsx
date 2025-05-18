@@ -3,130 +3,124 @@
 
 import { useState, useEffect } from 'react';
 import { MenuCard } from '@/components/menu-card';
-import type { Menu } from '@/types';
+import type { Menu, CustomerRequest } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { Search, Filter, ListFilter } from 'lucide-react';
+import { Search, Filter, ListFilter, Loader2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
-
-// Mock public menus data
-const mockPublicMenus: Menu[] = [
-  {
-    id: 'pub1',
-    title: 'Gourmet Burger Experience',
-    description: 'Juicy gourmet burgers with artisanal buns and a variety of toppings. Comes with hand-cut fries.',
-    cuisine: 'American',
-    pricePerHead: 45,
-    dietaryInfo: ['Vegetarian Option (Beyond Burger)'],
-    isPublic: true,
-    imageUrl: 'https://placehold.co/600x400.png',
-    pax: 4,
-    averageRating: 4.5,
-    numberOfRatings: 25,
-    dataAiHint: "burger gourmet",
-  },
-  {
-    id: 'pub2',
-    title: 'Authentic Thai Green Curry',
-    description: 'Aromatic Thai green curry with chicken or tofu, served with jasmine rice. Spicy and flavorful.',
-    cuisine: 'Thai',
-    pricePerHead: 55,
-    dietaryInfo: ['Vegan Option', 'Gluten-Free'],
-    isPublic: true,
-    imageUrl: 'https://placehold.co/600x400.png',
-    pax: 6,
-    averageRating: 4.8,
-    numberOfRatings: 40,
-    dataAiHint: "thai curry",
-  },
-  {
-    id: 'pub3',
-    title: 'Spanish Tapas Selection',
-    description: 'A vibrant selection of traditional Spanish tapas, perfect for sharing. Includes patatas bravas, gambas al ajillo, and more.',
-    cuisine: 'Spanish',
-    pricePerHead: 65,
-    dietaryInfo: [],
-    isPublic: true,
-    imageUrl: 'https://placehold.co/600x400.png',
-    pax: 8,
-    averageRating: 4.2,
-    numberOfRatings: 18,
-    dataAiHint: "spanish tapas",
-  },
-   {
-    id: 'pub4',
-    title: 'Fresh Sushi Platter',
-    description: 'Assortment of fresh nigiri, sashimi, and maki rolls. Prepared with high-quality seafood.',
-    cuisine: 'Japanese',
-    pricePerHead: 80,
-    dietaryInfo: ['Gluten-Free (with tamari)'],
-    isPublic: true,
-    imageUrl: 'https://placehold.co/600x400.png',
-    pax: 2,
-    averageRating: 4.9,
-    numberOfRatings: 55,
-    dataAiHint: "sushi platter",
-  },
-  {
-    id: 'pub5',
-    title: 'Italian Pasta Workshop',
-    description: 'Hands-on pasta making class followed by a delicious meal with your creations.',
-    cuisine: 'Italian',
-    pricePerHead: 70,
-    dietaryInfo: ['Vegetarian Option'],
-    isPublic: true,
-    imageUrl: 'https://placehold.co/600x400.png',
-    pax: 10,
-    averageRating: 4.6,
-    numberOfRatings: 30,
-    dataAiHint: "pasta workshop",
-  },
-];
+import { collection, query, where, getDocs, orderBy, Timestamp, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { useAuth } from '@/context/AuthContext';
+import { useRouter } from 'next/navigation';
 
 export default function CustomerMenusPage() {
+  const { user } = useAuth();
+  const router = useRouter();
   const [menus, setMenus] = useState<Menu[]>([]);
+  const [isLoadingMenus, setIsLoadingMenus] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [cuisineFilter, setCuisineFilter] = useState('all');
   const [dietaryFilter, setDietaryFilter] = useState('all');
   const { toast } = useToast();
 
-  // Simulate fetching menus
   useEffect(() => {
-    // In a real app, you'd fetch this data
-    setMenus(mockPublicMenus);
-  }, []);
+    const fetchPublicMenus = async () => {
+      setIsLoadingMenus(true);
+      try {
+        const menusCollectionRef = collection(db, "menus");
+        const q = query(menusCollectionRef, where("isPublic", "==", true), orderBy("createdAt", "desc"));
+        const querySnapshot = await getDocs(q);
+        const fetchedMenus = querySnapshot.docs.map(docSnap => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+          createdAt: docSnap.data().createdAt ? (docSnap.data().createdAt as Timestamp).toDate() : undefined,
+          updatedAt: docSnap.data().updatedAt ? (docSnap.data().updatedAt as Timestamp).toDate() : undefined,
+        } as Menu));
+        setMenus(fetchedMenus);
+      } catch (error) {
+        console.error("Error fetching public menus:", error);
+        toast({
+          title: "Error Loading Menus",
+          description: "Could not fetch menus at this time. Please try again later.",
+          variant: "destructive"
+        });
+      } finally {
+        setIsLoadingMenus(false);
+      }
+    };
+    fetchPublicMenus();
+  }, [toast]);
 
-  const handleRequestMenu = (menuId: string) => {
-    const requestedMenu = menus.find(m => m.id === menuId);
-    // Simulate sending an anonymized request
-    toast({
-      title: 'Availability Check & Request Sent (Simulated)',
-      description: `Your request for "${requestedMenu?.title}" has been sent. The chef will be in touch if available.`,
-    });
-    // In a real app, this would trigger a notification/message to the chef without revealing identities yet.
+  const handleRequestMenu = async (menu: Menu) => {
+    if (!user) {
+      toast({
+        title: 'Login Required',
+        description: 'Please log in or create an account to request a menu.',
+        variant: 'destructive',
+      });
+      router.push('/login');
+      return;
+    }
+
+    try {
+      const requestsCollectionRef = collection(db, "customerRequests");
+      const newRequest: Omit<CustomerRequest, 'id' | 'createdAt' | 'updatedAt'> = {
+        eventType: `Menu Request: ${menu.title}`,
+        budget: menu.pricePerHead * (menu.pax || 1),
+        cuisinePreference: menu.cuisine,
+        pax: menu.pax || 1,
+        eventDate: Timestamp.fromDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)), // Placeholder: 7 days from now
+        notes: `Interested in the menu: "${menu.title}" by Chef ${menu.chefName || 'Unknown Chef'}.`,
+        status: 'new',
+        customerId: user.uid,
+        requestedMenuId: menu.id,
+        requestedMenuTitle: menu.title,
+        respondingChefIds: [menu.chefId], // Directly assign to the chef who owns the menu
+      };
+
+      const docRef = await addDoc(requestsCollectionRef, {
+        ...newRequest,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      toast({
+        title: 'Request Sent!',
+        description: `Your request for "${menu.title}" has been sent. Check your messages for updates.`,
+      });
+      router.push(`/customer/dashboard/messages?requestId=${docRef.id}`);
+
+    } catch (error) {
+      console.error("Error creating customer request:", error);
+      toast({
+        title: "Request Failed",
+        description: "Could not send your request. Please try again.",
+        variant: "destructive",
+      });
+    }
   };
 
   const filteredMenus = menus.filter(menu => {
     const matchesSearch = menu.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           menu.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          menu.cuisine.toLowerCase().includes(searchTerm.toLowerCase());
+                          menu.cuisine.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          (menu.chefName && menu.chefName.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesCuisine = cuisineFilter === 'all' || menu.cuisine.toLowerCase() === cuisineFilter.toLowerCase();
     const matchesDietary = dietaryFilter === 'all' || (menu.dietaryInfo && menu.dietaryInfo.some(d => d.toLowerCase().includes(dietaryFilter.toLowerCase())));
     return matchesSearch && matchesCuisine && matchesDietary;
   });
   
-  const uniqueCuisines = ['all', ...new Set(mockPublicMenus.map(menu => menu.cuisine).filter(Boolean))];
-  const uniqueDietaryOptions = ['all', ...new Set(mockPublicMenus.flatMap(menu => menu.dietaryInfo).filter(Boolean))];
-
+  const uniqueCuisines = useMemo(() => ['all', ...new Set(menus.map(menu => menu.cuisine).filter(Boolean).sort())], [menus]);
+  const uniqueDietaryOptions = useMemo(() => ['all', ...new Set(menus.flatMap(menu => menu.dietaryInfo).filter(Boolean).sort())], [menus]);
 
   return (
     <div className="container mx-auto py-12 px-4 sm:px-6 lg:px-8">
       <header className="mb-12 text-center">
         <h1 className="text-4xl font-bold tracking-tight text-foreground sm:text-5xl">Explore Our Chefs' Menus</h1>
         <p className="mt-4 max-w-2xl mx-auto text-lg text-foreground/70">
-          Discover a world of flavors. Browse menus anonymously, check availability, and request a menu to connect with talented chefs. Chef details are revealed after a booking is confirmed.
+          Discover a world of flavors. Browse menus anonymously. Chef details are revealed after a booking is confirmed.
         </p>
       </header>
 
@@ -175,14 +169,19 @@ export default function CustomerMenusPage() {
         </div>
       </Card>
 
-      {filteredMenus.length > 0 ? (
+      {isLoadingMenus ? (
+        <div className="text-center py-16">
+          <Loader2 className="mx-auto h-12 w-12 animate-spin text-primary mb-4" />
+          <p className="text-lg text-muted-foreground">Loading menus...</p>
+        </div>
+      ) : filteredMenus.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
           {filteredMenus.map(menu => (
             <MenuCard
               key={menu.id}
               menu={menu}
-              showChefDetails={false} // Anonymized: chef details not shown
-              onRequest={handleRequestMenu}
+              showChefDetails={false} 
+              onRequest={() => handleRequestMenu(menu)}
             />
           ))}
         </div>

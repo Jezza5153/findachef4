@@ -91,7 +91,7 @@ export interface CustomerRequest {
   eventDate: any; // Firestore Timestamp
   notes?: string;
   customerId: string;
-  status?: 'new' | 'awaiting_customer_response' | 'proposal_sent' | 'chef_declined' | 'chef_accepted' | 'customer_confirmed' | 'proposal_declined' | 'booked' | 'cancelled_by_customer';
+  status?: 'new' | 'awaiting_customer_response' | 'proposal_sent' | 'chef_declined' | 'chef_accepted' | 'customer_confirmed' | 'booked' | 'cancelled_by_customer';
   createdAt?: any; // Firestore Timestamp
   updatedAt?: any; // Firestore Timestamp
   respondingChefIds?: string[];
@@ -100,20 +100,22 @@ export interface CustomerRequest {
     menuTitle: string;
     menuPricePerHead: number;
     chefId: string;
-    chefName: string; // Denormalized for easier display
-    chefAvatarUrl?: string; // Denormalized
+    chefName: string; 
+    chefAvatarUrl?: string; 
     notes?: string;
     proposedAt: any; // Firestore Timestamp
   };
-  declinedChefIds?: string[]; // Optional: to track chefs who declined
+  declinedChefIds?: string[];
+  requestedMenuId?: string; // ID of the menu if request originated from "Request This Menu"
+  requestedMenuTitle?: string; // Title of the menu
 }
 
 export interface RequestMessage {
-  id: string; // Firestore document ID
-  requestId: string; // ID of the parent CustomerRequest
-  senderId: string; // UID of the sender
-  senderName?: string; // Denormalized sender name
-  senderAvatarUrl?: string; // Denormalized sender avatar
+  id: string; 
+  requestId: string; 
+  senderId: string; 
+  senderName?: string; 
+  senderAvatarUrl?: string; 
   senderRole: 'chef' | 'customer' | 'system';
   text: string;
   timestamp: any; // Firestore Timestamp
@@ -215,8 +217,8 @@ export interface CustomerProfile {
   addressDetails?: string;
   defaultEventType?: string;
   defaultPax?: number;
-  defaultBudget?: string; // This was potentially a duplicate or for text display
-  defaultBudgetAmount?: number; // Main numeric budget
+  defaultBudget?: string; 
+  defaultBudgetAmount?: number; 
   defaultFrequency?: string;
   defaultTheme?: string;
   defaultDietaryNotes?: string;
@@ -256,10 +258,10 @@ export interface TaxAdviceOutput {
 
 export interface ActivityItem {
   id: string;
-  type: string; // e.g., 'new_booking_request', 'menu_published', 'new_message'
+  type: string; 
   description: string;
   timestamp: any; // Firestore Timestamp
-  linkTo?: string; // e.g., /chef/dashboard/requests/XYZ
+  linkTo?: string; 
   isRead?: boolean;
 }
 
@@ -289,18 +291,18 @@ export interface ReceiptParserOutput {
 export interface Booking {
   id: string;
   customerId: string;
-  customerName?: string; // Denormalized for easier display
+  customerName?: string; 
   chefId: string;
-  chefName?: string; // Denormalized
-  chefAvatarUrl?: string; // Denormalized
-  eventId?: string; // If booked from a ChefWallEvent
-  menuId?: string; // If a specific menu was booked
-  menuTitle?: string; // Denormalized
-  requestId?: string; // If booked from a CustomerRequest
-  eventTitle: string; // Could be from menu title, event title, or request type
+  chefName?: string; 
+  chefAvatarUrl?: string; 
+  eventId?: string; 
+  menuId?: string; 
+  menuTitle?: string; 
+  requestId?: string; 
+  eventTitle: string; 
   eventDate: any; // Firestore Timestamp
   pax: number;
-  pricePerHead?: number; // If applicable
+  pricePerHead?: number; 
   totalPrice: number;
   status: 'pending_chef_acceptance' | 'confirmed' | 'completed' | 'cancelled_by_customer' | 'cancelled_by_chef' | 'payment_failed';
   createdAt: any; // Firestore Timestamp

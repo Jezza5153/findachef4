@@ -41,7 +41,7 @@ import type { ShoppingListItem } from '@/types';
 import { PlusCircle, Trash2, ShoppingCart, FileDown, Edit, DollarSign, Loader2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, query, where, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, deleteDoc, query, serverTimestamp, Timestamp, onSnapshot, orderBy } from 'firebase/firestore';
 
 const shoppingListItemSchema = z.object({
   name: z.string().min(1, { message: 'Item name is required.' }),
@@ -49,6 +49,8 @@ const shoppingListItemSchema = z.object({
   unit: z.string().min(1, { message: 'Unit is required (e.g., kg, pcs, L).' }),
   estimatedCost: z.coerce.number().min(0, { message: 'Estimated cost must be a positive number.' }),
   notes: z.string().optional(),
+  menuId: z.string().optional(), // To link back to a menu
+  eventId: z.string().optional(), // To link back to an event
 });
 
 type ShoppingListItemFormValues = z.infer<typeof shoppingListItemSchema>;
@@ -57,6 +59,7 @@ export default function ShoppingListPage() {
   const { user } = useAuth();
   const [items, setItems] = useState<ShoppingListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAddItemDialogOpen, setIsAddItemDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<ShoppingListItem | null>(null);
   const { toast } = useToast();
@@ -69,30 +72,37 @@ export default function ShoppingListPage() {
       unit: '',
       estimatedCost: 0,
       notes: '',
+      menuId: '',
+      eventId: '',
     },
   });
 
   useEffect(() => {
-    const fetchItems = async () => {
-      if (!user) {
-        setIsLoading(false);
-        return;
-      }
-      setIsLoading(true);
-      try {
-        const itemsCollectionRef = collection(db, "users", user.uid, "shoppingListItems");
-        const q = query(itemsCollectionRef, orderBy("createdAt", "desc"));
-        const querySnapshot = await getDocs(q);
-        const fetchedItems = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ShoppingListItem));
-        setItems(fetchedItems);
-      } catch (error) {
-        console.error("Error fetching shopping list items:", error);
-        toast({ title: "Error", description: "Could not fetch shopping list items.", variant: "destructive" });
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    fetchItems();
+    if (!user) {
+      setIsLoading(false);
+      setItems([]);
+      return;
+    }
+    setIsLoading(true);
+    const itemsCollectionRef = collection(db, "users", user.uid, "shoppingListItems");
+    const q = query(itemsCollectionRef, orderBy("createdAt", "desc"));
+    
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      const fetchedItems = querySnapshot.docs.map(docSnap => ({ 
+        id: docSnap.id, 
+        ...docSnap.data(),
+        createdAt: docSnap.data().createdAt ? (docSnap.data().createdAt as Timestamp).toDate() : undefined,
+        updatedAt: docSnap.data().updatedAt ? (docSnap.data().updatedAt as Timestamp).toDate() : undefined,
+      } as ShoppingListItem));
+      setItems(fetchedItems);
+      setIsLoading(false);
+    }, (error) => {
+      console.error("Error fetching shopping list items:", error);
+      toast({ title: "Error", description: "Could not fetch shopping list items.", variant: "destructive" });
+      setIsLoading(false);
+    });
+    
+    return () => unsubscribe();
   }, [user, toast]);
 
   const openAddItemDialog = (itemToEdit: ShoppingListItem | null = null) => {
@@ -104,6 +114,8 @@ export default function ShoppingListPage() {
         unit: itemToEdit.unit,
         estimatedCost: itemToEdit.estimatedCost,
         notes: itemToEdit.notes || '',
+        menuId: itemToEdit.menuId || '',
+        eventId: itemToEdit.eventId || '',
       });
     } else {
       form.reset({
@@ -112,6 +124,8 @@ export default function ShoppingListPage() {
         unit: '',
         estimatedCost: 0,
         notes: '',
+        menuId: '',
+        eventId: '',
       });
     }
     setIsAddItemDialogOpen(true);
@@ -122,12 +136,12 @@ export default function ShoppingListPage() {
       toast({ title: "Error", description: "You must be logged in.", variant: "destructive" });
       return;
     }
+    setIsSubmitting(true);
     
     const itemData = {
       ...data,
       chefId: user.uid,
       purchased: editingItem ? editingItem.purchased : false,
-      createdAt: editingItem ? editingItem.createdAt : serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
 
@@ -135,11 +149,12 @@ export default function ShoppingListPage() {
       if (editingItem) {
         const itemDocRef = doc(db, "users", user.uid, "shoppingListItems", editingItem.id);
         await updateDoc(itemDocRef, itemData);
-        setItems(items.map(item => item.id === editingItem.id ? { ...editingItem, ...itemData, id: editingItem.id } : item));
         toast({ title: 'Item Updated', description: `"${data.name}" has been updated.` });
       } else {
-        const docRef = await addDoc(collection(db, "users", user.uid, "shoppingListItems"), itemData);
-        setItems([{ ...itemData, id: docRef.id }, ...items]);
+        await addDoc(collection(db, "users", user.uid, "shoppingListItems"), {
+          ...itemData,
+          createdAt: serverTimestamp(),
+        });
         toast({ title: 'Item Added', description: `"${data.name}" has been added.` });
       }
       form.reset();
@@ -148,6 +163,8 @@ export default function ShoppingListPage() {
     } catch (error) {
         console.error("Error saving shopping list item:", error);
         toast({ title: "Save Error", description: "Could not save item.", variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -157,7 +174,6 @@ export default function ShoppingListPage() {
     if (window.confirm(`Are you sure you want to delete "${itemToDelete?.name}"?`)) {
       try {
         await deleteDoc(doc(db, "users", user.uid, "shoppingListItems", itemId));
-        setItems(items.filter(item => item.id !== itemId));
         toast({ title: 'Item Deleted', description: `"${itemToDelete?.name}" removed.`, variant: "destructive" });
       } catch (error) {
         console.error("Error deleting item:", error);
@@ -173,8 +189,7 @@ export default function ShoppingListPage() {
       const newPurchasedStatus = !itemToUpdate.purchased;
       try {
         const itemDocRef = doc(db, "users", user.uid, "shoppingListItems", itemId);
-        await updateDoc(itemDocRef, { purchased: newPurchasedStatus });
-        setItems(items.map(item => item.id === itemId ? { ...item, purchased: newPurchasedStatus } : item));
+        await updateDoc(itemDocRef, { purchased: newPurchasedStatus, updatedAt: serverTimestamp() });
       } catch (error) {
         console.error("Error updating purchased status:", error);
         toast({ title: "Update Error", description: "Could not update status.", variant: "destructive" });
@@ -193,10 +208,38 @@ export default function ShoppingListPage() {
   }, [items]);
 
   const handleExportToCSV = () => {
-    toast({
-      title: 'Export to CSV (Placeholder)',
-      description: 'This feature is a placeholder. Real CSV export requires backend logic.',
-    });
+    if (items.length === 0) {
+      toast({ title: "No Data", description: "Shopping list is empty.", variant: "default" });
+      return;
+    }
+    const headers = ["Name", "Quantity", "Unit", "Estimated Cost (Total)", "Notes", "Purchased", "Menu ID", "Event ID"];
+    const csvRows = [
+      headers.join(','),
+      ...items.map(item => [
+        `"${item.name.replace(/"/g, '""')}"`, // Escape double quotes
+        item.quantity,
+        `"${item.unit.replace(/"/g, '""')}"`,
+        (item.estimatedCost * item.quantity).toFixed(2),
+        `"${(item.notes || '').replace(/"/g, '""')}"`,
+        item.purchased ? "Yes" : "No",
+        `"${(item.menuId || '').replace(/"/g, '""')}"`,
+        `"${(item.eventId || '').replace(/"/g, '""')}"`,
+      ].join(','))
+    ];
+    const csvString = csvRows.join('\n');
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    if (link.download !== undefined) {
+      const url = URL.createObjectURL(blob);
+      link.setAttribute("href", url);
+      link.setAttribute("download", "shopping_list.csv");
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
+    toast({ title: 'Export Successful', description: 'Shopping list exported to CSV.' });
   };
 
   if (isLoading) {
@@ -214,7 +257,7 @@ export default function ShoppingListPage() {
         <h1 className="text-3xl font-bold flex items-center">
           <ShoppingCart className="mr-3 h-8 w-8 text-primary" /> My Shopping List
         </h1>
-        <Button onClick={() => openAddItemDialog()}>
+        <Button onClick={() => openAddItemDialog()} disabled={isSubmitting}>
           <PlusCircle className="mr-2 h-5 w-5" /> Add New Item
         </Button>
       </div>
@@ -283,11 +326,35 @@ export default function ShoppingListPage() {
                   </FormItem>
                 )}
               />
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={form.control}
+                  name="menuId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Link to Menu ID (Optional)</FormLabel>
+                      <FormControl><Input placeholder="e.g., menuXYZ" {...field} /></FormControl>
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="eventId"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Link to Event ID (Optional)</FormLabel>
+                      <FormControl><Input placeholder="e.g., event123" {...field} /></FormControl>
+                    </FormItem>
+                  )}
+                />
+              </div>
               <DialogFooter>
                 <DialogClose asChild>
-                  <Button type="button" variant="outline">Cancel</Button>
+                  <Button type="button" variant="outline" disabled={isSubmitting}>Cancel</Button>
                 </DialogClose>
-                <Button type="submit">{editingItem ? 'Save Changes' : 'Add Item'}</Button>
+                <Button type="submit" disabled={isSubmitting}>
+                  {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (editingItem ? 'Save Changes' : 'Add Item')}
+                  </Button>
               </DialogFooter>
             </form>
           </Form>
@@ -309,6 +376,7 @@ export default function ShoppingListPage() {
                   <TableHead>Unit</TableHead>
                   <TableHead className="text-right">Est. Cost (Total)</TableHead>
                   <TableHead>Notes</TableHead>
+                  <TableHead>Linked To</TableHead>
                   <TableHead className="text-right w-[120px]">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -329,12 +397,16 @@ export default function ShoppingListPage() {
                       ${(item.estimatedCost * item.quantity).toFixed(2)}
                     </TableCell>
                     <TableCell className={`text-xs text-muted-foreground ${item.purchased ? 'line-through' : ''}`}>{item.notes}</TableCell>
+                    <TableCell className="text-xs">
+                        {item.menuId && <div>Menu: {item.menuId.substring(0,6)}...</div>}
+                        {item.eventId && <div>Event: {item.eventId.substring(0,6)}...</div>}
+                    </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="icon" onClick={() => openAddItemDialog(item)} className="mr-1">
+                      <Button variant="ghost" size="icon" onClick={() => openAddItemDialog(item)} className="mr-1" disabled={isSubmitting}>
                         <Edit className="h-4 w-4" />
                         <span className="sr-only">Edit</span>
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={() => handleDeleteItem(item.id)} className="text-destructive hover:text-destructive">
+                      <Button variant="ghost" size="icon" onClick={() => handleDeleteItem(item.id)} className="text-destructive hover:text-destructive" disabled={isSubmitting}>
                         <Trash2 className="h-4 w-4" />
                         <span className="sr-only">Delete</span>
                       </Button>
@@ -362,7 +434,7 @@ export default function ShoppingListPage() {
       </Card>
       
       <div className="flex justify-end mt-6">
-        <Button onClick={handleExportToCSV} variant="outline">
+        <Button onClick={handleExportToCSV} variant="outline" disabled={items.length === 0}>
           <FileDown className="mr-2 h-5 w-5" /> Export to CSV
         </Button>
       </div>
