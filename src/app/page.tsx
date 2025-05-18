@@ -54,13 +54,13 @@ export default function Home() {
       {/* Hero Section */}
       <section className="relative py-20 md:py-32 bg-gradient-to-br from-blue-100 via-slate-50 to-orange-100">
         <div className="absolute inset-0">
-            <Image 
-              src="https://placehold.co/1920x1080.png" 
-              alt="Gourmet food platter" 
-              layout="fill" 
-              objectFit="cover" 
-              className="opacity-20"
+            <Image
+              src="https://placehold.co/1920x1080.png"
+              alt="Gourmet food platter"
+              fill
+              className="object-cover opacity-20"
               data-ai-hint="gourmet food"
+              priority
             />
         </div>
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
@@ -73,7 +73,7 @@ export default function Home() {
           </p>
           <div className="mt-10 flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4">
             <Button asChild size="lg" className="text-lg px-8 py-4 bg-primary hover:bg-primary/90 text-primary-foreground">
-              <Link href="/customer/menus">I’m a Customer</Link>
+              <Link href="/login">I’m a Customer</Link>
             </Button>
             <Button asChild size="lg" variant="outline" className="text-lg px-8 py-4 border-primary text-primary hover:bg-primary/10">
               <Link href="/chef/signup">I’m a Chef</Link>
@@ -146,11 +146,11 @@ export default function Home() {
                   <p className="text-foreground/80 italic">"{testimonial.text}"</p>
                 </CardContent>
                 <CardHeader className="flex flex-row items-center space-x-4 pt-4 mt-auto">
-                  <Image 
-                    src={testimonial.avatarUrl!} 
-                    alt={testimonial.customerName} 
-                    width={50} 
-                    height={50} 
+                  <Image
+                    src={testimonial.avatarUrl!}
+                    alt={testimonial.customerName}
+                    width={50}
+                    height={50}
                     className="rounded-full"
                     data-ai-hint="person avatar"
                   />
