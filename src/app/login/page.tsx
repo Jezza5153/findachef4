@@ -15,15 +15,15 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { LogIn } from 'lucide-react';
+import { LogIn, Loader2 } from 'lucide-react'; // Added Loader2
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth'; // Added sendPasswordResetEmail
 import { auth, db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { useState } from 'react';
-import type { ChefProfile } from '@/types'; // Import ChefProfile type
+import type { ChefProfile, CustomerProfile } from '@/types'; // Assuming CustomerProfile might be relevant
 
 const loginSchema = z.object({
   email: z.string().email({ message: 'Invalid email address.' }),
@@ -58,22 +58,35 @@ export default function LoginPage() {
 
       // AuthContext will handle fetching profile and determining redirection
       // based on the profile data from Firestore.
-      // The redirection will occur in the dashboard layouts based on AuthContext state.
-      
-      // For now, we'll do a simple default redirect.
-      // The dashboard layouts will then check the role from AuthContext (which fetches from Firestore).
-
-      // Attempt to fetch Firestore profile to determine role for initial redirect hint
-      // This is a bit redundant as AuthContext will do it, but helps direct immediately.
+      // For now, let's determine role here for immediate redirect.
       let roleForRedirect = 'customer'; // Default
+      let isChefApproved = false;
+      let isChefSubscribed = false;
+
       if (user) {
         const userDocRef = doc(db, "users", user.uid);
         const userDoc = await getDoc(userDocRef);
         if (userDoc.exists()) {
-          const userData = userDoc.data();
+          const userData = userDoc.data() as ChefProfile | CustomerProfile;
           roleForRedirect = userData.role || 'customer';
+          if (userData.role === 'chef') {
+            isChefApproved = (userData as ChefProfile).isApproved || false;
+            isChefSubscribed = (userData as ChefProfile).isSubscribed || false;
+          }
+        } else {
+          // If no profile, might be an old user or needs profile setup
+          // For demo, keep default role as customer
+          console.warn("No profile document found for user:", user.uid);
         }
       }
+      
+      // The AuthContext will now fetch and store this. No need to set in localStorage here.
+      // localStorage.setItem('userName', user.displayName || data.email.split('@')[0]);
+      // localStorage.setItem('userRole', roleForRedirect);
+      // if (roleForRedirect === 'chef') {
+      //   localStorage.setItem('isChefApproved', String(isChefApproved));
+      //   localStorage.setItem('isChefSubscribed', String(isChefSubscribed));
+      // }
 
       if (roleForRedirect === 'chef') {
         router.push('/chef/dashboard');
@@ -92,6 +105,46 @@ export default function LoginPage() {
       toast({
         title: 'Login Failed',
         description: errorMessage,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handlePasswordReset = async () => {
+    const email = form.getValues('email');
+    if (!email) {
+      toast({
+        title: 'Email Required',
+        description: 'Please enter your email address to reset your password.',
+        variant: 'destructive',
+      });
+      form.setError('email', { type: 'manual', message: 'Email is required for password reset.' });
+      return;
+    }
+    if (!z.string().email().safeParse(email).success) {
+        toast({
+            title: 'Invalid Email',
+            description: 'Please enter a valid email address.',
+            variant: 'destructive',
+        });
+        form.setError('email', { type: 'manual', message: 'Please enter a valid email address.' });
+        return;
+    }
+
+    setIsLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, email);
+      toast({
+        title: 'Password Reset Email Sent',
+        description: 'If an account exists for this email, a password reset link has been sent. Please check your inbox.',
+      });
+    } catch (error: any) {
+      console.error('Password reset error:', error);
+      toast({
+        title: 'Password Reset Failed',
+        description: error.message || 'Could not send password reset email. Please try again.',
         variant: 'destructive',
       });
     } finally {
@@ -141,15 +194,15 @@ export default function LoginPage() {
                 )}
               />
               <Button type="submit" className="w-full text-lg py-3" size="lg" disabled={isLoading || form.formState.isSubmitting}>
-                {isLoading ? 'Logging in...' : <><LogIn className="mr-2 h-5 w-5" /> Login</>}
+                {isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <><LogIn className="mr-2 h-5 w-5" /> Login</>}
               </Button>
             </form>
           </Form>
           <div className="mt-6 space-y-3 text-center text-sm">
             <p>
-              <Link href="#" className="font-medium text-primary hover:underline">
+              <Button variant="link" onClick={handlePasswordReset} className="p-0 h-auto font-medium text-primary hover:underline" disabled={isLoading}>
                 Forgot Password?
-              </Link>
+              </Button>
             </p>
             <p>
               New to FindAChef?{' '}

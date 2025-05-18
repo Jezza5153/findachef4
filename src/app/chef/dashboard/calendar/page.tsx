@@ -9,10 +9,21 @@ import type { CalendarEvent, ChefProfile } from '@/types';
 import { format, parseISO, isSameDay, startOfDay } from 'date-fns';
 import { CalendarDays, Users, DollarSign, MapPin, Utensils, Info, Sun, ChefHat, AlertTriangle, CheckCircle, Clock, QrCode, Ban, Loader2, InfoIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { doc, getDoc, updateDoc, Timestamp, collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, Timestamp, collection, query, orderBy } from 'firebase/firestore';
 
 export default function ChefCalendarPage() {
   const { user, userProfile } = useAuth();
@@ -20,6 +31,8 @@ export default function ChefCalendarPage() {
   const [allEvents, setAllEvents] = useState<CalendarEvent[]>([]); 
   const [blockedDates, setBlockedDates] = useState<Date[]>([]);
   const [isLoadingCalendarData, setIsLoadingCalendarData] = useState(true);
+  const [isEventDetailsDialogOpen, setIsEventDetailsDialogOpen] = useState(false);
+  const [selectedEventForDialog, setSelectedEventForDialog] = useState<CalendarEvent | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -43,7 +56,6 @@ export default function ChefCalendarPage() {
           setBlockedDates([]);
         }
       }
-      // Consider setIsLoading to false only after both subscriptions are active or have failed
     }, (error) => {
       console.error("Error fetching user profile for blocked dates:", error);
       toast({ title: "Error", description: "Could not fetch blocked dates.", variant: "destructive" });
@@ -54,16 +66,18 @@ export default function ChefCalendarPage() {
     const q = query(eventsCollectionRef, orderBy("date", "asc")); // Order by date
     
     unsubscribeCalendarEvents = onSnapshot(q, (querySnapshot) => {
-      const fetchedEvents = querySnapshot.docs.map(doc => {
-        const data = doc.data();
+      const fetchedEvents = querySnapshot.docs.map(docSnap => {
+        const data = docSnap.data();
         return {
-          id: doc.id,
+          id: docSnap.id,
           ...data,
-          date: (data.date as Timestamp).toDate(), // Convert Firestore Timestamp to Date
+          date: (data.date as Timestamp).toDate(), 
+          createdAt: data.createdAt ? (data.createdAt as Timestamp).toDate() : undefined,
+          updatedAt: data.updatedAt ? (data.updatedAt as Timestamp).toDate() : undefined,
         } as CalendarEvent;
       });
       setAllEvents(fetchedEvents);
-      setIsLoadingCalendarData(false); // Set loading to false after events are fetched
+      setIsLoadingCalendarData(false); 
     }, (error) => {
       console.error("Error fetching calendar events:", error);
       toast({ title: "Error", description: "Could not fetch calendar events.", variant: "destructive" });
@@ -111,7 +125,7 @@ export default function ChefCalendarPage() {
   const handleGoogleCalendarSync = () => {
     toast({
         title: "Google Calendar Sync (Placeholder)",
-        description: "This feature is a placeholder. Real integration requires backend setup.",
+        description: "This feature is a placeholder. Real integration requires backend setup and Google API integration.",
     });
   };
 
@@ -139,13 +153,12 @@ export default function ChefCalendarPage() {
     } else {
       newBlockedDatesIso = [...blockedDates, dateToToggle]
         .map(d => d.toISOString().split('T')[0])
-        .sort(); // Keep sorted for consistency
+        .sort(); 
     }
     
     try {
       const userDocRef = doc(db, "users", user.uid);
       await updateDoc(userDocRef, { blockedDates: newBlockedDatesIso });
-      // No need to call setBlockedDates here, onSnapshot will update it
       toast({ 
         title: alreadyBlocked ? "Date Unblocked" : "Date Blocked", 
         description: `${format(dateToToggle, 'PPP')} is now ${alreadyBlocked ? 'available' : 'marked as unavailable.'}` 
@@ -154,6 +167,11 @@ export default function ChefCalendarPage() {
       console.error("Error updating blocked dates:", error);
       toast({ title: "Update Error", description: "Could not update blocked status.", variant: "destructive"});
     }
+  };
+
+  const openEventDetailsDialog = (event: CalendarEvent) => {
+    setSelectedEventForDialog(event);
+    setIsEventDetailsDialogOpen(true);
   };
 
   if (isLoadingCalendarData) {
@@ -290,7 +308,7 @@ export default function ChefCalendarPage() {
                   )}
                 </CardContent>
                 <CardFooter className="flex flex-col items-start space-y-2 pt-4 border-t">
-                    {event.status === 'Confirmed' && !event.isWallEvent && ( // Only show QR for confirmed client bookings
+                    {event.status === 'Confirmed' && !event.isWallEvent && ( 
                         <>
                             <p className="text-xs text-muted-foreground">
                                 <strong>Event Completion:</strong> At the event, the customer will provide a QR code. Scan it to confirm completion and initiate the release of the remaining 50% of your funds. Remember to upload all related receipts.
@@ -302,7 +320,9 @@ export default function ChefCalendarPage() {
                         </>
                     )}
                     {(event.status === 'Confirmed' || event.status === 'Pending' || event.status === 'WallEvent') && (
-                         <Button variant="link" size="sm" className="p-0 h-auto text-xs text-blue-500 hover:underline">View/Edit Details (Placeholder)</Button>
+                        <Button variant="link" size="sm" onClick={() => openEventDetailsDialog(event)} className="p-0 h-auto text-xs text-blue-500 hover:underline">
+                          View/Edit Details
+                        </Button>
                     )}
                     {event.status === 'Cancelled' && (
                         <p className="text-xs text-destructive">This event has been cancelled.</p>
@@ -331,9 +351,23 @@ export default function ChefCalendarPage() {
            )}
         </div>
       </div>
+
+      <AlertDialog open={isEventDetailsDialogOpen} onOpenChange={setIsEventDetailsDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{selectedEventForDialog?.title || "Event Details"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              Full event details and editing functionality will be available here soon.
+              For now, this serves as a placeholder.
+              {selectedEventForDialog && <p className="mt-2 text-xs">Event ID: {selectedEventForDialog.id}</p>}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Close</AlertDialogCancel>
+            {/* <AlertDialogAction>Edit (Placeholder)</AlertDialogAction> */}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
-
-
-    
