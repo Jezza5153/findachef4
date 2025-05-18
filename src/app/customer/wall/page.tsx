@@ -6,19 +6,39 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { CalendarSearch, Users, DollarSign, MapPin, Utensils, Search, InfoIcon, Loader2, CalendarClock, ChefHat } from 'lucide-react';
+import { CalendarSearch, Users, DollarSign, MapPin, Search, Loader2, CalendarClock, ChefHat, Image as ImageIconLucide } from 'lucide-react';
 import Image from 'next/image';
-import type { ChefWallEvent } from '@/types';
+import type { ChefWallEvent, Booking, CalendarEvent } from '@/types';
 import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, Timestamp, addDoc, serverTimestamp, doc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
+import { useAuth } from '@/context/AuthContext';
+import { useRouter } from 'next/navigation';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export default function CustomerWallPage() {
   const [allEvents, setAllEvents] = useState<ChefWallEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const { toast } = useToast();
+  const { user } = useAuth();
+  const router = useRouter();
+
+  const [isEventDetailsDialogOpen, setIsEventDetailsDialogOpen] = useState(false);
+  const [selectedEventForDetails, setSelectedEventForDetails] = useState<ChefWallEvent | null>(null);
+  const [isBookingConfirmationDialogOpen, setIsBookingConfirmationDialogOpen] = useState(false);
+  const [isBookingEvent, setIsBookingEvent] = useState(false);
+
 
   useEffect(() => {
     const fetchPublicEvents = async () => {
@@ -28,19 +48,17 @@ export default function CustomerWallPage() {
         const q = query(
           eventsCollectionRef,
           where("isPublic", "==", true),
-          orderBy("eventDateTime", "asc") // Show upcoming events first
+          orderBy("eventDateTime", "asc")
         );
         const querySnapshot = await getDocs(q);
-        const fetchedEvents = querySnapshot.docs.map(doc => {
-          const data = doc.data();
+        const fetchedEvents = querySnapshot.docs.map(docSnap => {
+          const data = docSnap.data();
           return {
-            id: doc.id,
+            id: docSnap.id,
             ...data,
-            // Ensure eventDateTime is a string; convert if it's a Timestamp
-            eventDateTime: data.eventDateTime instanceof Timestamp ? data.eventDateTime.toDate().toISOString() : data.eventDateTime,
-            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : data.createdAt,
-            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : data.updatedAt,
-
+            eventDateTime: data.eventDateTime instanceof Timestamp ? data.eventDateTime.toDate().toISOString() : data.eventDateTime as string,
+            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : undefined),
+            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt) : undefined),
           } as ChefWallEvent;
         });
         setAllEvents(fetchedEvents);
@@ -70,30 +88,105 @@ export default function CustomerWallPage() {
     );
   }, [allEvents, searchTerm]);
 
-  const formatEventDateTimeForDisplay = (dateTimeString: string) => {
+  const formatEventDateTimeForDisplay = (dateTimeString: string | undefined) => {
+    if (!dateTimeString) return "Date TBD";
     try {
       const date = new Date(dateTimeString);
       if (isNaN(date.getTime())) return "Invalid Date";
       return format(date, "MMM d, yyyy 'at' h:mm a");
     } catch (e) {
-      return dateTimeString; 
+      return String(dateTimeString); 
     }
   };
   
-  const handleViewEventDetails = (eventId: string) => {
-    // Placeholder: In a real app, this would navigate to a detailed event page
-    // or open a modal with more information and registration options.
-    toast({
-      title: "View Event Details (Placeholder)",
-      description: `Further details and registration for event ${eventId.substring(0,6)}... would be shown here.`,
-    });
+  const handleViewEventDetails = (event: ChefWallEvent) => {
+    setSelectedEventForDetails(event);
+    setIsEventDetailsDialogOpen(true);
+  };
+
+  const handleBookEventConfirmation = () => {
+    if (!selectedEventForDetails) return;
+    if (!user) {
+      toast({
+        title: "Login Required",
+        description: "Please log in to book an event.",
+        variant: "destructive",
+      });
+      router.push('/login');
+      return;
+    }
+    setIsEventDetailsDialogOpen(false); // Close details dialog
+    setIsBookingConfirmationDialogOpen(true); // Open booking confirmation dialog
+  };
+
+  const handleConfirmBooking = async () => {
+    if (!user || !selectedEventForDetails) {
+      toast({ title: "Error", description: "User or event details missing.", variant: "destructive" });
+      return;
+    }
+    setIsBookingEvent(true);
+    try {
+      const newBookingRef = doc(collection(db, "bookings"));
+      const bookingData: Omit<Booking, 'id'> = {
+        customerId: user.uid,
+        chefId: selectedEventForDetails.chefId,
+        chefName: selectedEventForDetails.chefName,
+        chefAvatarUrl: selectedEventForDetails.chefAvatarUrl,
+        eventTitle: selectedEventForDetails.title,
+        eventDate: Timestamp.fromDate(new Date(selectedEventForDetails.eventDateTime)),
+        pax: selectedEventForDetails.maxPax, // Assuming maxPax is the number of tickets for this event
+        totalPrice: selectedEventForDetails.pricePerPerson * selectedEventForDetails.maxPax, // Or just pricePerPerson if it's a ticket
+        pricePerHead: selectedEventForDetails.pricePerPerson,
+        status: 'confirmed', // Assuming direct booking of public event confirms it
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        menuTitle: `Event: ${selectedEventForDetails.title}`, // Or more specific if a menu is tied to the wall event
+        location: selectedEventForDetails.location,
+        // requestId: undefined, // Not from a customer request
+        chefWallEventId: selectedEventForDetails.id, // Link back to the ChefWallEvent
+      };
+      await addDoc(collection(db, "bookings"), bookingData);
+      
+      // Add to chef's personal calendar
+      const calendarEventData: Omit<CalendarEvent, 'id' | 'createdAt' | 'updatedAt'> = {
+        chefId: selectedEventForDetails.chefId,
+        date: Timestamp.fromDate(new Date(selectedEventForDetails.eventDateTime)),
+        title: `Booking: ${selectedEventForDetails.title}`,
+        customerName: user.displayName || "Customer",
+        pax: selectedEventForDetails.maxPax,
+        menuName: `Event: ${selectedEventForDetails.title}`,
+        pricePerHead: selectedEventForDetails.pricePerPerson,
+        location: selectedEventForDetails.location,
+        notes: `Booked via Chef's Wall. Event ID: ${selectedEventForDetails.id}. Booking ID: ${newBookingRef.id}`,
+        status: 'Confirmed',
+        isWallEvent: true, // Indicates this calendar event originated from a wall post booking
+      };
+      await setDoc(doc(db, `users/${selectedEventForDetails.chefId}/calendarEvents`, newBookingRef.id), {
+        ...calendarEventData,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      toast({
+        title: "Event Booked!",
+        description: `You've successfully booked "${selectedEventForDetails.title}". Check 'My Booked Events'.`,
+      });
+      router.push('/customer/dashboard/events');
+    } catch (error) {
+      console.error("Error booking event:", error);
+      toast({ title: "Booking Failed", description: "Could not book the event. Please try again.", variant: "destructive" });
+    } finally {
+      setIsBookingEvent(false);
+      setIsBookingConfirmationDialogOpen(false);
+      setSelectedEventForDetails(null);
+    }
   };
 
 
   if (isLoading) {
     return (
       <div className="container mx-auto py-12 px-4 sm:px-6 lg:px-8 text-center">
-        <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
+        <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" data-ai-hint="loading spinner"/>
         <p className="text-lg text-muted-foreground">Loading chef events...</p>
       </div>
     );
@@ -121,15 +214,6 @@ export default function CustomerWallPage() {
             className="pl-10 w-full"
           />
         </div>
-        {/* Placeholder for more advanced tag filtering */}
-        {/* <div className="mt-4">
-          <p className="text-sm font-medium text-muted-foreground">Filter by tags:</p>
-          <div className="flex flex-wrap gap-2 mt-2">
-            <Button variant="outline" size="sm">Italian</Button>
-            <Button variant="outline" size="sm">Vegan</Button>
-            <Button variant="outline" size="sm">Pop-Up</Button>
-          </div>
-        </div> */}
       </Card>
 
       {filteredEvents.length > 0 ? (
@@ -147,8 +231,8 @@ export default function CustomerWallPage() {
                   onError={(e) => { (e.target as HTMLImageElement).src = "https://placehold.co/600x300.png?text=Image+Error"; }}
                 />
               ) : (
-                <div className="w-full h-56 bg-muted flex items-center justify-center text-muted-foreground" data-ai-hint="event placeholder">
-                  <CalendarSearch className="h-20 w-20 opacity-50" />
+                <div className="w-full h-56 bg-muted flex items-center justify-center text-muted-foreground" data-ai-hint="event placeholder image">
+                  <ImageIconLucide className="h-20 w-20 opacity-50" />
                 </div>
               )}
               <CardHeader className="pb-3">
@@ -161,7 +245,7 @@ export default function CustomerWallPage() {
                 <p className="line-clamp-3 text-foreground/80">{event.description}</p>
                 <div className="flex items-center text-muted-foreground"><CalendarClock className="mr-2 h-4 w-4 text-primary" /> {formatEventDateTimeForDisplay(event.eventDateTime)}</div>
                 <div className="flex items-center text-muted-foreground"><MapPin className="mr-2 h-4 w-4 text-primary" /> {event.location}</div>
-                <div className="flex items-center text-muted-foreground"><DollarSign className="mr-2 h-4 w-4 text-green-600" /> ${event.pricePerPerson}/person</div>
+                <div className="flex items-center text-muted-foreground"><DollarSign className="mr-2 h-4 w-4 text-green-600" /> ${event.pricePerPerson.toFixed(2)}/person</div>
                 <div className="flex items-center text-muted-foreground"><Users className="mr-2 h-4 w-4 text-primary" /> Up to {event.maxPax} guests</div>
                 {event.tags && event.tags.length > 0 && (
                   <div className="pt-2">
@@ -173,7 +257,7 @@ export default function CustomerWallPage() {
                 )}
               </CardContent>
               <CardFooter className="p-4 border-t bg-muted/20">
-                <Button className="w-full" onClick={() => handleViewEventDetails(event.id)}>
+                <Button className="w-full" onClick={() => handleViewEventDetails(event)}>
                   View Details & Book
                 </Button>
               </CardFooter>
@@ -182,14 +266,70 @@ export default function CustomerWallPage() {
         </div>
       ) : (
         <div className="text-center py-16 col-span-full">
-          <CalendarSearch className="mx-auto h-16 w-16 text-muted-foreground mb-4" />
+          <CalendarSearch className="mx-auto h-16 w-16 text-muted-foreground mb-4" data-ai-hint="empty search" />
           <h2 className="text-2xl font-semibold text-foreground">No Chef Events Found</h2>
           <p className="mt-2 text-muted-foreground">
             {searchTerm ? "No events match your current search. Try different keywords." : "There are currently no public events posted by chefs. Check back soon!"}
           </p>
         </div>
       )}
+
+      {/* Event Details Dialog */}
+      <AlertDialog open={isEventDetailsDialogOpen} onOpenChange={setIsEventDetailsDialogOpen}>
+        <AlertDialogContent className="sm:max-w-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{selectedEventForDetails?.title || "Event Details"}</AlertDialogTitle>
+            {selectedEventForDetails?.imageUrl && (
+              <div className="my-4 rounded-md overflow-hidden">
+                <Image src={selectedEventForDetails.imageUrl} alt={selectedEventForDetails.title} width={400} height={200} className="object-cover w-full" data-ai-hint={selectedEventForDetails.dataAiHint || "event food"}/>
+              </div>
+            )}
+            <AlertDialogDescription className="text-left space-y-1 pt-2">
+              <p><strong>Chef:</strong> {selectedEventForDetails?.chefName}</p>
+              <p><strong>Date & Time:</strong> {formatEventDateTimeForDisplay(selectedEventForDetails?.eventDateTime)}</p>
+              <p><strong>Location:</strong> {selectedEventForDetails?.location}</p>
+              <p><strong>Price:</strong> ${selectedEventForDetails?.pricePerPerson.toFixed(2)} per person</p>
+              <p><strong>Max Guests:</strong> {selectedEventForDetails?.maxPax}</p>
+              <p><strong>Description:</strong> {selectedEventForDetails?.description}</p>
+              {selectedEventForDetails?.tags && selectedEventForDetails.tags.length > 0 && (
+                <div className="flex flex-wrap gap-1 pt-1"><strong>Tags:</strong> {selectedEventForDetails.tags.map(tag => <Badge key={tag} variant="outline" className="text-xs">{tag}</Badge>)}</div>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Close</AlertDialogCancel>
+            <Button onClick={handleBookEventConfirmation} disabled={isBookingEvent}>
+              {isBookingEvent ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Book This Event
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      
+      {/* Booking Confirmation Dialog */}
+      {selectedEventForDetails && (
+        <AlertDialog open={isBookingConfirmationDialogOpen} onOpenChange={setIsBookingConfirmationDialogOpen}>
+          <AlertDialogContent className="sm:max-w-md">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Confirm Booking</AlertDialogTitle>
+              <AlertDialogDescription className="text-left space-y-2 pt-2">
+                <p>You are about to book the event:</p>
+                <p><strong>{selectedEventForDetails.title}</strong></p>
+                <p>with Chef {selectedEventForDetails.chefName}.</p>
+                <p>Price: <strong>${selectedEventForDetails.pricePerPerson.toFixed(2)} per person</strong>.</p>
+                <p className="text-xs text-muted-foreground"> (Note: For simplicity, PAX for this direct booking is assumed from event's max PAX. Payment processing is simulated.)</p>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isBookingEvent}>Cancel</AlertDialogCancel>
+              <Button onClick={handleConfirmBooking} disabled={isBookingEvent}>
+                {isBookingEvent ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Confirm & Book
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
   );
 }
-
