@@ -7,18 +7,20 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { MessageSquare, Send, CalendarDays, UserCircle, Search, Inbox, AlertTriangle, Info, CheckCircle, XCircle, Loader2, FileText, Briefcase, Utensils, DollarSign } from 'lucide-react';
+import { MessageSquare, Send, UserCircle, Search, Inbox, AlertTriangle, Info, CheckCircle, XCircle, Loader2, FileText, Briefcase, DollarSign } from 'lucide-react';
 import Image from 'next/image';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs, doc, updateDoc, addDoc, serverTimestamp, Timestamp, onSnapshot, orderBy, getDoc as getFirestoreDoc } from 'firebase/firestore';
-import type { CustomerRequest, RequestMessage, ChefProfile, EnrichedCustomerRequest } from '@/types';
+import type { CustomerRequest, RequestMessage, ChefProfile, EnrichedCustomerRequest, Booking } from '@/types';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
+import { useRouter } from 'next/navigation';
 
 export default function CustomerMessagesPage() {
   const { user, userProfile } = useAuth();
   const { toast } = useToast();
+  const router = useRouter();
 
   const [customerRequests, setCustomerRequests] = useState<EnrichedCustomerRequest[]>([]);
   const [selectedRequest, setSelectedRequest] = useState<EnrichedCustomerRequest | null>(null);
@@ -43,7 +45,7 @@ export default function CustomerMessagesPage() {
     const q = query(
       requestsCollectionRef,
       where("customerId", "==", user.uid),
-      orderBy("updatedAt", "desc") // Order by updatedAt to see most recent interactions first
+      orderBy("updatedAt", "desc")
     );
 
     const unsubscribe = onSnapshot(q, async (querySnapshot) => {
@@ -79,15 +81,9 @@ export default function CustomerMessagesPage() {
       setCustomerRequests(resolvedRequests);
       setIsLoadingRequests(false);
 
-      // If a request was selected, update its state from the new fetch
       if (selectedRequest) {
         const updatedSelectedRequest = resolvedRequests.find(r => r.id === selectedRequest.id);
-        if (updatedSelectedRequest) {
-          setSelectedRequest(updatedSelectedRequest);
-        } else {
-          // The previously selected request might have been deleted or its status changed such that it's no longer fetched
-          setSelectedRequest(null); 
-        }
+        setSelectedRequest(updatedSelectedRequest || null);
       }
 
     }, (error) => {
@@ -97,7 +93,7 @@ export default function CustomerMessagesPage() {
     });
 
     return () => unsubscribe();
-  }, [user, toast, selectedRequest?.id]); // Added selectedRequest.id to re-evaluate if it changes elsewhere
+  }, [user, toast]);
 
   useEffect(() => {
     if (!selectedRequest) {
@@ -113,7 +109,7 @@ export default function CustomerMessagesPage() {
       const fetchedMessages = querySnapshot.docs.map(docSnap => ({
         id: docSnap.id,
         ...docSnap.data(),
-        timestamp: docSnap.data().timestamp instanceof Timestamp ? docSnap.data().timestamp.toDate() : new Date(docSnap.data().timestamp)
+        timestamp: docSnap.data().timestamp instanceof Timestamp ? docSnap.data().timestamp.toDate() : new Date(docSnap.data().timestamp as any)
       } as RequestMessage));
       setMessages(fetchedMessages);
       setIsLoadingMessages(false);
@@ -149,11 +145,10 @@ export default function CustomerMessagesPage() {
       });
       setNewMessageText('');
       
-      // Update request status if customer is replying to a proposal
       if(selectedRequest.status === 'proposal_sent' || selectedRequest.status === 'chef_accepted') {
          await updateDoc(requestDocRef, { status: 'awaiting_customer_response', updatedAt: serverTimestamp() });
-      } else if (selectedRequest.status === 'new' || selectedRequest.status === 'awaiting_customer_response') {
-          await updateDoc(requestDocRef, { updatedAt: serverTimestamp() }); // Just update timestamp for sorting
+      } else if (selectedRequest.status === 'new') { // If customer messages on a brand new request, still just update timestamp
+          await updateDoc(requestDocRef, { updatedAt: serverTimestamp() });
       }
 
     } catch (error) {
@@ -170,7 +165,7 @@ export default function CustomerMessagesPage() {
     setIsProcessingProposalAction(true);
     const requestDocRef = doc(db, "customerRequests", selectedRequest.id);
     const systemMessageText = action === 'accept' 
-      ? `Customer ${userProfile.name || 'You'} accepted the proposal from Chef ${selectedRequest.activeProposal.chefName}. Next step: Booking & Payment.`
+      ? `Customer ${userProfile.name || 'You'} accepted the proposal from Chef ${selectedRequest.activeProposal.chefName}. Awaiting booking confirmation.`
       : `Customer ${userProfile.name || 'You'} declined the proposal from Chef ${selectedRequest.activeProposal.chefName}.`;
 
     try {
@@ -178,9 +173,38 @@ export default function CustomerMessagesPage() {
         await updateDoc(requestDocRef, {
           status: 'customer_confirmed', 
           updatedAt: serverTimestamp()
-          // In a real system, activeProposal might be moved to a 'confirmedProposal' field or a new 'bookings' document created
         });
-        toast({ title: "Proposal Accepted!", description: "Awaiting booking finalization." });
+        
+        // Simulate Booking Creation
+        const newBookingData: Omit<Booking, 'id'> = {
+          customerId: user.uid,
+          customerName: userProfile.name || user.displayName || "Customer",
+          chefId: selectedRequest.activeProposal.chefId,
+          chefName: selectedRequest.activeProposal.chefName,
+          chefAvatarUrl: selectedRequest.activeProposal.chefAvatarUrl,
+          eventTitle: selectedRequest.eventType || `Menu: ${selectedRequest.activeProposal.menuTitle}`,
+          eventDate: selectedRequest.eventDate instanceof Date ? Timestamp.fromDate(selectedRequest.eventDate) : selectedRequest.eventDate,
+          pax: selectedRequest.pax,
+          totalPrice: selectedRequest.activeProposal.menuPricePerHead * selectedRequest.pax,
+          pricePerHead: selectedRequest.activeProposal.menuPricePerHead,
+          status: 'confirmed', // Assuming confirmed for now, could be 'pending_payment'
+          menuTitle: selectedRequest.activeProposal.menuTitle,
+          location: selectedRequest.location || undefined,
+          requestId: selectedRequest.id,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+
+        const bookingsCollectionRef = collection(db, "bookings");
+        const bookingDocRef = await addDoc(bookingsCollectionRef, newBookingData);
+
+        toast({ 
+          title: "Proposal Accepted!", 
+          description: `Booking (ID: ${bookingDocRef.id.substring(0,6)}...) created. Check 'My Booked Events'.`,
+          duration: 7000,
+        });
+        router.push('/customer/dashboard/events');
+
       } else { // Decline
         await updateDoc(requestDocRef, {
           status: 'proposal_declined',
@@ -220,6 +244,12 @@ export default function CustomerMessagesPage() {
 
   const canTakeProposalAction = selectedRequest && selectedRequest.activeProposal && 
                                (selectedRequest.status === 'proposal_sent' || selectedRequest.status === 'chef_accepted');
+  
+  const canSendMessage = selectedRequest && 
+                         selectedRequest.status !== 'booked' && 
+                         selectedRequest.status !== 'cancelled_by_customer' &&
+                         selectedRequest.status !== 'proposal_declined' &&
+                         selectedRequest.status !== 'customer_confirmed';
 
 
   return (
@@ -307,7 +337,7 @@ export default function CustomerMessagesPage() {
             {isLoadingMessages ? (
                 <div className="flex justify-center items-center h-full"><Loader2 className="h-5 w-5 animate-spin mr-2"/>Loading messages...</div>
             ) : messages.length === 0 && !selectedRequest.activeProposal ? (
-                <div className="text-center text-muted-foreground py-8">No messages yet for this request.</div>
+                <div className="text-center text-muted-foreground py-8">No messages yet for this request. Send a message to start the conversation or await a chef's proposal.</div>
             ) : (
               messages.map(msg => (
                 <div key={msg.id} className={`flex ${msg.senderId === user?.uid ? 'justify-end' : 'justify-start'}`}>
@@ -353,7 +383,7 @@ export default function CustomerMessagesPage() {
                     <FileText className="mr-2 h-5 w-5"/>
                     Proposal from Chef {selectedRequest.activeProposal.chefName}
                     {selectedRequest.status === 'proposal_declined' && " (Declined)"}
-                    {selectedRequest.status === 'customer_confirmed' && " (Accepted!)"}
+                    {selectedRequest.status === 'customer_confirmed' && " (Accepted - Booking Pending Finalization)"}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0 text-sm space-y-1">
@@ -372,7 +402,7 @@ export default function CustomerMessagesPage() {
                   </CardFooter>
                 )}
                  {selectedRequest.status === 'customer_confirmed' && (
-                    <p className="text-sm text-green-700 mt-2 font-medium">Thank you for confirming! The chef will finalize booking details soon. This may involve payment arrangements.</p>
+                    <p className="text-sm text-green-700 mt-2 font-medium">Thank you for confirming! A booking has been initiated. Check 'My Booked Events'.</p>
                 )}
               </Card>
             )}
@@ -390,15 +420,15 @@ export default function CustomerMessagesPage() {
                 onChange={(e) => setNewMessageText(e.target.value)}
                 className="flex-1 min-h-[40px] max-h-[120px]"
                 rows={1}
-                disabled={isSendingMessage || !selectedRequest || selectedRequest.status === 'booked' || selectedRequest.status === 'cancelled_by_customer' || selectedRequest.status === 'proposal_declined' || selectedRequest.status === 'customer_confirmed'}
+                disabled={isSendingMessage || !canSendMessage}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    if (newMessageText.trim()) handleSendMessage();
+                    if (newMessageText.trim() && canSendMessage) handleSendMessage();
                   }
                 }}
               />
-              <Button type="submit" size="icon" onClick={handleSendMessage} disabled={isSendingMessage || !newMessageText.trim() || !selectedRequest || selectedRequest.status === 'booked' || selectedRequest.status === 'cancelled_by_customer' || selectedRequest.status === 'proposal_declined' || selectedRequest.status === 'customer_confirmed'}>
+              <Button type="submit" size="icon" onClick={handleSendMessage} disabled={isSendingMessage || !newMessageText.trim() || !canSendMessage}>
                 {isSendingMessage ? <Loader2 className="animate-spin h-5 w-5"/> : <Send className="h-5 w-5" />}
                 <span className="sr-only">Send</span>
               </Button>
@@ -415,5 +445,3 @@ export default function CustomerMessagesPage() {
     </div>
   );
 }
-
-    

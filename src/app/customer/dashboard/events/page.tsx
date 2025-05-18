@@ -9,64 +9,11 @@ import { Button } from '@/components/ui/button';
 import type { Booking } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, Timestamp, onSnapshot } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { CalendarCheck2, User, Users, DollarSign, QrCode, Info, Loader2, ChefHat, MapPin } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-
-// MOCK DATA as a fallback if Firestore is empty or for initial UI structure.
-// In a real scenario, this would be removed once booking creation is implemented.
-const MOCK_BOOKED_EVENTS: Booking[] = [
-  {
-    id: 'mockbooking1',
-    customerId: 'customer123',
-    customerName: 'Alice Wonderland',
-    chefId: 'chef789',
-    chefName: 'Chef Gordon Ramsay',
-    chefAvatarUrl: 'https://placehold.co/80x80.png',
-    eventTitle: 'Exclusive Birthday Dinner',
-    eventDate: Timestamp.fromDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)), // 7 days from now
-    pax: 4,
-    totalPrice: 400,
-    pricePerHead: 100,
-    status: 'confirmed',
-    createdAt: Timestamp.now(),
-    location: 'My Home Dining Room',
-    menuTitle: 'Signature Tasting Menu',
-  },
-  {
-    id: 'mockbooking2',
-    customerId: 'customer123',
-    customerName: 'Alice Wonderland',
-    chefId: 'chef000',
-    chefName: 'Chef Julia Child',
-    chefAvatarUrl: 'https://placehold.co/80x80.png',
-    eventTitle: 'French Cooking Masterclass',
-    eventDate: Timestamp.fromDate(new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)), // 14 days from now
-    pax: 1,
-    totalPrice: 150,
-    status: 'completed',
-    createdAt: Timestamp.fromDate(new Date(Date.now() - 5 * 24 * 60 * 60 * 1000)), // 5 days ago
-    qrCodeScannedAt: Timestamp.fromDate(new Date(Date.now() - 4 * 24 * 60 * 60 * 1000)),
-    location: "Chef Julia's Studio",
-  },
-  {
-    id: 'mockbooking3',
-    customerId: 'customer123',
-    customerName: 'Alice Wonderland',
-    chefId: 'chef111',
-    chefName: 'Chef Jiro Ono',
-    chefAvatarUrl: 'https://placehold.co/80x80.png',
-    eventTitle: 'Omakase Sushi Experience',
-    eventDate: Timestamp.fromDate(new Date(Date.now() + 21 * 24 * 60 * 60 * 1000)), // 21 days from now
-    pax: 2,
-    totalPrice: 600,
-    status: 'confirmed',
-    createdAt: Timestamp.now(),
-    location: 'Sushi Bar Downtown',
-  },
-];
 
 export default function CustomerBookedEventsPage() {
   const { user } = useAuth();
@@ -74,56 +21,45 @@ export default function CustomerBookedEventsPage() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const fetchBookedEvents = async () => {
-      if (!user) {
-        setIsLoading(false);
-        // If no user, use mock data for structure preview, or clear if you prefer
-        // setBookedEvents(MOCK_BOOKED_EVENTS.filter(b => b.customerId === 'customer123')); 
-        setBookedEvents([]); // Clear events if no user
-        return;
-      }
-      setIsLoading(true);
-      try {
-        const bookingsCollectionRef = collection(db, 'bookings');
-        const q = query(
-          bookingsCollectionRef,
-          where('customerId', '==', user.uid),
-          orderBy('eventDate', 'desc')
-        );
-        const querySnapshot = await getDocs(q);
-        const fetchedEvents = querySnapshot.docs.map(doc => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            ...data,
-            eventDate: data.eventDate instanceof Timestamp ? data.eventDate.toDate() : new Date(data.eventDate),
-            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : new Date(data.createdAt),
-            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt) : undefined),
-            qrCodeScannedAt: data.qrCodeScannedAt instanceof Timestamp ? data.qrCodeScannedAt.toDate() : (data.qrCodeScannedAt ? new Date(data.qrCodeScannedAt) : undefined),
-          } as Booking;
-        });
-        setBookedEvents(fetchedEvents);
+    if (!user) {
+      setIsLoading(false);
+      setBookedEvents([]); 
+      return;
+    }
+    setIsLoading(true);
+    const bookingsCollectionRef = collection(db, 'bookings');
+    const q = query(
+      bookingsCollectionRef,
+      where('customerId', '==', user.uid),
+      orderBy('eventDate', 'desc')
+    );
+    
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      const fetchedEvents = querySnapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        return {
+          id: docSnap.id,
+          ...data,
+          eventDate: data.eventDate instanceof Timestamp ? data.eventDate.toDate() : new Date(data.eventDate as any),
+          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : new Date(data.createdAt as any),
+          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
+          qrCodeScannedAt: data.qrCodeScannedAt instanceof Timestamp ? data.qrCodeScannedAt.toDate() : (data.qrCodeScannedAt ? new Date(data.qrCodeScannedAt as any) : undefined),
+        } as Booking;
+      });
+      setBookedEvents(fetchedEvents);
+      setIsLoading(false);
+    }, (error) => {
+      console.error('Error fetching booked events:', error);
+      setBookedEvents([]); // Clear on error
+      setIsLoading(false);
+    });
 
-        // Fallback to mock data if Firestore returns empty and for demonstration purposes
-        if (fetchedEvents.length === 0) {
-            console.log("No bookings found in Firestore for this customer, showing mock data for UI structure.");
-            // This mock data should be filtered if you use it, or simply don't set it for real user flow
-            // setBookedEvents(MOCK_BOOKED_EVENTS.filter(b => b.customerId === 'customer123')); 
-        }
+    return () => unsubscribe(); // Cleanup subscription on component unmount
 
-      } catch (error) {
-        console.error('Error fetching booked events:', error);
-        // Fallback to mock data on error for demonstration
-        // setBookedEvents(MOCK_BOOKED_EVENTS.filter(b => b.customerId === 'customer123'));
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchBookedEvents();
   }, [user]);
 
-  const getStatusVariant = (status: Booking['status']): 'default' | 'secondary' | 'destructive' | 'outline' => {
+  const getStatusVariant = (status?: Booking['status']): 'default' | 'secondary' | 'destructive' | 'outline' => {
+    if (!status) return 'outline';
     switch (status) {
       case 'confirmed': return 'default';
       case 'completed': return 'secondary';
@@ -131,7 +67,7 @@ export default function CustomerBookedEventsPage() {
       case 'cancelled_by_chef':
       case 'payment_failed':
         return 'destructive';
-      case 'pending_chef_acceptance': return 'outline';
+      case 'pending_payment': return 'outline';
       default: return 'outline';
     }
   };
@@ -204,7 +140,7 @@ export default function CustomerBookedEventsPage() {
               <CardContent className="space-y-3 text-sm">
                 <div className="flex items-center text-muted-foreground">
                   <CalendarCheck2 className="h-4 w-4 mr-2 text-primary" />
-                  Date: <span className="font-medium text-foreground ml-1">{format(booking.eventDate, 'PPpp')}</span>
+                  Date: <span className="font-medium text-foreground ml-1">{booking.eventDate ? format(booking.eventDate, 'PPpp') : 'Date TBD'}</span>
                 </div>
                 <div className="flex items-center text-muted-foreground">
                   <Users className="h-4 w-4 mr-2 text-primary" />

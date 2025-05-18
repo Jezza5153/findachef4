@@ -89,6 +89,7 @@ export interface CustomerRequest {
   cuisinePreference: string;
   pax: number;
   eventDate: any; // Firestore Timestamp
+  location?: string;
   notes?: string;
   customerId: string;
   status?: 'new' | 'awaiting_customer_response' | 'proposal_sent' | 'chef_declined' | 'chef_accepted' | 'customer_confirmed' | 'booked' | 'cancelled_by_customer';
@@ -100,14 +101,14 @@ export interface CustomerRequest {
     menuTitle: string;
     menuPricePerHead: number;
     chefId: string;
-    chefName: string; 
-    chefAvatarUrl?: string; 
+    chefName: string;
+    chefAvatarUrl?: string;
     notes?: string;
     proposedAt: any; // Firestore Timestamp
   };
   declinedChefIds?: string[];
-  requestedMenuId?: string; // ID of the menu if request originated from "Request This Menu"
-  requestedMenuTitle?: string; // Title of the menu
+  requestedMenuId?: string; 
+  requestedMenuTitle?: string;
 }
 
 export interface RequestMessage {
@@ -232,6 +233,7 @@ export type CostType = 'Ingredient' | 'Equipment' | 'Tax' | 'BAS' | 'Travel' | '
 
 export interface Receipt {
   id: string;
+  chefId: string;
   fileName?: string;
   vendor: string;
   date: any; // Firestore Timestamp
@@ -240,7 +242,6 @@ export interface Receipt {
   assignedToMenuId?: string;
   costType: CostType;
   notes?: string;
-  chefId: string;
   imageUrl?: string;
   createdAt?: any;
   updatedAt?: any;
@@ -289,29 +290,30 @@ export interface ReceiptParserOutput {
 }
 
 export interface Booking {
-  id: string;
+  id: string; // Firestore document ID
   customerId: string;
-  customerName?: string; 
+  customerName?: string; // Denormalized for display
   chefId: string;
-  chefName?: string; 
-  chefAvatarUrl?: string; 
-  eventId?: string; 
-  menuId?: string; 
-  menuTitle?: string; 
-  requestId?: string; 
-  eventTitle: string; 
+  chefName: string; // Denormalized for display
+  chefAvatarUrl?: string; // Denormalized for display
+  eventId?: string; // If booked from a ChefWallEvent
+  menuId?: string; // If a specific menu was booked
+  menuTitle?: string; // Denormalized
+  requestId?: string; // Link back to the original CustomerRequest
+  eventTitle: string; // Can be from request.eventType or a custom title
   eventDate: any; // Firestore Timestamp
   pax: number;
-  pricePerHead?: number; 
-  totalPrice: number;
-  status: 'pending_chef_acceptance' | 'confirmed' | 'completed' | 'cancelled_by_customer' | 'cancelled_by_chef' | 'payment_failed';
+  pricePerHead?: number; // From proposal
+  totalPrice: number; // Usually pricePerHead * pax
+  status: 'pending_payment' | 'confirmed' | 'completed' | 'cancelled_by_customer' | 'cancelled_by_chef' | 'payment_failed';
+  location?: string;
+  customerNotes?: string; // From original request or subsequent chat
+  chefNotes?: string; // From proposal or subsequent chat
+  qrCodeScannedAt?: any; // Firestore Timestamp, for event completion
   createdAt: any; // Firestore Timestamp
   updatedAt?: any; // Firestore Timestamp
-  customerNotes?: string;
-  chefNotes?: string;
-  location?: string;
-  qrCodeScannedAt?: any; // Firestore Timestamp for event completion
 }
+
 
 // Enriched types for UI display
 export interface EnrichedCustomerRequest extends CustomerRequest {
