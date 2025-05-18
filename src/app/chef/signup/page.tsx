@@ -19,18 +19,17 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ResumeUploadForm } from '@/components/resume-upload-form';
-import { useState } from 'react';
+import { useState, type ChangeEvent } from 'react';
 import type { ParseResumeOutput, ChefProfile } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
 import { ChefHat, UserPlus, UploadCloud, ShieldCheck, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { createUserWithEmailAndPassword, updateProfile as updateAuthProfile } from 'firebase/auth';
-import { auth, storage, db } from '@/lib/firebase'; 
+import { auth, storage, db } from '@/lib/firebase';
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore'; 
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
-
 
 const chefSignupSchema = z.object({
   email: z.string().email({ message: 'Invalid email address.' }),
@@ -73,12 +72,13 @@ export default function ChefSignupPage() {
       bio: '',
       specialties: '',
       agreedToTerms: false,
+      profilePicture: undefined,
     },
   });
 
   const handleResumeParsed = (data: { parsedData: ParseResumeOutput; file: File }) => {
     setResumeParsedData(data.parsedData);
-    setResumeFile(data.file);
+    setResumeFile(data.file); // Store the actual File object
     setIsResumeUploaded(true);
     if (data.parsedData.experience && form.getValues('bio') === '') {
         form.setValue('bio', data.parsedData.experience.substring(0,500));
@@ -91,7 +91,7 @@ export default function ChefSignupPage() {
   const handleProfilePictureChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      form.setValue('profilePicture', file);
+      form.setValue('profilePicture', file, { shouldValidate: true });
       const reader = new FileReader();
       reader.onloadend = () => {
         setProfilePicturePreview(reader.result as string);
@@ -115,51 +115,45 @@ export default function ChefSignupPage() {
     
     setIsLoading(true);
     try {
+      console.log("Attempting to create user with email:", data.email);
       const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password);
       const user = userCredential.user;
+      console.log("Firebase Auth user created successfully:", user.uid);
 
       let profilePictureUrl = '';
       let resumeFileUrl = '';
 
-      // 1. Upload Profile Picture (if provided)
       if (data.profilePicture) {
         const file = data.profilePicture;
         const fileExtension = file.name.split('.').pop();
-        const profilePicRef = storageRef(storage, `users/${user.uid}/profilePicture.${fileExtension}`);
+        const profilePicRefPath = `users/${user.uid}/profilePicture.${fileExtension}`;
+        const profilePicRef = storageRef(storage, profilePicRefPath);
         
-        try {
-          toast({ title: "Uploading Profile Picture...", description: "Please wait.", duration: 2000 });
-          const uploadTaskSnapshot = await uploadBytesResumable(profilePicRef, file);
-          profilePictureUrl = await getDownloadURL(uploadTaskSnapshot.ref);
-        } catch (uploadError) {
-          console.error("Profile picture upload error:", uploadError);
-          toast({ title: "Profile Picture Upload Failed", description: "Could not upload profile picture. It can be updated later.", variant: "destructive" });
-        }
+        toast({ title: "Uploading Profile Picture...", description: "Please wait.", duration: 2000 });
+        const uploadTaskSnapshot = await uploadBytesResumable(profilePicRef, file);
+        profilePictureUrl = await getDownloadURL(uploadTaskSnapshot.ref);
+        console.log("Profile picture uploaded:", profilePictureUrl);
       }
       
-      // 2. Upload Resume File
-      try {
+      if (resumeFile) {
         toast({ title: "Uploading Resume...", description: "Please wait.", duration: 2000 });
-        const resumeStorageRefPath = `users/${user.uid}/resume.pdf`; // Standardize to PDF, ensure conversion if other formats were allowed
-        const resumeStorageRef = storageRef(storage, resumeStorageRefPath);
-        const resumeUploadTask = await uploadBytesResumable(resumeStorageRef, resumeFile);
+        const resumeFileExtension = resumeFile.name.split('.').pop() || 'pdf';
+        const resumeStorageRefPath = `users/${user.uid}/resume.${resumeFileExtension}`;
+        const resumeStorageRefInstance = storageRef(storage, resumeStorageRefPath);
+        const resumeUploadTask = await uploadBytesResumable(resumeStorageRefInstance, resumeFile);
         resumeFileUrl = await getDownloadURL(resumeUploadTask.ref);
-      } catch (resumeUploadError) {
-          console.error("Resume upload error:", resumeUploadError);
-          toast({ title: "Resume Upload Failed", description: "Could not upload your resume file. It can be updated later.", variant: "destructive" });
+        console.log("Resume uploaded:", resumeFileUrl);
       }
 
-
-      // 3. Update Firebase Auth Profile
       await updateAuthProfile(user, { 
         displayName: data.name, 
         photoURL: profilePictureUrl || null 
       });
+      console.log("Firebase Auth profile updated with displayName and photoURL.");
 
-      // 4. Save additional chef profile data to Firestore
       const userProfileData: ChefProfile = {
-        id: user.uid,
-        email: user.email || '',
+        id: user.uid, // Crucial: matches the doc ID and auth UID
+        email: user.email!,
         name: data.name,
         abn: data.abn,
         bio: data.bio,
@@ -172,17 +166,23 @@ export default function ChefSignupPage() {
         role: 'chef',
         isApproved: false, 
         isSubscribed: false, 
-        trustScore: 3.0, // Initial default trust score
+        trustScore: 3.0,
         trustScoreBasis: "New chef - awaiting activity",
+        hasCompletedFirstCoOp: false,
+        collaboratorIds: [],
+        outgoingCollaborationRequests: [],
+        incomingCollaborationRequests: [],
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
-
+      
+      console.log("Attempting to set Firestore document for user:", user.uid, "with data:", userProfileData);
       await setDoc(doc(db, "users", user.uid), userProfileData);
+      console.log("Firestore document created successfully for user:", user.uid);
       
       toast({
         title: 'Signup Successful!',
-        description: 'Your chef account has been created. You will be redirected to login. Your account requires admin approval.',
+        description: 'Your chef account has been created. Your account requires admin approval before full access.',
         duration: 7000,
       });
       
@@ -191,12 +191,15 @@ export default function ChefSignupPage() {
       setResumeFile(null);
       setIsResumeUploaded(false);
       setProfilePicturePreview(null);
+      // Redirect to login or a pending approval page
       router.push('/login'); 
     } catch (error: any) {
       console.error('Signup error:', error);
       let errorMessage = 'Failed to create account.';
       if (error.code === 'auth/email-already-in-use') {
         errorMessage = 'This email address is already in use.';
+      } else if (error.code === 'permission-denied' || error.message?.toLowerCase().includes('permission-denied')) {
+        errorMessage = 'Failed to save profile data due to permissions. Please contact support.';
       } else if (error.code) {
         errorMessage = `An error occurred: ${error.message}`;
       }
@@ -303,7 +306,7 @@ export default function ChefSignupPage() {
               <FormField
                   control={form.control}
                   name="profilePicture"
-                  render={({ field }) => ( 
+                  render={() => ( 
                     <FormItem>
                       <FormLabel>Profile Picture</FormLabel>
                       <FormControl>
