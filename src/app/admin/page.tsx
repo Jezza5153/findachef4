@@ -5,19 +5,24 @@ import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { ShieldAlert, ListChecks, UserCog, FileWarning, UserCheck, FileSearch2, BadgeCheck, MessageCircleWarning, Gavel, Award, MessageSquare, LockKeyhole, CalendarX2, UsersRound, Banknote, PauseCircle, Undo2, ClipboardCheck, FileCheck2, BotMessageSquare, ShieldBan, CreditCard, CalendarCheck2 as CalendarCheckIcon, Download, AlertTriangle, CalendarClock, Loader2, Utensils } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { ShieldAlert, ListChecks, UserCog, FileWarning, UserCheck, FileSearch2, BadgeCheck, MessageCircleWarning, Gavel, Award, MessageSquare, LockKeyhole, CalendarX2, UsersRound, Banknote, PauseCircle, Undo2, ClipboardCheck, FileCheck2, BotMessageSquare, ShieldBan, CreditCard, CalendarCheck2 as CalendarCheckIcon, Download, AlertTriangle, CalendarClock, Loader2, Utensils, CheckCircle, XCircle } from 'lucide-react';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, orderBy, Timestamp, query } from 'firebase/firestore';
+import { collection, getDocs, orderBy, Timestamp, query, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import type { ChefProfile, CustomerProfile, Menu } from '@/types';
 import { format } from 'date-fns';
+import { useToast } from '@/hooks/use-toast';
 
-type UserView = Partial<ChefProfile & CustomerProfile>;
+type UserView = Partial<ChefProfile & CustomerProfile>; // Allows mixing fields from both
 
 export default function AdminPage() {
+  const { toast } = useToast();
   const [allUsers, setAllUsers] = useState<UserView[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
   const [allMenus, setAllMenus] = useState<Menu[]>([]);
   const [isLoadingMenus, setIsLoadingMenus] = useState(true);
+  const [isProcessingAction, setIsProcessingAction] = useState(false);
+
 
   useEffect(() => {
     const fetchAdminData = async () => {
@@ -27,17 +32,18 @@ export default function AdminPage() {
         const usersCollectionRef = collection(db, "users");
         const usersQuery = query(usersCollectionRef, orderBy("createdAt", "desc"));
         const usersSnapshot = await getDocs(usersQuery);
-        const fetchedUsers = usersSnapshot.docs.map(doc => {
-          const data = doc.data();
+        const fetchedUsers = usersSnapshot.docs.map(docSnap => {
+          const data = docSnap.data();
           return {
-            id: doc.id,
+            id: docSnap.id,
             ...data,
-            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : undefined),
+            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
           } as UserView;
         });
         setAllUsers(fetchedUsers);
       } catch (error) {
         console.error("Error fetching users:", error);
+        toast({ title: "Error", description: "Could not fetch users.", variant: "destructive" });
       } finally {
         setIsLoadingUsers(false);
       }
@@ -48,24 +54,91 @@ export default function AdminPage() {
         const menusCollectionRef = collection(db, "menus");
         const menusQuery = query(menusCollectionRef, orderBy("createdAt", "desc"));
         const menusSnapshot = await getDocs(menusQuery);
-        const fetchedMenus = menusSnapshot.docs.map(doc => {
-          const data = doc.data();
+        const fetchedMenus = menusSnapshot.docs.map(docSnap => {
+          const data = docSnap.data();
           return {
-            id: doc.id,
+            id: docSnap.id,
             ...data,
-            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : undefined),
-            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt) : undefined),
+            adminStatus: data.adminStatus || 'pending', // Default to pending if not set
+            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
           } as Menu;
         });
         setAllMenus(fetchedMenus);
       } catch (error) {
         console.error("Error fetching menus:", error);
+        toast({ title: "Error", description: "Could not fetch menus.", variant: "destructive" });
       } finally {
         setIsLoadingMenus(false);
       }
     };
     fetchAdminData();
-  }, []);
+  }, [toast]);
+
+  const handleApproveUser = async (userId: string) => {
+    setIsProcessingAction(true);
+    try {
+      const userDocRef = doc(db, "users", userId);
+      await updateDoc(userDocRef, { isApproved: true, updatedAt: serverTimestamp() });
+      setAllUsers(prevUsers => prevUsers.map(u => u.id === userId ? { ...u, isApproved: true } : u));
+      toast({ title: "Chef Approved", description: `Chef with ID ${userId.substring(0,6)}... has been approved.` });
+    } catch (error) {
+      console.error("Error approving user:", error);
+      toast({ title: "Error", description: "Could not approve chef.", variant: "destructive" });
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  const handleRejectUser = async (userId: string) => {
+    // For now, this is conceptual. In a real system, you might set isApproved to false
+    // or add them to a "rejected" list, potentially with a reason.
+    setIsProcessingAction(true);
+    try {
+      // Conceptual: Maybe set a 'rejectedReason' field or simply log it.
+      // For now, we'll just show a toast and ensure isApproved remains false or is set to false.
+      const userDocRef = doc(db, "users", userId);
+      await updateDoc(userDocRef, { isApproved: false, updatedAt: serverTimestamp() }); // Ensure it's false
+      setAllUsers(prevUsers => prevUsers.map(u => u.id === userId ? { ...u, isApproved: false } : u));
+      toast({ title: "Chef Rejected (Conceptual)", description: `Chef ID ${userId.substring(0,6)}... action noted.` });
+    } catch (error) {
+       console.error("Error conceptually rejecting user:", error);
+      toast({ title: "Error", description: "Could not process rejection for chef.", variant: "destructive" });
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  const handleApproveMenu = async (menuId: string) => {
+    setIsProcessingAction(true);
+    try {
+      const menuDocRef = doc(db, "menus", menuId);
+      await updateDoc(menuDocRef, { adminStatus: 'approved', updatedAt: serverTimestamp() });
+      setAllMenus(prevMenus => prevMenus.map(m => m.id === menuId ? { ...m, adminStatus: 'approved' } : m));
+      toast({ title: "Menu Approved", description: `Menu ID ${menuId.substring(0,6)}... has been approved.` });
+    } catch (error) {
+      console.error("Error approving menu:", error);
+      toast({ title: "Error", description: "Could not approve menu.", variant: "destructive" });
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  const handleRejectMenu = async (menuId: string) => {
+    setIsProcessingAction(true);
+    try {
+      const menuDocRef = doc(db, "menus", menuId);
+      await updateDoc(menuDocRef, { adminStatus: 'rejected', updatedAt: serverTimestamp() });
+      setAllMenus(prevMenus => prevMenus.map(m => m.id === menuId ? { ...m, adminStatus: 'rejected' } : m));
+      toast({ title: "Menu Rejected", description: `Menu ID ${menuId.substring(0,6)}... has been rejected.` });
+    } catch (error) {
+      console.error("Error rejecting menu:", error);
+      toast({ title: "Error", description: "Could not reject menu.", variant: "destructive" });
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
 
   const adminFeatures = [
     { name: "Approve Co-hosted Events", description: "Confirm both chefs are approved and willing to collaborate on the event.", icon: <ClipboardCheck className="mr-2 h-5 w-5 text-purple-600" /> },
@@ -149,8 +222,7 @@ export default function AdminPage() {
                     <TableHead>Role</TableHead>
                     <TableHead>Joined</TableHead>
                     <TableHead>Chef Approved</TableHead>
-                    <TableHead>Chef Subscribed</TableHead>
-                    <TableHead>User ID</TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -168,19 +240,47 @@ export default function AdminPage() {
                       </TableCell>
                       <TableCell>
                         {user.role === 'chef' ? (
-                          user.isApproved ? <Badge variant="default" className="bg-green-500 hover:bg-green-600">Yes</Badge> : <Badge variant="destructive">No</Badge>
+                          user.isApproved ? (
+                            <Badge variant="default" className="bg-green-500 hover:bg-green-600">Approved</Badge>
+                          ) : (
+                            <Badge variant="destructive">Pending</Badge>
+                          )
                         ) : (
                           'N/A'
                         )}
                       </TableCell>
                       <TableCell>
-                        {user.role === 'chef' ? (
-                           user.isSubscribed ? <Badge variant="default" className="bg-green-500 hover:bg-green-600">Yes</Badge> : <Badge variant="secondary">No</Badge>
-                        ) : (
-                          'N/A'
+                        {user.role === 'chef' && !user.isApproved && (
+                          <div className="flex space-x-1">
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              onClick={() => handleApproveUser(user.id!)}
+                              disabled={isProcessingAction}
+                              className="bg-green-500 hover:bg-green-600 text-white text-xs px-2 py-1"
+                            >
+                              {isProcessingAction ? <Loader2 className="h-3 w-3 animate-spin"/> : <CheckCircle className="h-3 w-3"/>}
+                              <span className="ml-1">Approve</span>
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              onClick={() => handleRejectUser(user.id!)}
+                              disabled={isProcessingAction}
+                              className="bg-red-500 hover:bg-red-600 text-white text-xs px-2 py-1"
+                            >
+                             {isProcessingAction ? <Loader2 className="h-3 w-3 animate-spin"/> : <XCircle className="h-3 w-3"/>}
+                             <span className="ml-1">Reject</span>
+                            </Button>
+                          </div>
+                        )}
+                         {user.role === 'chef' && user.isApproved && (
+                          <span className="text-xs text-muted-foreground">No actions</span>
+                        )}
+                         {user.role !== 'chef' && (
+                          <span className="text-xs text-muted-foreground">N/A</span>
                         )}
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground truncate max-w-[100px]" title={user.id}>{user.id?.substring(0, 10)}...</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -193,7 +293,7 @@ export default function AdminPage() {
       <Card className="shadow-lg">
         <CardHeader>
           <CardTitle className="flex items-center"><Utensils className="mr-2 h-6 w-6 text-primary"/> All Platform Menus</CardTitle>
-          <CardDescription>Review all menus created by chefs.</CardDescription>
+          <CardDescription>Review and manage all menus created by chefs.</CardDescription>
         </CardHeader>
         <CardContent>
           {isLoadingMenus ? (
@@ -213,7 +313,7 @@ export default function AdminPage() {
                     <TableHead>Cuisine</TableHead>
                     <TableHead className="text-right">Price/Head</TableHead>
                     <TableHead>Public</TableHead>
-                    <TableHead>Created At</TableHead>
+                    <TableHead>Admin Status</TableHead>
                     <TableHead>Actions</TableHead> 
                   </TableRow>
                 </TableHeader>
@@ -229,13 +329,51 @@ export default function AdminPage() {
                           {menu.isPublic ? 'Yes' : 'No'}
                         </Badge>
                       </TableCell>
-                      <TableCell>
-                        {menu.createdAt ? format(menu.createdAt, 'PP') : 'N/A'}
+                       <TableCell>
+                        <Badge 
+                          variant={
+                            menu.adminStatus === 'approved' ? 'default' : 
+                            menu.adminStatus === 'rejected' ? 'destructive' : 
+                            'secondary'
+                          }
+                          className={
+                            menu.adminStatus === 'approved' ? 'bg-green-500 hover:bg-green-600' :
+                            menu.adminStatus === 'rejected' ? '' : '' // default destructive is fine
+                          }
+                        >
+                          {menu.adminStatus?.charAt(0).toUpperCase() + menu.adminStatus?.slice(1) || 'Pending'}
+                        </Badge>
                       </TableCell>
                       <TableCell>
-                        <Button variant="outline" size="sm" onClick={() => alert(`Reviewing menu: ${menu.title}`)}>
-                          Review
-                        </Button>
+                        {menu.adminStatus === 'pending' && (
+                           <div className="flex space-x-1">
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              onClick={() => handleApproveMenu(menu.id)}
+                              disabled={isProcessingAction}
+                              className="bg-green-500 hover:bg-green-600 text-white text-xs px-2 py-1"
+                            >
+                              {isProcessingAction ? <Loader2 className="h-3 w-3 animate-spin"/> : <CheckCircle className="h-3 w-3"/>}
+                              <span className="ml-1">Approve</span>
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              onClick={() => handleRejectMenu(menu.id)}
+                              disabled={isProcessingAction}
+                              className="bg-red-500 hover:bg-red-600 text-white text-xs px-2 py-1"
+                            >
+                              {isProcessingAction ? <Loader2 className="h-3 w-3 animate-spin"/> : <XCircle className="h-3 w-3"/>}
+                              <span className="ml-1">Reject</span>
+                            </Button>
+                          </div>
+                        )}
+                        {menu.adminStatus !== 'pending' && (
+                           <Button variant="outline" size="sm" onClick={() => alert(`Viewing menu: ${menu.title}`)} className="text-xs">
+                             View
+                           </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -249,8 +387,8 @@ export default function AdminPage() {
       <div className="mt-8 p-4 border-l-4 border-yellow-500 bg-yellow-500/10 rounded-md">
         <h4 className="font-semibold text-yellow-700">Development Note:</h4>
         <p className="text-sm text-yellow-600">
-          This is a basic admin view. Full admin functionality, including secure role-based access control, user actions (approve, ban, etc.),
-          and detailed logs, requires significant backend development and secure infrastructure.
+          Admin actions now update Firestore. Full admin functionality, including secure role-based access control (preventing non-admins from viewing this page or performing actions),
+          and detailed logs, requires significant backend development and secure infrastructure (e.g., Firebase Auth custom claims for admin roles).
         </p>
       </div>
     </div>

@@ -31,6 +31,7 @@ export interface Menu {
   menuIngredients?: MenuIngredient[];
   calculatedTotalIngredientCost?: number; // Sum of all menuIngredients.totalCost
   calculatedCostPricePerHead?: number; // calculatedTotalIngredientCost / pax
+  adminStatus?: 'pending' | 'approved' | 'rejected'; // For admin review
 }
 
 export interface ParseResumeOutput {
