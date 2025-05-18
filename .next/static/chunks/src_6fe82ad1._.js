@@ -755,7 +755,7 @@ const firebaseConfig = {
     apiKey: ("TURBOPACK compile-time value", "AIzaSyBYA0W0pTa7lMpPnwoUL9E5g5YyaNAJxnw"),
     authDomain: ("TURBOPACK compile-time value", "findachef-7be9e.firebaseapp.com"),
     projectId: ("TURBOPACK compile-time value", "findachef-7be9e"),
-    storageBucket: ("TURBOPACK compile-time value", "findachef-7be9e.firebasestorage.app"),
+    storageBucket: ("TURBOPACK compile-time value", "findachef-7be9e.appspot.com"),
     messagingSenderId: ("TURBOPACK compile-time value", "56090105308"),
     appId: ("TURBOPACK compile-time value", "1:56090105308:web:274fe168ffffaf1a312b19"),
     measurementId: ("TURBOPACK compile-time value", "G-LNG1BGDNNQ")

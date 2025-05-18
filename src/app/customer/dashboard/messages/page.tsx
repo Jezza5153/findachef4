@@ -7,10 +7,10 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { MessageSquare, Send, UserCircle, Search, Inbox, AlertTriangle, Info, CheckCircle, XCircle, Loader2, FileText, Briefcase, DollarSign, CalendarDays } from 'lucide-react';
+import { MessageSquare, Send, UserCircle, Search, Inbox, AlertTriangle, Info, CheckCircle, XCircle, Loader2, FileText, Briefcase, DollarSign, CalendarDays, CreditCard } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, doc, updateDoc, addDoc, serverTimestamp, Timestamp, onSnapshot, orderBy, getDoc as getFirestoreDoc, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, updateDoc, addDoc, serverTimestamp, Timestamp, onSnapshot, orderBy, getDoc as getFirestoreDoc, setDoc, writeBatch, arrayUnion } from 'firebase/firestore';
 import type { CustomerRequest, RequestMessage, ChefProfile, EnrichedCustomerRequest, Booking, CalendarEvent } from '@/types';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
@@ -24,8 +24,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+} from "@/components/ui/alert-dialog"; // Removed AlertDialogTrigger as it's not directly used here
 
 export default function CustomerMessagesPage() {
   const { user, userProfile } = useAuth();
@@ -43,7 +42,7 @@ export default function CustomerMessagesPage() {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   const [isProcessingProposalAction, setIsProcessingProposalAction] = useState(false);
-  const [isConfirmPaymentDialogOpen, setIsConfirmPaymentDialogOpen] = useState(false);
+  const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false); // Renamed for clarity
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
@@ -70,22 +69,20 @@ export default function CustomerMessagesPage() {
         const data = docSnap.data() as Omit<CustomerRequest, 'id'>;
         
         let eventDate = data.eventDate;
-        if (eventDate instanceof Timestamp) {
-          eventDate = eventDate.toDate();
+        if (eventDate && !(eventDate instanceof Date) && typeof eventDate.toDate === 'function') {
+          eventDate = (eventDate as Timestamp).toDate();
         } else if (typeof eventDate === 'string') {
           eventDate = new Date(eventDate);
-        } else if (eventDate && typeof eventDate.toDate === 'function') {
-          eventDate = eventDate.toDate();
         } else if (!(eventDate instanceof Date)) {
-          eventDate = new Date(); // Fallback
+          eventDate = new Date(); 
         }
 
         let createdAt = data.createdAt;
-        if (createdAt && !(createdAt instanceof Date)) {
+        if (createdAt && !(createdAt instanceof Date) && typeof createdAt.toDate === 'function') {
             createdAt = (createdAt as Timestamp).toDate();
         }
         let updatedAt = data.updatedAt;
-        if (updatedAt && !(updatedAt instanceof Date)) {
+        if (updatedAt && !(updatedAt instanceof Date) && typeof updatedAt.toDate === 'function') {
             updatedAt = (updatedAt as Timestamp).toDate();
         }
         
@@ -117,7 +114,7 @@ export default function CustomerMessagesPage() {
 
       const resolvedRequests = await Promise.all(fetchedRequestsPromises);
       setCustomerRequests(resolvedRequests);
-      setIsLoadingRequests(false);
+      
 
       const requestIdFromUrl = searchParams.get('requestId');
       if (requestIdFromUrl && resolvedRequests.length > 0) {
@@ -125,11 +122,11 @@ export default function CustomerMessagesPage() {
         if (requestToSelect && (!selectedRequest || selectedRequest.id !== requestToSelect.id)) {
           setSelectedRequest(requestToSelect);
         }
-      } else if (selectedRequest) {
+      } else if (selectedRequest) { // If a request was selected, try to find its updated version
         const updatedSelectedRequest = resolvedRequests.find(r => r.id === selectedRequest.id);
         setSelectedRequest(updatedSelectedRequest || null);
       }
-
+      setIsLoadingRequests(false);
 
     }, (error) => {
       console.error("Error fetching customer requests:", error);
@@ -138,7 +135,7 @@ export default function CustomerMessagesPage() {
     });
 
     return () => unsubscribe();
-  }, [user, toast, searchParams, selectedRequest?.id]);
+  }, [user, toast, searchParams, selectedRequest?.id]); // Added selectedRequest.id to re-run if it changes externally
 
   useEffect(() => {
     if (!selectedRequest) {
@@ -154,7 +151,7 @@ export default function CustomerMessagesPage() {
       const fetchedMessages = querySnapshot.docs.map(docSnap => {
         const data = docSnap.data();
         let timestamp = data.timestamp;
-        if (timestamp && !(timestamp instanceof Date)) {
+        if (timestamp && !(timestamp instanceof Date) && typeof timestamp.toDate === 'function') {
             timestamp = (timestamp as Timestamp).toDate();
         }
         return {
@@ -197,6 +194,7 @@ export default function CustomerMessagesPage() {
         timestamp: serverTimestamp()
       });
       
+      // Update the parent request's updatedAt and potentially status if it was 'proposal_sent' or 'chef_accepted'
       let newStatus = selectedRequest.status;
       if (selectedRequest.status === 'proposal_sent' || selectedRequest.status === 'chef_accepted') {
         newStatus = 'awaiting_customer_response';
@@ -211,24 +209,22 @@ export default function CustomerMessagesPage() {
       setIsSendingMessage(false);
     }
   };
-
-  const proceedWithAcceptingProposal = async () => {
+  
+  const proceedWithBookingCreation = async () => {
     if (!selectedRequest || !selectedRequest.activeProposal || !user || !userProfile) return;
     
-    setIsProcessingProposalAction(true);
+    setIsProcessingProposalAction(true); // Use the same loading state
     const requestDocRef = doc(db, "customerRequests", selectedRequest.id);
     const systemMessageText = `Customer ${userProfile.name || 'You'} accepted the proposal from Chef ${selectedRequest.activeProposal.chefName}. A booking has been created.`;
 
     try {
       const batch = writeBatch(db);
 
-      // 1. Update CustomerRequest status
       batch.update(requestDocRef, {
         status: 'customer_confirmed', 
         updatedAt: serverTimestamp()
       });
       
-      // 2. Create Booking document
       const eventDateAsTimestamp = selectedRequest.eventDate instanceof Date 
                                    ? Timestamp.fromDate(selectedRequest.eventDate) 
                                    : selectedRequest.eventDate; 
@@ -251,10 +247,9 @@ export default function CustomerMessagesPage() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
-      const bookingDocRef = doc(collection(db, "bookings")); // Generate new ID
+      const bookingDocRef = doc(collection(db, "bookings")); 
       batch.set(bookingDocRef, newBookingData);
 
-      // 3. Create CalendarEvent for the Chef
       const calendarEventData: Omit<CalendarEvent, 'id'> = {
           chefId: newBookingData.chefId,
           date: newBookingData.eventDate, 
@@ -264,7 +259,7 @@ export default function CustomerMessagesPage() {
           menuName: newBookingData.menuTitle || 'Custom Event',
           pricePerHead: newBookingData.pricePerHead || 0,
           location: newBookingData.location,
-          notes: `Booking confirmed via customer request ID: ${selectedRequest.id}. Booking ID: ${bookingDocRef.id}`,
+          notes: `Booking confirmed for request ID: ${selectedRequest.id}. Booking ID: ${bookingDocRef.id}`,
           status: 'Confirmed',
           isWallEvent: false, 
           createdAt: serverTimestamp(),
@@ -273,9 +268,8 @@ export default function CustomerMessagesPage() {
       const chefCalendarEventDocRef = doc(db, `users/${newBookingData.chefId}/calendarEvents`, bookingDocRef.id);
       batch.set(chefCalendarEventDocRef, calendarEventData);
 
-      // 4. Add system message
       const messagesCollectionRef = collection(requestDocRef, "messages");
-      const systemMessageRef = doc(messagesCollectionRef); // auto-generate ID
+      const systemMessageRef = doc(messagesCollectionRef); 
       batch.set(systemMessageRef, {
         requestId: selectedRequest.id,
         senderId: 'system', 
@@ -298,15 +292,16 @@ export default function CustomerMessagesPage() {
       toast({ title: "Error", description: `Could not accept proposal. Details: ${(error as Error).message}`, variant: "destructive" });
     } finally {
       setIsProcessingProposalAction(false);
-      setIsConfirmPaymentDialogOpen(false);
+      setIsPaymentDialogOpen(false);
     }
   };
+
 
   const handleProposalAction = async (action: 'accept' | 'decline') => {
     if (!selectedRequest || !selectedRequest.activeProposal || !user || !userProfile) return;
 
     if (action === 'accept') {
-      setIsConfirmPaymentDialogOpen(true); // Open payment dialog first
+      setIsPaymentDialogOpen(true); // Open payment dialog first
       return;
     }
 
@@ -444,7 +439,7 @@ export default function CustomerMessagesPage() {
               </div>
             </div>
             <div className="text-xs text-muted-foreground space-y-0.5 text-right">
-                <p><CalendarDays className="inline h-3 w-3 mr-1"/> Event Date: {format(selectedRequest.eventDate, 'PP')}</p>
+                <p><CalendarDays className="inline h-3 w-3 mr-1"/> Event Date: {selectedRequest.eventDate ? format(selectedRequest.eventDate, 'PP') : 'N/A'}</p>
                 <p><Users className="inline h-3 w-3 mr-1"/> PAX: {selectedRequest.pax}</p>
                 <p><DollarSign className="inline h-3 w-3 mr-1"/> Budget: ${selectedRequest.budget}</p>
             </div>
@@ -488,18 +483,10 @@ export default function CustomerMessagesPage() {
               </>
             )}
 
-            {selectedRequest.activeProposal && (
-              <Card className={`my-4 p-4 border shadow-md ${
-                selectedRequest.status === 'customer_confirmed' ? 'bg-green-50 border-green-200' : 
-                selectedRequest.status === 'proposal_declined' ? 'bg-red-50 border-red-200 opacity-70' :
-                'bg-sky-50 border-sky-200'
-              }`}>
+            {selectedRequest.activeProposal && (selectedRequest.status === 'proposal_sent' || selectedRequest.status === 'chef_accepted') && (
+              <Card className="my-4 p-4 border shadow-md bg-sky-50 border-sky-200">
                 <CardHeader className="p-0 pb-2">
-                  <CardTitle className={`text-md flex items-center ${
-                     selectedRequest.status === 'customer_confirmed' ? 'text-green-700' : 
-                     selectedRequest.status === 'proposal_declined' ? 'text-red-700' :
-                     'text-sky-600'
-                  }`}>
+                  <CardTitle className="text-md flex items-center text-sky-600">
                     <FileText className="mr-2 h-5 w-5"/>
                     Proposal from Chef {selectedRequest.activeProposal.chefName}
                   </CardTitle>
@@ -512,20 +499,24 @@ export default function CustomerMessagesPage() {
                 {canTakeProposalAction && (
                   <CardFooter className="p-0 pt-3 flex gap-2">
                     <Button onClick={() => handleProposalAction('accept')} size="sm" className="bg-green-600 hover:bg-green-700" disabled={isProcessingProposalAction}>
-                      {isProcessingProposalAction ? <Loader2 className="animate-spin h-4 w-4 mr-1.5"/> : <CheckCircle className="h-4 w-4 mr-1.5"/>} Accept Proposal
+                      {isProcessingProposalAction ? <Loader2 className="animate-spin h-4 w-4 mr-1.5"/> : <CheckCircle className="h-4 w-4 mr-1.5"/>} Accept & Proceed to Pay
                     </Button>
                     <Button onClick={() => handleProposalAction('decline')} size="sm" variant="outline" disabled={isProcessingProposalAction}>
                       {isProcessingProposalAction ? <Loader2 className="animate-spin h-4 w-4 mr-1.5"/> : <XCircle className="h-4 w-4 mr-1.5"/>} Decline Proposal
                     </Button>
                   </CardFooter>
                 )}
-                 {selectedRequest.status === 'customer_confirmed' && (
-                    <p className="text-sm text-green-700 mt-2 font-medium">Thank you for confirming! A booking has been initiated. Check 'My Booked Events'.</p>
-                )}
-                {selectedRequest.status === 'proposal_declined' && (
-                    <p className="text-sm text-red-700 mt-2 font-medium">You have declined this proposal. You can still message the chef or await other proposals if any.</p>
-                )}
               </Card>
+            )}
+            {selectedRequest.status === 'customer_confirmed' && (
+                <div className="text-sm text-green-700 mt-2 font-medium p-3 rounded-md bg-green-50 border border-green-200 text-center">
+                    <CheckCircle className="inline h-5 w-5 mr-2"/> You have accepted this proposal. Booking is confirmed! Check 'My Booked Events'.
+                </div>
+            )}
+            {selectedRequest.status === 'proposal_declined' && (
+                <div className="text-sm text-red-700 mt-2 font-medium p-3 rounded-md bg-red-50 border border-red-200 text-center">
+                    <XCircle className="inline h-5 w-5 mr-2"/> You have declined this proposal.
+                </div>
             )}
           </CardContent>
 
@@ -565,23 +556,24 @@ export default function CustomerMessagesPage() {
       )}
 
       {selectedRequest && selectedRequest.activeProposal && (
-        <AlertDialog open={isConfirmPaymentDialogOpen} onOpenChange={setIsConfirmPaymentDialogOpen}>
+        <AlertDialog open={isPaymentDialogOpen} onOpenChange={setIsPaymentDialogOpen}>
             <AlertDialogContent>
                 <AlertDialogHeader>
-                    <AlertDialogTitle>Confirm Booking &amp; Payment</AlertDialogTitle>
-                    <AlertDialogDescription>
-                        You are about to accept the proposal from Chef {selectedRequest.activeProposal.chefName} for the menu "{selectedRequest.activeProposal.menuTitle}".
-                        <br />
-                        Total Price: <strong>${(selectedRequest.activeProposal.menuPricePerHead * selectedRequest.pax).toFixed(2)}</strong>
-                        <br /><br />
-                        This is a simulation. In a real application, you would be redirected to a secure payment gateway.
+                    <AlertDialogTitle className="flex items-center"><CreditCard className="mr-2 h-5 w-5 text-primary"/>Confirm Booking & Proceed to Payment</AlertDialogTitle>
+                    <AlertDialogDescription className="text-left space-y-2 pt-2">
+                        <p>You are about to accept the proposal from <strong>Chef {selectedRequest.activeProposal.chefName}</strong> for the menu/event titled: <strong>"{selectedRequest.activeProposal.menuTitle || selectedRequest.eventType}"</strong>.</p>
+                        <p>The total price for this event is: <strong className="text-lg">${(selectedRequest.activeProposal.menuPricePerHead * selectedRequest.pax).toFixed(2)}</strong>.</p>
+                        <p className="text-xs text-muted-foreground pt-2">
+                            This is a simulation. In a real application, clicking "Confirm & Pay" would redirect you to a secure payment gateway (e.g., Stripe) to complete your payment.
+                            Upon successful payment, your booking will be confirmed.
+                        </p>
                     </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
-                    <AlertDialogCancel onClick={() => setIsConfirmPaymentDialogOpen(false)} disabled={isProcessingProposalAction}>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={proceedWithAcceptingProposal} disabled={isProcessingProposalAction}>
-                        {isProcessingProposalAction ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : null}
-                        Confirm &amp; Pay (Simulated)
+                    <AlertDialogCancel onClick={() => setIsPaymentDialogOpen(false)} disabled={isProcessingProposalAction}>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={proceedWithBookingCreation} disabled={isProcessingProposalAction}>
+                        {isProcessingProposalAction ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <CheckCircle className="mr-2 h-4 w-4"/>}
+                        Confirm & Pay (Simulated)
                     </AlertDialogAction>
                 </AlertDialogFooter>
             </AlertDialogContent>
@@ -590,5 +582,3 @@ export default function CustomerMessagesPage() {
     </div>
   );
 }
-
-    
