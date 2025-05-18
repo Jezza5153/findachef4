@@ -22,11 +22,13 @@ import { Textarea } from '@/components/ui/textarea'; // Added
 import { ShieldAlert, ListChecks, UserCog, FileWarning, UserCheck, FileSearch2, BadgeCheck, MessageCircleWarning, Gavel, Award, MessageSquare, LockKeyhole, CalendarX2, UsersRound, Banknote, PauseCircle, Undo2, ClipboardCheck, FileCheck2, BotMessageSquare, ShieldBan, CreditCard, CalendarCheck2 as CalendarCheckIcon, Download, AlertTriangle, CalendarClock, Loader2, Utensils, CheckCircle, XCircle, Send, Eye } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, orderBy, Timestamp, query, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import type { ChefProfile, CustomerProfile, Menu, CustomerRequest, RequestMessage, AppUserProfileContext } from '@/types';
+import type { Menu, CustomerRequest, RequestMessage, AppUserProfileContext, ChefProfile } from '@/types';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import Image from 'next/image';
+
 
 type UserView = AppUserProfileContext;
 
@@ -343,7 +345,7 @@ export default function AdminPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        {user.createdAt ? format(user.createdAt, 'PP') : 'N/A'}
+                        {user.createdAt ? format(new Date(user.createdAt), 'PP') : 'N/A'}
                       </TableCell>
                       <TableCell>
                         {user.role === 'chef' ? (

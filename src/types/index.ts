@@ -132,7 +132,7 @@ export interface CustomerRequest {
     chefAvatarUrl?: string; 
     notes?: string;
     proposedAt: any; // Firestore Timestamp
-  } | null; // Allow null for clearing proposal
+  } | null; 
   declinedChefIds?: string[];
   requestedMenuId?: string;
   requestedMenuTitle?: string;
@@ -268,10 +268,10 @@ export interface TaxAdviceOutput {
 
 export interface ActivityItem {
   id: string;
-  type: string;
+  type: string; // e.g., 'new_message', 'booking_confirmed', 'menu_updated'
   description: string;
   timestamp: any; // Firestore Timestamp or Date object
-  linkTo?: string;
+  linkTo?: string; // e.g., /chef/dashboard/requests/XYZ or /customer/dashboard/events/ABC
   isRead?: boolean;
 }
 
@@ -316,7 +316,7 @@ export interface Booking {
   location?: string;
   qrCodeScannedAt?: any; 
   paymentIntentId?: string; 
-  requestId?: string; 
+  requestId?: string; // Link to the original CustomerRequest if applicable
   chefWallEventId?: string; // Link if booked from a ChefWallEvent
 }
 
