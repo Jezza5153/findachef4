@@ -12,9 +12,9 @@ import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs, doc, updateDoc, addDoc, serverTimestamp, Timestamp, onSnapshot, orderBy, getDoc as getFirestoreDoc, writeBatch, arrayUnion } from 'firebase/firestore';
 import type { CustomerRequest, RequestMessage, ChefProfile, EnrichedCustomerRequest, Booking, CalendarEvent } from '@/types';
-import { format } from 'date-fns';
+import { format, isToday, isYesterday } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation'; // Added usePathname
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,8 +25,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { loadStripe, type Stripe } from '@stripe/stripe-js';
-import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import { loadStripe } from '@stripe/stripe-js';
 import dynamic from 'next/dynamic';
 
 const StripeElementsProvider = dynamic(() =>
@@ -34,106 +33,14 @@ const StripeElementsProvider = dynamic(() =>
     import('@stripe/react-stripe-js').then(mod => mod.Elements),
     import('@stripe/stripe-js').then(mod => loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!))
   ]).then(([{ Elements: StripeElementsComponent }, stripePromise]) => ({ default: ({children}: {children: React.ReactNode}) => 
-    stripePromise ? <StripeElementsComponent stripe={stripePromise}>{children}</StripeElementsComponent> : <p>Loading payment gateway...</p> 
+    stripePromise ? <StripeElementsComponent stripe={stripePromise}>{children}</StripeElementsComponent> : <div className="text-center py-4"><Loader2 className="h-6 w-6 animate-spin mx-auto" /> Initializing Payment Gateway...</div>
   })), { ssr: false, loading: () => <div className="text-center py-4"><Loader2 className="h-6 w-6 animate-spin mx-auto" /> Initializing Payment Gateway...</div> }
 );
 
-interface StripePaymentFormProps {
-  totalPrice: number;
-  onPaymentAttemptComplete: (result: { success: boolean; paymentIntentId?: string; error?: string }) => void;
-  isProcessingPayment: boolean;
-  setIsProcessingPayment: (isProcessing: boolean) => void;
-}
-
-const StripePaymentForm: React.FC<StripePaymentFormProps> = ({ totalPrice, onPaymentAttemptComplete, isProcessingPayment, setIsProcessingPayment }) => {
-  const stripe = useStripe();
-  const elements = useElements();
-  const { toast } = useToast();
-
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setIsProcessingPayment(true);
-
-    if (!stripe || !elements) {
-      onPaymentAttemptComplete({ success: false, error: "Stripe.js has not loaded yet." });
-      setIsProcessingPayment(false);
-      return;
-    }
-
-    const cardElement = elements.getElement(CardElement);
-    if (!cardElement) {
-      onPaymentAttemptComplete({ success: false, error: "Card element not found." });
-      setIsProcessingPayment(false);
-      return;
-    }
-    
-    toast({ title: "Processing Payment...", description: "Contacting payment gateway. Please wait." });
-
-    try {
-      const response = await fetch('/api/create-payment-intent', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: Math.round(totalPrice * 100), currency: 'aud' }), // Amount in cents
-      });
-
-      const paymentIntentData = await response.json();
-
-      if (response.status !== 200 || !paymentIntentData.clientSecret) {
-        throw new Error(paymentIntentData.error || 'Failed to create payment intent.');
-      }
-
-      const { error, paymentIntent } = await stripe.confirmCardPayment(paymentIntentData.clientSecret, {
-        payment_method: {
-          card: cardElement,
-          // billing_details: { name: 'Jenny Rosen' }, // Optional: Add customer name
-        },
-      });
-
-      if (error) {
-        throw new Error(error.message || 'Payment failed.');
-      }
-
-      if (paymentIntent && paymentIntent.status === 'succeeded') {
-        onPaymentAttemptComplete({ success: true, paymentIntentId: paymentIntent.id });
-      } else {
-        // Handle other statuses like 'requires_action' or 'requires_confirmation' if necessary
-        throw new Error(paymentIntent?.status ? `Payment status: ${paymentIntent.status}` : 'Payment not successful.');
-      }
-    } catch (err: any) {
-      console.error("Payment processing error:", err);
-      onPaymentAttemptComplete({ success: false, error: err.message || "An unexpected error occurred during payment." });
-    } finally {
-      // setIsProcessingPayment(false); // This will be set by parent component based on booking finalization
-    }
-  };
-
-  const cardElementOptions = {
-    style: {
-      base: {
-        fontSize: '16px',
-        color: 'hsl(var(--foreground))',
-        '::placeholder': {
-          color: 'hsl(var(--muted-foreground))',
-        },
-      },
-      invalid: {
-        color: 'hsl(var(--destructive))',
-      },
-    },
-  };
-
-  return (
-    <form onSubmit={handleSubmit}>
-      <div className="my-4 p-3 border rounded-md bg-background">
-        <CardElement options={cardElementOptions} />
-      </div>
-      <Button type="submit" disabled={!stripe || isProcessingPayment} className="w-full">
-        { isProcessingPayment ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CreditCard className="mr-2 h-4 w-4" /> }
-        {isProcessingPayment ? "Processing..." : `Pay AUD ${(totalPrice).toFixed(2)}`}
-      </Button>
-    </form>
-  );
-};
+const StripePaymentForm = dynamic(() => 
+  import('@/components/stripe-payment-form').then(mod => mod.StripePaymentForm), 
+  { ssr: false, loading: () => <div className="text-center py-4"><Loader2 className="h-6 w-6 animate-spin mx-auto" /> Loading Payment Form...</div> }
+);
 
 
 export default function CustomerMessagesPage() {
@@ -142,6 +49,7 @@ export default function CustomerMessagesPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const pathname = usePathname(); 
 
   const [customerRequests, setCustomerRequests] = useState<EnrichedCustomerRequest[]>([]);
   const [selectedRequest, setSelectedRequest] = useState<EnrichedCustomerRequest | null>(null);
@@ -153,9 +61,11 @@ export default function CustomerMessagesPage() {
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
-  const [isProcessingPayment, setIsProcessingPayment] = useState(false); // For Stripe form button
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [bookingFinalizationStatus, setBookingFinalizationStatus] = useState<'idle' | 'payment_processing' | 'awaiting_confirmation' | 'confirmed' | 'failed'>('idle');
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [isActuallyProcessingPayment, setIsActuallyProcessingPayment] = useState(false);
+
 
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -169,7 +79,7 @@ export default function CustomerMessagesPage() {
     if (!user) {
       setIsLoadingRequests(false);
       setCustomerRequests([]);
-      return;
+      return () => {};
     }
 
     setIsLoadingRequests(true);
@@ -186,7 +96,10 @@ export default function CustomerMessagesPage() {
         
         const convertTimestamp = (ts: any): Date | undefined => {
           if (!ts) return undefined;
-          return ts instanceof Timestamp ? ts.toDate() : new Date(ts);
+          if (ts instanceof Timestamp) return ts.toDate();
+          if (typeof ts === 'string' || typeof ts === 'number') return new Date(ts);
+          if (ts.seconds && typeof ts.seconds === 'number') return new Timestamp(ts.seconds, ts.nanoseconds).toDate();
+          return undefined;
         };
         
         let enrichedData: EnrichedCustomerRequest = { 
@@ -226,11 +139,17 @@ export default function CustomerMessagesPage() {
       if (requestIdFromUrl && resolvedRequests.length > 0) {
         const requestToSelect = resolvedRequests.find(r => r.id === requestIdFromUrl);
         if (requestToSelect && (!selectedRequest || selectedRequest.id !== requestToSelect.id)) {
-          handleSelectRequest(requestToSelect); // Use handleSelectRequest to ensure messages are loaded
+          handleSelectRequest(requestToSelect);
+        } else if (!requestToSelect && selectedRequest && selectedRequest.id === requestIdFromUrl) {
+          // If the previously selected request (from URL) is no longer in the list (e.g., booked and filtered out)
+          // clear the selection.
+          setSelectedRequest(null);
         }
       } else if (selectedRequest && resolvedRequests.length > 0) { 
         const updatedSelectedRequest = resolvedRequests.find(r => r.id === selectedRequest.id);
         setSelectedRequest(updatedSelectedRequest || null);
+      } else if (!requestIdFromUrl) {
+        setSelectedRequest(null); // Clear selection if no requestId in URL
       }
       setIsLoadingRequests(false);
 
@@ -241,12 +160,12 @@ export default function CustomerMessagesPage() {
     });
 
     return () => unsubscribe();
-  }, [user, toast, searchParams]); // Removed selectedRequest.id to avoid re-triggering when selectedRequest updates internally
+  }, [user, toast, searchParams]); 
 
   useEffect(() => {
     if (!selectedRequest) {
       setMessages([]);
-      return () => {}; // Return an empty function for cleanup
+      return () => {}; 
     }
 
     setIsLoadingMessages(true);
@@ -257,12 +176,16 @@ export default function CustomerMessagesPage() {
       const fetchedMessages = querySnapshot.docs.map(docSnap => {
         const data = docSnap.data();
         let timestamp = data.timestamp;
-        if (timestamp && typeof timestamp.toDate === 'function') {
-            timestamp = (timestamp as Timestamp).toDate();
+        if (timestamp instanceof Timestamp) {
+            timestamp = timestamp.toDate();
+        } else if (timestamp && typeof timestamp.toDate === 'function') { 
+            timestamp = (timestamp as any).toDate();
         } else if (timestamp && typeof timestamp === 'string') { 
             timestamp = new Date(timestamp);
-        } else if (timestamp === null || timestamp === undefined) {
-            timestamp = new Date(); // Fallback if timestamp is missing
+        } else if (timestamp && typeof timestamp === 'object' && timestamp.seconds !== undefined) {
+            timestamp = new Timestamp(timestamp.seconds, timestamp.nanoseconds).toDate();
+        } else if (!(timestamp instanceof Date)) {
+            timestamp = new Date(); // Fallback if timestamp is missing or unparsable
         }
         return {
           id: docSnap.id,
@@ -284,16 +207,14 @@ export default function CustomerMessagesPage() {
   const handleSelectRequest = (request: EnrichedCustomerRequest) => {
     setSelectedRequest(request);
     setNewMessageText('');
-    setBookingFinalizationStatus('idle'); // Reset payment status when selecting a new request
+    setBookingFinalizationStatus('idle'); 
     setPaymentError(null);
-    // Update URL without full page reload if already on messages page
     if (pathname === '/customer/dashboard/messages') {
       router.replace(`/customer/dashboard/messages?requestId=${request.id}`, { scroll: false });
     } else {
       router.push(`/customer/dashboard/messages?requestId=${request.id}`);
     }
   };
-  const pathname = usePathname(); // Get current pathname
 
   const handleSendMessage = async () => {
     if (!user || !userProfile || !selectedRequest || !newMessageText.trim()) return;
@@ -313,8 +234,6 @@ export default function CustomerMessagesPage() {
       });
       
       let newStatus = selectedRequest.status;
-      // If customer replies to a proposal, keep it as 'awaiting_customer_response' or similar,
-      // or it might go back to 'awaiting_customer_response' if it was 'proposal_sent' or 'chef_accepted'
       if (selectedRequest.status === 'proposal_sent' || selectedRequest.status === 'chef_accepted') {
         newStatus = 'awaiting_customer_response'; 
       }
@@ -330,11 +249,10 @@ export default function CustomerMessagesPage() {
   };
   
   const handlePaymentAttemptComplete = async (result: { success: boolean; paymentIntentId?: string; error?: string }) => {
-    setIsProcessingPayment(false); // Handled by StripeForm, but good to ensure here too
+    setIsProcessingPayment(false); 
     if (result.success && result.paymentIntentId) {
       setBookingFinalizationStatus('awaiting_confirmation');
       toast({ title: "Payment Processed!", description: "Finalizing your booking with the chef..." });
-      // Simulate backend finalization
       await proceedWithBookingCreation(result.paymentIntentId);
     } else {
       setBookingFinalizationStatus('failed');
@@ -347,8 +265,12 @@ export default function CustomerMessagesPage() {
     if (!selectedRequest || !selectedRequest.activeProposal || !user || !userProfile) {
       setBookingFinalizationStatus('failed');
       setPaymentError("Missing critical information to create booking.");
+      toast({ title: "Booking Error", description: "Missing critical information.", variant: "destructive" });
       return;
     }
+    
+    setIsActuallyProcessingPayment(true); // Indicate final backend processing
+    await new Promise(resolve => setTimeout(resolve, 2500)); // Simulate backend delay
 
     const requestDocRef = doc(db, "customerRequests", selectedRequest.id);
     const systemMessageText = `You accepted the proposal from Chef ${selectedRequest.activeProposal.chefName}. Booking is being finalized. ${paymentIntentId ? `Payment ID: ${paymentIntentId.substring(0,10)}...` : ''}`;
@@ -356,14 +278,15 @@ export default function CustomerMessagesPage() {
     try {
       const batch = writeBatch(db);
 
+      // Update CustomerRequest status to 'booked'
       batch.update(requestDocRef, {
-        status: 'customer_confirmed', 
+        status: 'booked', // Final status after payment and booking creation
         updatedAt: serverTimestamp()
       });
       
       const eventDateAsTimestamp = selectedRequest.eventDate instanceof Date 
                                    ? Timestamp.fromDate(selectedRequest.eventDate) 
-                                   : selectedRequest.eventDate;
+                                   : selectedRequest.eventDate; // Assume it might already be a Timestamp from fetch
 
       const newBookingData: Omit<Booking, 'id'> = {
         customerId: user.uid,
@@ -376,7 +299,7 @@ export default function CustomerMessagesPage() {
         pax: selectedRequest.pax,
         totalPrice: selectedRequest.activeProposal.menuPricePerHead * selectedRequest.pax,
         pricePerHead: selectedRequest.activeProposal.menuPricePerHead,
-        status: 'confirmed', // This status signifies successful payment and booking
+        status: 'confirmed', 
         menuTitle: selectedRequest.activeProposal.menuTitle,
         location: selectedRequest.location || undefined,
         requestId: selectedRequest.id,
@@ -421,14 +344,17 @@ export default function CustomerMessagesPage() {
         description: `Your event with Chef ${newBookingData.chefName} is confirmed. Booking ID: ${bookingDocRef.id.substring(0,6)}... Check 'My Booked Events'.`,
         duration: 7000,
       });
-      setIsPaymentDialogOpen(false); // Close payment dialog
+      setIsPaymentDialogOpen(false); 
       router.push('/customer/dashboard/events');
 
     } catch (error) {
       console.error("Error accepting proposal and creating booking:", error);
       setBookingFinalizationStatus('failed');
-      setPaymentError(`Could not complete booking. Details: ${(error as Error).message}`);
-      toast({ title: "Error", description: `Could not complete booking. Details: ${(error as Error).message}`, variant: "destructive" });
+      const errorMessage = (error instanceof Error) ? error.message : "Could not complete booking.";
+      setPaymentError(`Could not complete booking. Details: ${errorMessage}`);
+      toast({ title: "Error", description: `Could not complete booking. Details: ${errorMessage}`, variant: "destructive" });
+    } finally {
+      setIsActuallyProcessingPayment(false);
     }
   };
 
@@ -440,18 +366,18 @@ export default function CustomerMessagesPage() {
 
     if (action === 'accept') {
       setIsPaymentDialogOpen(true); 
-      setBookingFinalizationStatus('payment_processing'); // Indicate payment step is starting
+      setBookingFinalizationStatus('payment_processing'); 
       return;
     }
 
     // Handle 'decline'
-    setBookingFinalizationStatus('idle'); // Reset if it was processing something else
+    setBookingFinalizationStatus('idle'); 
     const requestDocRef = doc(db, "customerRequests", selectedRequest.id);
     const systemMessageText = `You declined the proposal from Chef ${selectedRequest.activeProposal.chefName}.`;
     
     try {
-        const batch = writeBatch(db);
-        batch.update(requestDocRef, {
+        const batchWrite = writeBatch(db);
+        batchWrite.update(requestDocRef, {
           status: 'proposal_declined',
           activeProposal: null, 
           updatedAt: serverTimestamp()
@@ -459,7 +385,7 @@ export default function CustomerMessagesPage() {
         
         const messagesCollectionRef = collection(requestDocRef, "messages");
         const systemMessageRef = doc(messagesCollectionRef);
-        batch.set(systemMessageRef, {
+        batchWrite.set(systemMessageRef, {
           requestId: selectedRequest.id,
           senderId: 'system',
           senderRole: 'system',
@@ -467,11 +393,12 @@ export default function CustomerMessagesPage() {
           timestamp: serverTimestamp()
         });
 
-        await batch.commit();
+        await batchWrite.commit();
         toast({ title: "Proposal Declined", variant: "default", description: "The chef has been notified." });
     } catch (error) {
       console.error(`Error declining proposal:`, error);
-      toast({ title: "Error", description: `Could not decline proposal. Details: ${(error as Error).message}`, variant: "destructive" });
+      const errorMessage = (error instanceof Error) ? error.message : "Could not decline proposal.";
+      toast({ title: "Error", description: `Could not decline proposal. Details: ${errorMessage}`, variant: "destructive" });
     }
   };
   
@@ -490,9 +417,9 @@ export default function CustomerMessagesPage() {
                                (selectedRequest.status === 'proposal_sent' || selectedRequest.status === 'chef_accepted');
   
   const isConversationFinalized = selectedRequest && 
-                                  (selectedRequest.status === 'customer_confirmed' || 
+                                  (selectedRequest.status === 'customer_confirmed' ||
+                                   selectedRequest.status === 'booked' ||
                                    selectedRequest.status === 'proposal_declined' ||
-                                   selectedRequest.status === 'booked' || // 'booked' might be a final server-side confirmed state
                                    selectedRequest.status === 'cancelled_by_customer');
 
 
@@ -585,8 +512,8 @@ export default function CustomerMessagesPage() {
           <CardContent className="p-6 flex-grow overflow-y-auto space-y-4">
             {isLoadingMessages ? (
                 <div className="flex justify-center items-center h-full"><Loader2 className="h-5 w-5 animate-spin mr-2"/>Loading messages...</div>
-            ) : messages.length === 0 && !selectedRequest.activeProposal && bookingFinalizationStatus === 'idle' ? (
-                <div className="text-center text-muted-foreground py-8">No messages yet for this request. Send a message to start the conversation or await a chef's proposal.</div>
+            ) : messages.length === 0 && !selectedRequest.activeProposal && bookingFinalizationStatus === 'idle' && selectedRequest.status !== 'booked' && selectedRequest.status !== 'proposal_declined' ? (
+                <div className="text-center text-muted-foreground py-8">No messages yet. Await a chef's proposal or send a message if applicable.</div>
             ) : (
               <>
                 {messages.map(msg => (
@@ -635,10 +562,10 @@ export default function CustomerMessagesPage() {
                 </CardContent>
                 {canTakeProposalAction && (
                   <CardFooter className="p-0 pt-3 flex gap-2">
-                    <Button onClick={() => handleProposalAction('accept')} size="sm" className="bg-green-600 hover:bg-green-700" disabled={bookingFinalizationStatus !== 'idle'}>
+                    <Button onClick={() => handleProposalAction('accept')} size="sm" className="bg-green-600 hover:bg-green-700" disabled={bookingFinalizationStatus !== 'idle' || isActuallyProcessingPayment}>
                       <CheckCircle className="h-4 w-4 mr-1.5"/> Accept & Proceed to Pay
                     </Button>
-                    <Button onClick={() => handleProposalAction('decline')} size="sm" variant="outline" disabled={bookingFinalizationStatus !== 'idle'}>
+                    <Button onClick={() => handleProposalAction('decline')} size="sm" variant="outline" disabled={bookingFinalizationStatus !== 'idle' || isActuallyProcessingPayment}>
                       <XCircle className="h-4 w-4 mr-1.5"/> Decline Proposal
                     </Button>
                   </CardFooter>
@@ -660,9 +587,14 @@ export default function CustomerMessagesPage() {
                     <AlertTriangle className="inline h-5 w-5 mr-2"/> {paymentError}
                 </div>
             )}
-            {selectedRequest.status === 'customer_confirmed' && bookingFinalizationStatus !== 'confirmed' && ( // Shows if page reloaded after confirmation but before redirect
+            {selectedRequest.status === 'customer_confirmed' && bookingFinalizationStatus !== 'confirmed' && ( 
                 <div className="text-sm text-green-700 dark:text-green-400 mt-2 font-medium p-3 rounded-md bg-green-50 dark:bg-green-800/30 border border-green-200 dark:border-green-700 text-center">
-                    <CheckCircle className="inline h-5 w-5 mr-2"/> This booking is confirmed. Redirecting soon or check 'My Booked Events'.
+                    <CheckCircle className="inline h-5 w-5 mr-2"/> This request is confirmed and booking is being processed. Redirecting soon or check 'My Booked Events'.
+                </div>
+            )}
+            {selectedRequest.status === 'booked' && bookingFinalizationStatus !== 'confirmed' && ( 
+                <div className="text-sm text-green-700 dark:text-green-400 mt-2 font-medium p-3 rounded-md bg-green-50 dark:bg-green-800/30 border border-green-200 dark:border-green-700 text-center">
+                    <CheckCircle className="inline h-5 w-5 mr-2"/> This request has been booked. Check 'My Booked Events'.
                 </div>
             )}
             {selectedRequest.status === 'proposal_declined' && (
@@ -679,20 +611,20 @@ export default function CustomerMessagesPage() {
             </div>
             <div className="flex w-full items-center space-x-2">
               <Textarea
-                placeholder={isConversationFinalized || bookingFinalizationStatus !== 'idle' ? "Conversation ended or action pending." : "Type your message..."}
+                placeholder={isConversationFinalized || bookingFinalizationStatus !== 'idle' || isActuallyProcessingPayment ? "Conversation ended or action pending." : "Type your message..."}
                 value={newMessageText}
                 onChange={(e) => setNewMessageText(e.target.value)}
                 className="flex-1 min-h-[40px] max-h-[120px]"
                 rows={1}
-                disabled={isSendingMessage || isConversationFinalized || bookingFinalizationStatus !== 'idle'}
+                disabled={isSendingMessage || isConversationFinalized || bookingFinalizationStatus !== 'idle' || isActuallyProcessingPayment}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    if (newMessageText.trim() && !isConversationFinalized && bookingFinalizationStatus === 'idle') handleSendMessage();
+                    if (newMessageText.trim() && !isConversationFinalized && bookingFinalizationStatus === 'idle' && !isActuallyProcessingPayment) handleSendMessage();
                   }
                 }}
               />
-              <Button type="submit" size="icon" onClick={handleSendMessage} disabled={isSendingMessage || !newMessageText.trim() || isConversationFinalized || bookingFinalizationStatus !== 'idle'}>
+              <Button type="submit" size="icon" onClick={handleSendMessage} disabled={isSendingMessage || !newMessageText.trim() || isConversationFinalized || bookingFinalizationStatus !== 'idle' || isActuallyProcessingPayment}>
                 {isSendingMessage ? <Loader2 className="animate-spin h-5 w-5"/> : <Send className="h-5 w-5" />}
                 <span className="sr-only">Send</span>
               </Button>
@@ -709,11 +641,10 @@ export default function CustomerMessagesPage() {
 
       {selectedRequest && selectedRequest.activeProposal && (
         <AlertDialog open={isPaymentDialogOpen} onOpenChange={(open) => {
-            // Prevent closing if payment is actively being processed by Stripe form
             if (isProcessingPayment && open) return;
-            // Allow closing if booking finalization is just 'awaiting_confirmation' but Stripe form is done
+            if (isActuallyProcessingPayment && open) return; // Also prevent closing if final backend processing simulation is active
             if (bookingFinalizationStatus === 'awaiting_confirmation' && !isProcessingPayment && !open) {
-                setBookingFinalizationStatus('idle'); // Reset if user cancels before server confirms
+                setBookingFinalizationStatus('idle');
             }
             setIsPaymentDialogOpen(open);
         }}>
@@ -723,9 +654,14 @@ export default function CustomerMessagesPage() {
                     <AlertDialogDescription className="text-left space-y-2 pt-2">
                         <p>You are about to accept the proposal from <strong>Chef {selectedRequest.activeProposal.chefName}</strong> for: <strong>"{selectedRequest.activeProposal.menuTitle || selectedRequest.eventType}"</strong>.</p>
                         <p>Total Price: <strong className="text-lg">AUD {(selectedRequest.activeProposal.menuPricePerHead * selectedRequest.pax).toFixed(2)}</strong>.</p>
-                        {bookingFinalizationStatus === 'payment_processing' && !isProcessingPayment && ( // Stripe form might have finished, but outer processing not
+                        {bookingFinalizationStatus === 'payment_processing' && !isProcessingPayment && (
                             <div className="text-sm text-blue-600 flex items-center justify-center py-2">
-                                <Loader2 className="h-4 w-4 animate-spin mr-2"/> Validating payment...
+                                <Loader2 className="h-4 w-4 animate-spin mr-2"/> Verifying payment details...
+                            </div>
+                        )}
+                         {isActuallyProcessingPayment && (
+                             <div className="text-sm text-blue-600 flex items-center justify-center py-2">
+                                <Loader2 className="h-4 w-4 animate-spin mr-2"/> Finalizing your booking...
                             </div>
                         )}
                     </AlertDialogDescription>
@@ -733,6 +669,8 @@ export default function CustomerMessagesPage() {
                 {bookingFinalizationStatus === 'payment_processing' && (
                     <StripeElementsProvider>
                     <StripePaymentForm
+                        customerName={userProfile?.name || "Customer"}
+                        customerEmail={user?.email || ""}
                         totalPrice={selectedRequest.activeProposal.menuPricePerHead * selectedRequest.pax}
                         onPaymentAttemptComplete={handlePaymentAttemptComplete}
                         isProcessingPayment={isProcessingPayment}
@@ -744,9 +682,10 @@ export default function CustomerMessagesPage() {
                 <AlertDialogFooter className="mt-2"> 
                     <AlertDialogCancel onClick={() => {
                         setIsPaymentDialogOpen(false); 
-                        setBookingFinalizationStatus('idle'); // Reset if user cancels payment process
-                        setIsProcessingPayment(false); // Ensure this is also reset
-                    }} disabled={isProcessingPayment}>Cancel Payment</AlertDialogCancel>
+                        setBookingFinalizationStatus('idle'); 
+                        setIsProcessingPayment(false); 
+                        setIsActuallyProcessingPayment(false);
+                    }} disabled={isProcessingPayment || isActuallyProcessingPayment}>Cancel Payment</AlertDialogCancel>
                 </AlertDialogFooter>
             </AlertDialogContent>
         </AlertDialog>
@@ -755,3 +694,5 @@ export default function CustomerMessagesPage() {
   );
 }
 
+
+    
