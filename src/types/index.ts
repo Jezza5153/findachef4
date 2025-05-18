@@ -1,5 +1,4 @@
 
-
 export interface MenuIngredient {
   id: string; // for stable list rendering
   name: string;
@@ -32,7 +31,8 @@ export interface Menu {
   menuIngredients?: MenuIngredient[];
   calculatedTotalIngredientCost?: number; // Sum of all menuIngredients.totalCost
   calculatedCostPricePerHead?: number; // calculatedTotalIngredientCost / pax
-  adminStatus?: 'pending' | 'approved' | 'rejected'; // For admin review
+  adminStatus?: 'pending' | 'approved' | 'rejected';
+  adminNotes?: string;
 }
 
 export interface ParseResumeOutput {
@@ -77,7 +77,7 @@ export interface ChefProfile extends UserProfileBase {
   resumeFileUrl?: string;
   isApproved?: boolean;
   isSubscribed?: boolean;
-  blockedDates?: string[]; // Array of ISO date strings
+  blockedDates?: string[]; // Array of ISO date strings "YYYY-MM-DD"
   trustScore?: number;
   trustScoreBasis?: string;
   teamId?: string;
@@ -95,7 +95,7 @@ export interface CustomerProfile extends UserProfileBase {
   addressDetails?: string;
   defaultEventType?: string;
   defaultPax?: number;
-  defaultBudgetAmount?: number; 
+  defaultBudgetAmount?: number;
   defaultFrequency?: string;
   defaultTheme?: string;
   defaultDietaryNotes?: string;
@@ -104,7 +104,6 @@ export interface CustomerProfile extends UserProfileBase {
 
 export interface AdminProfile extends UserProfileBase {
   role: 'admin';
-  // Admin specific fields can be added here if needed
 }
 
 export type AppUserProfile = ChefProfile | CustomerProfile | AdminProfile;
@@ -120,7 +119,7 @@ export interface CustomerRequest {
   location?: string;
   notes?: string;
   customerId: string;
-  status?: 'new' | 'awaiting_customer_response' | 'proposal_sent' | 'chef_declined' | 'chef_accepted' | 'customer_confirmed' | 'booked' | 'cancelled_by_customer' | 'payment_failed';
+  status?: 'new' | 'awaiting_customer_response' | 'proposal_sent' | 'chef_declined' | 'chef_accepted' | 'customer_confirmed' | 'booked' | 'cancelled_by_customer' | 'proposal_declined';
   createdAt?: any; // Firestore Timestamp or Date object
   updatedAt?: any; // Firestore Timestamp or Date object
   respondingChefIds?: string[];
@@ -129,22 +128,24 @@ export interface CustomerRequest {
     menuTitle: string;
     menuPricePerHead: number;
     chefId: string;
-    chefName: string; // Denormalized chef name
-    chefAvatarUrl?: string; // Denormalized chef avatar
+    chefName: string; 
+    chefAvatarUrl?: string; 
     notes?: string;
     proposedAt: any; // Firestore Timestamp
-  };
+  } | null; // Allow null for clearing proposal
   declinedChefIds?: string[];
-  requestedMenuId?: string; 
+  requestedMenuId?: string;
   requestedMenuTitle?: string;
+  moderationStatus?: 'pending_review' | 'resolved' | 'customer_warned' | 'customer_suspended';
+  adminNotes?: string;
 }
 
 export interface RequestMessage {
-  id: string; 
-  requestId: string; 
-  senderId: string; 
-  senderName?: string; 
-  senderAvatarUrl?: string; 
+  id: string;
+  requestId: string;
+  senderId: string;
+  senderName?: string;
+  senderAvatarUrl?: string;
   senderRole: 'chef' | 'customer' | 'system';
   text: string;
   timestamp: any; // Firestore Timestamp or Date object
@@ -170,7 +171,7 @@ export interface ShoppingListItem {
   name: string;
   quantity: number;
   unit: string;
-  estimatedCost: number; // This is cost per item in shopping list
+  estimatedCost: number; 
   notes?: string;
   purchased: boolean;
   menuId?: string;
@@ -180,7 +181,7 @@ export interface ShoppingListItem {
 }
 
 export interface CalendarEvent {
-  id: string; // Should match bookingId if created from a booking
+  id: string; 
   chefId: string;
   date: any; // Firestore Timestamp or Date object
   title: string;
@@ -194,8 +195,8 @@ export interface CalendarEvent {
   status: 'Confirmed' | 'Pending' | 'Cancelled' | 'WallEvent' | 'Completed';
   weather?: string;
   toolsNeeded?: string[];
-  createdAt?: any; // Firestore Timestamp or Date object
-  updatedAt?: any; // Firestore Timestamp or Date object
+  createdAt?: any; 
+  updatedAt?: any; 
   teamId?: string;
   isWallEvent?: boolean;
 }
@@ -216,8 +217,8 @@ export interface ChefWallEvent {
   chefName: string;
   chefAvatarUrl?: string;
   dataAiHint?: string;
-  createdAt?: any; // Firestore Timestamp or Date object
-  updatedAt?: any; // Firestore Timestamp or Date object
+  createdAt?: any; 
+  updatedAt?: any; 
   teamId?: string;
 }
 
@@ -251,8 +252,8 @@ export interface Receipt {
   costType: CostType;
   notes?: string;
   imageUrl?: string;
-  createdAt?: any; // Firestore Timestamp or Date object
-  updatedAt?: any; // Firestore Timestamp or Date object
+  createdAt?: any; 
+  updatedAt?: any; 
 }
 
 export interface TaxAdviceInput {
@@ -267,14 +268,13 @@ export interface TaxAdviceOutput {
 
 export interface ActivityItem {
   id: string;
-  type: string; 
+  type: string;
   description: string;
   timestamp: any; // Firestore Timestamp or Date object
-  linkTo?: string; 
+  linkTo?: string;
   isRead?: boolean;
 }
 
-// AI Flow related types
 export interface MenuItemAssistInput {
   menuTitle: string;
   currentDescription?: string;
@@ -298,36 +298,31 @@ export interface ReceiptParserOutput {
 }
 
 export interface Booking {
-  id: string; // Firestore document ID
+  id: string; 
   customerId: string;
-  customerName?: string; // Denormalized for display
+  customerName?: string; 
   chefId: string;
-  chefName: string; // Denormalized for display
-  chefAvatarUrl?: string; // Denormalized for display
-  eventId?: string; // If booked from a ChefWallEvent
-  menuId?: string; // If a specific menu was booked
-  menuTitle?: string; // Denormalized
-  requestId?: string; // Link back to the original CustomerRequest
-  eventTitle: string; // Can be from request.eventType or a custom title
+  chefName: string; 
+  chefAvatarUrl?: string; 
+  eventTitle: string; 
   eventDate: any; // Firestore Timestamp or Date object
   pax: number;
-  pricePerHead?: number; // From proposal
-  totalPrice: number; // Usually pricePerHead * pax
+  totalPrice: number; 
+  pricePerHead?: number;
   status: 'pending_payment' | 'confirmed' | 'completed' | 'cancelled_by_customer' | 'cancelled_by_chef' | 'payment_failed';
+  createdAt: any; 
+  updatedAt?: any; 
+  menuTitle?: string; 
   location?: string;
-  customerNotes?: string; // From original request or subsequent chat
-  chefNotes?: string; // From proposal or subsequent chat
-  qrCodeScannedAt?: any; // Firestore Timestamp or Date object
-  paymentIntentId?: string; // To store Stripe PaymentIntent ID
-  createdAt: any; // Firestore Timestamp or Date object
-  updatedAt?: any; // Firestore Timestamp or Date object
+  qrCodeScannedAt?: any; 
+  paymentIntentId?: string; 
+  requestId?: string; 
+  chefWallEventId?: string; // Link if booked from a ChefWallEvent
 }
 
 
-// Enriched types for UI display
 export interface EnrichedCustomerRequest extends CustomerRequest {
   proposingChef?: Pick<ChefProfile, 'name' | 'profilePictureUrl'>;
 }
 
-// General User Profile Type for AuthContext
 export type AppUserProfileContext = UserProfileBase & Partial<ChefProfile> & Partial<CustomerProfile> & Partial<AdminProfile>;

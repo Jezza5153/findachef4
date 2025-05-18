@@ -951,6 +951,14 @@ body {
   max-height: 100vh;
 }
 
+.max-h-48 {
+  max-height: 12rem;
+}
+
+.max-h-\[50vh\] {
+  max-height: 50vh;
+}
+
 .min-h-0 {
   min-height: 0;
 }
@@ -1906,6 +1914,10 @@ body {
   padding: 1px;
 }
 
+.p-1\.5 {
+  padding: .375rem;
+}
+
 .px-1 {
   padding-left: .25rem;
   padding-right: .25rem;
@@ -2117,6 +2129,10 @@ body {
 .text-xs {
   font-size: .75rem;
   line-height: 1rem;
+}
+
+.text-\[10px\] {
+  font-size: 10px;
 }
 
 .font-bold {

@@ -10,11 +10,11 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { MessageSquare, Send, UserCircle, Search, Inbox, AlertTriangle, Info, CheckCircle, XCircle, Loader2, FileText, Briefcase, DollarSign, CalendarDays, CreditCard } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, doc, updateDoc, addDoc, serverTimestamp, Timestamp, onSnapshot, orderBy, getDoc as getFirestoreDoc, writeBatch, arrayUnion } from 'firebase/firestore';
-import type { CustomerRequest, RequestMessage, ChefProfile, EnrichedCustomerRequest, Booking, CalendarEvent } from '@/types';
+import { collection, query, where, getDoc as getFirestoreDoc, onSnapshot, orderBy, Timestamp, doc, updateDoc, addDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
+import type { CustomerRequest, RequestMessage, ChefProfile, EnrichedCustomerRequest, Booking, CalendarEvent, AppUserProfileContext } from '@/types';
 import { format, isToday, isYesterday } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
-import { useRouter, useSearchParams, usePathname } from 'next/navigation'; // Added usePathname
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,13 +25,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { loadStripe } from '@stripe/stripe-js';
+import { loadStripe, Stripe } from '@stripe/stripe-js';
 import dynamic from 'next/dynamic';
 
 const StripeElementsProvider = dynamic(() =>
   Promise.all([
     import('@stripe/react-stripe-js').then(mod => mod.Elements),
-    import('@stripe/stripe-js').then(mod => loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!))
+    loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!)
   ]).then(([{ Elements: StripeElementsComponent }, stripePromise]) => ({ default: ({children}: {children: React.ReactNode}) => 
     stripePromise ? <StripeElementsComponent stripe={stripePromise}>{children}</StripeElementsComponent> : <div className="text-center py-4"><Loader2 className="h-6 w-6 animate-spin mx-auto" /> Initializing Payment Gateway...</div>
   })), { ssr: false, loading: () => <div className="text-center py-4"><Loader2 className="h-6 w-6 animate-spin mx-auto" /> Initializing Payment Gateway...</div> }
@@ -49,7 +49,7 @@ export default function CustomerMessagesPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const pathname = usePathname(); 
+  const pathname = usePathname();
 
   const [customerRequests, setCustomerRequests] = useState<EnrichedCustomerRequest[]>([]);
   const [selectedRequest, setSelectedRequest] = useState<EnrichedCustomerRequest | null>(null);
@@ -61,11 +61,10 @@ export default function CustomerMessagesPage() {
   const [isSendingMessage, setIsSendingMessage] = useState(false);
   
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
-  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false); // For Stripe form
   const [bookingFinalizationStatus, setBookingFinalizationStatus] = useState<'idle' | 'payment_processing' | 'awaiting_confirmation' | 'confirmed' | 'failed'>('idle');
   const [paymentError, setPaymentError] = useState<string | null>(null);
-  const [isActuallyProcessingPayment, setIsActuallyProcessingPayment] = useState(false);
-
+  const [isActuallyProcessingPayment, setIsActuallyProcessingPayment] = useState(false); // For Firestore writes after payment
 
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -87,7 +86,7 @@ export default function CustomerMessagesPage() {
     const q = query(
       requestsCollectionRef,
       where("customerId", "==", user.uid),
-      orderBy("updatedAt", "desc") 
+      orderBy("updatedAt", "desc")
     );
 
     const unsubscribe = onSnapshot(q, async (querySnapshot) => {
@@ -141,15 +140,17 @@ export default function CustomerMessagesPage() {
         if (requestToSelect && (!selectedRequest || selectedRequest.id !== requestToSelect.id)) {
           handleSelectRequest(requestToSelect);
         } else if (!requestToSelect && selectedRequest && selectedRequest.id === requestIdFromUrl) {
-          // If the previously selected request (from URL) is no longer in the list (e.g., booked and filtered out)
-          // clear the selection.
           setSelectedRequest(null);
         }
-      } else if (selectedRequest && resolvedRequests.length > 0) { 
+      } else if (selectedRequest && resolvedRequests.length > 0) {
         const updatedSelectedRequest = resolvedRequests.find(r => r.id === selectedRequest.id);
-        setSelectedRequest(updatedSelectedRequest || null);
+        if (updatedSelectedRequest) {
+          setSelectedRequest(prev => ({...prev, ...updatedSelectedRequest})); // Merge to keep potential transient UI states
+        } else {
+          setSelectedRequest(null); // Selected request no longer exists or matches filters
+        }
       } else if (!requestIdFromUrl) {
-        setSelectedRequest(null); // Clear selection if no requestId in URL
+         // setSelectedRequest(null); // Keep current selection if no URL param
       }
       setIsLoadingRequests(false);
 
@@ -160,12 +161,12 @@ export default function CustomerMessagesPage() {
     });
 
     return () => unsubscribe();
-  }, [user, toast, searchParams]); 
+  }, [user, toast, searchParams]);
 
   useEffect(() => {
     if (!selectedRequest) {
       setMessages([]);
-      return () => {}; 
+      return () => {};
     }
 
     setIsLoadingMessages(true);
@@ -185,7 +186,7 @@ export default function CustomerMessagesPage() {
         } else if (timestamp && typeof timestamp === 'object' && timestamp.seconds !== undefined) {
             timestamp = new Timestamp(timestamp.seconds, timestamp.nanoseconds).toDate();
         } else if (!(timestamp instanceof Date)) {
-            timestamp = new Date(); // Fallback if timestamp is missing or unparsable
+            timestamp = new Date(); 
         }
         return {
           id: docSnap.id,
@@ -209,10 +210,10 @@ export default function CustomerMessagesPage() {
     setNewMessageText('');
     setBookingFinalizationStatus('idle'); 
     setPaymentError(null);
-    if (pathname === '/customer/dashboard/messages') {
+    // Update URL only if it's different, to avoid redundant pushes
+    const currentRequestId = searchParams.get('requestId');
+    if (currentRequestId !== request.id) {
       router.replace(`/customer/dashboard/messages?requestId=${request.id}`, { scroll: false });
-    } else {
-      router.push(`/customer/dashboard/messages?requestId=${request.id}`);
     }
   };
 
@@ -226,14 +227,15 @@ export default function CustomerMessagesPage() {
       await addDoc(messagesCollectionRef, {
         requestId: selectedRequest.id,
         senderId: user.uid,
-        senderName: userProfile.name || user.displayName || "Customer",
-        senderAvatarUrl: userProfile.profilePictureUrl || user.photoURL || undefined,
+        senderName: (userProfile as AppUserProfileContext).name || user.displayName || "Customer",
+        senderAvatarUrl: (userProfile as AppUserProfileContext).profilePictureUrl || user.photoURL || undefined,
         senderRole: 'customer',
         text: newMessageText,
         timestamp: serverTimestamp()
       });
       
       let newStatus = selectedRequest.status;
+      // If customer messages on a proposal_sent or chef_accepted, it implies they are responding
       if (selectedRequest.status === 'proposal_sent' || selectedRequest.status === 'chef_accepted') {
         newStatus = 'awaiting_customer_response'; 
       }
@@ -262,35 +264,35 @@ export default function CustomerMessagesPage() {
   };
 
   const proceedWithBookingCreation = async (paymentIntentId?: string) => {
-    if (!selectedRequest || !selectedRequest.activeProposal || !user || !userProfile) {
+    if (!selectedRequest || !selectedRequest.activeProposal || !user || !(userProfile as AppUserProfileContext)) {
       setBookingFinalizationStatus('failed');
       setPaymentError("Missing critical information to create booking.");
       toast({ title: "Booking Error", description: "Missing critical information.", variant: "destructive" });
       return;
     }
     
-    setIsActuallyProcessingPayment(true); // Indicate final backend processing
-    await new Promise(resolve => setTimeout(resolve, 2500)); // Simulate backend delay
-
+    setIsActuallyProcessingPayment(true); 
+    
     const requestDocRef = doc(db, "customerRequests", selectedRequest.id);
-    const systemMessageText = `You accepted the proposal from Chef ${selectedRequest.activeProposal.chefName}. Booking is being finalized. ${paymentIntentId ? `Payment ID: ${paymentIntentId.substring(0,10)}...` : ''}`;
+    const systemMessageText = `You accepted the proposal from Chef ${selectedRequest.activeProposal.chefName}. Booking is confirmed. ${paymentIntentId ? `Payment ID: ${paymentIntentId.substring(0,10)}...` : ''}`;
 
     try {
       const batch = writeBatch(db);
+      const customerNameForBooking = (userProfile as AppUserProfileContext).name || user.displayName || "Customer";
 
-      // Update CustomerRequest status to 'booked'
       batch.update(requestDocRef, {
-        status: 'booked', // Final status after payment and booking creation
+        status: 'booked', 
         updatedAt: serverTimestamp()
       });
       
       const eventDateAsTimestamp = selectedRequest.eventDate instanceof Date 
                                    ? Timestamp.fromDate(selectedRequest.eventDate) 
-                                   : selectedRequest.eventDate; // Assume it might already be a Timestamp from fetch
+                                   : selectedRequest.eventDate;
 
+      const bookingDocRef = doc(collection(db, "bookings")); 
       const newBookingData: Omit<Booking, 'id'> = {
         customerId: user.uid,
-        customerName: userProfile.name || user.displayName || "Customer",
+        customerName: customerNameForBooking, 
         chefId: selectedRequest.activeProposal.chefId,
         chefName: selectedRequest.activeProposal.chefName,
         chefAvatarUrl: selectedRequest.activeProposal.chefAvatarUrl || undefined,
@@ -307,12 +309,11 @@ export default function CustomerMessagesPage() {
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
-      const bookingDocRef = doc(collection(db, "bookings")); 
       batch.set(bookingDocRef, newBookingData);
 
       const calendarEventData: Omit<CalendarEvent, 'id' | 'createdAt' | 'updatedAt'> = {
           chefId: newBookingData.chefId,
-          date: newBookingData.eventDate, 
+          date: newBookingData.eventDate,
           title: `Booking: ${newBookingData.eventTitle}`,
           customerName: newBookingData.customerName,
           pax: newBookingData.pax,
@@ -360,7 +361,7 @@ export default function CustomerMessagesPage() {
 
 
   const handleProposalAction = async (action: 'accept' | 'decline') => {
-    if (!selectedRequest || !selectedRequest.activeProposal || !user || !userProfile) return;
+    if (!selectedRequest || !selectedRequest.activeProposal || !user || !(userProfile as AppUserProfileContext)) return;
     setBookingFinalizationStatus('idle');
     setPaymentError(null);
 
@@ -371,6 +372,7 @@ export default function CustomerMessagesPage() {
     }
 
     // Handle 'decline'
+    setIsActuallyProcessingPayment(true); // Use this to disable buttons during decline processing
     setBookingFinalizationStatus('idle'); 
     const requestDocRef = doc(db, "customerRequests", selectedRequest.id);
     const systemMessageText = `You declined the proposal from Chef ${selectedRequest.activeProposal.chefName}.`;
@@ -399,6 +401,8 @@ export default function CustomerMessagesPage() {
       console.error(`Error declining proposal:`, error);
       const errorMessage = (error instanceof Error) ? error.message : "Could not decline proposal.";
       toast({ title: "Error", description: `Could not decline proposal. Details: ${errorMessage}`, variant: "destructive" });
+    } finally {
+        setIsActuallyProcessingPayment(false);
     }
   };
   
@@ -428,7 +432,7 @@ export default function CustomerMessagesPage() {
       <Card className="w-full md:w-1/3 lg:w-1/4 flex flex-col shadow-lg">
         <CardHeader className="border-b p-4">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-xl flex items-center"><Inbox className="mr-2 h-5 w-5 text-primary"/> My Requests</CardTitle>
+            <CardTitle className="text-xl flex items-center"><Inbox className="mr-2 h-5 w-5 text-primary" data-ai-hint="inbox mail"/> My Requests</CardTitle>
             <span className="text-sm text-muted-foreground">{filteredRequests.length}</span>
           </div>
           <div className="relative mt-2">
@@ -456,15 +460,15 @@ export default function CustomerMessagesPage() {
                 >
                   <div className="flex items-start space-x-3">
                     <Avatar className="h-10 w-10">
-                      <AvatarImage src={req.proposingChef?.profilePictureUrl || undefined} alt={req.proposingChef?.name || req.eventType.charAt(0)} data-ai-hint="chef avatar"/>
+                      <AvatarImage src={req.activeProposal?.chefAvatarUrl || req.proposingChef?.profilePictureUrl || undefined} alt={req.activeProposal?.chefName || req.proposingChef?.name || req.eventType.charAt(0)} data-ai-hint="chef avatar"/>
                       <AvatarFallback>
-                        {req.proposingChef ? req.proposingChef.name?.substring(0,1).toUpperCase() : req.eventType.substring(0,1).toUpperCase()}
+                        {req.activeProposal?.chefName ? req.activeProposal.chefName.substring(0,1).toUpperCase() : (req.proposingChef ? req.proposingChef.name?.substring(0,1).toUpperCase() : req.eventType.substring(0,1).toUpperCase())}
                       </AvatarFallback>
                     </Avatar>
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-center">
                         <p className="text-sm font-semibold truncate">
-                          {req.proposingChef?.name ? `Chef ${req.proposingChef.name}` : req.eventType}
+                          {req.activeProposal?.chefName ? `Chef ${req.activeProposal.chefName}` : (req.proposingChef?.name ? `Chef ${req.proposingChef.name}` : req.eventType)}
                         </p>
                         <p className="text-xs text-muted-foreground">
                            {req.updatedAt ? format(new Date(req.updatedAt), 'PP') : (req.createdAt ? format(new Date(req.createdAt), 'PP') : 'N/A')}
@@ -490,29 +494,29 @@ export default function CustomerMessagesPage() {
           <CardHeader className="border-b p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
             <div className="flex items-center space-x-3">
               <Avatar className="h-10 w-10">
-                <AvatarImage src={selectedRequest.proposingChef?.profilePictureUrl || undefined} alt={selectedRequest.proposingChef?.name || selectedRequest.eventType.charAt(0)} data-ai-hint="chef avatar" />
+                 <AvatarImage src={selectedRequest.activeProposal?.chefAvatarUrl || selectedRequest.proposingChef?.profilePictureUrl || undefined} alt={selectedRequest.activeProposal?.chefName || selectedRequest.proposingChef?.name || selectedRequest.eventType.charAt(0)} data-ai-hint="chef avatar"/>
                 <AvatarFallback>
-                  {selectedRequest.proposingChef ? selectedRequest.proposingChef.name?.substring(0,1).toUpperCase() : selectedRequest.eventType.substring(0,1).toUpperCase()}
+                  {selectedRequest.activeProposal?.chefName ? selectedRequest.activeProposal.chefName.substring(0,1).toUpperCase() : (selectedRequest.proposingChef ? selectedRequest.proposingChef.name?.substring(0,1).toUpperCase() : selectedRequest.eventType.substring(0,1).toUpperCase())}
                 </AvatarFallback>
               </Avatar>
               <div>
                 <CardTitle className="text-lg">
-                  {selectedRequest.proposingChef?.name ? `Chat with Chef ${selectedRequest.proposingChef.name}` : selectedRequest.eventType}
+                  {selectedRequest.activeProposal?.chefName ? `Chat with Chef ${selectedRequest.activeProposal.chefName}` : (selectedRequest.proposingChef?.name ? `Chat with Chef ${selectedRequest.proposingChef.name}` : selectedRequest.eventType)}
                 </CardTitle>
                 <CardDescription className="text-xs">Request ID: {selectedRequest.id.substring(0,8)}... | Status: {getStatusDisplay(selectedRequest.status)}</CardDescription>
               </div>
             </div>
             <div className="text-xs text-muted-foreground space-y-0.5 text-right self-start sm:self-center">
-                <p><CalendarDays className="inline h-3 w-3 mr-1"/> Event Date: {selectedRequest.eventDate ? format(selectedRequest.eventDate, 'PP') : 'N/A'}</p>
-                <p><Users className="inline h-3 w-3 mr-1"/> PAX: {selectedRequest.pax}</p>
-                <p><DollarSign className="inline h-3 w-3 mr-1"/> Budget: ${selectedRequest.budget}</p>
+                <p><CalendarDays className="inline h-3 w-3 mr-1" data-ai-hint="calendar icon"/> Event Date: {selectedRequest.eventDate ? format(selectedRequest.eventDate, 'PP') : 'N/A'}</p>
+                <p><Users className="inline h-3 w-3 mr-1" data-ai-hint="users group"/> PAX: {selectedRequest.pax}</p>
+                <p><DollarSign className="inline h-3 w-3 mr-1" data-ai-hint="money dollar sign"/> Budget: ${selectedRequest.budget}</p>
             </div>
           </CardHeader>
 
           <CardContent className="p-6 flex-grow overflow-y-auto space-y-4">
             {isLoadingMessages ? (
                 <div className="flex justify-center items-center h-full"><Loader2 className="h-5 w-5 animate-spin mr-2"/>Loading messages...</div>
-            ) : messages.length === 0 && !selectedRequest.activeProposal && bookingFinalizationStatus === 'idle' && selectedRequest.status !== 'booked' && selectedRequest.status !== 'proposal_declined' ? (
+            ) : messages.length === 0 && !selectedRequest.activeProposal && bookingFinalizationStatus === 'idle' && !isConversationFinalized ? (
                 <div className="text-center text-muted-foreground py-8">No messages yet. Await a chef's proposal or send a message if applicable.</div>
             ) : (
               <>
@@ -526,7 +530,7 @@ export default function CustomerMessagesPage() {
                          </Avatar>
                       )}
                        {msg.senderRole === 'system' && (
-                          <Info className="h-5 w-5 text-muted-foreground flex-shrink-0 self-center mr-1" />
+                          <Info className="h-5 w-5 text-muted-foreground flex-shrink-0 self-center mr-1" data-ai-hint="info icon"/>
                       )}
                       <div className={`px-3 py-2 rounded-xl shadow-sm ${msg.senderId === user?.uid ? 'bg-primary text-primary-foreground' : (msg.senderRole === 'system' ? 'bg-amber-100 dark:bg-amber-800/30 text-amber-700 dark:text-amber-300 text-xs italic text-center w-full' : 'bg-muted')}`}>
                         <p className="text-sm whitespace-pre-wrap">{msg.text}</p>
@@ -534,10 +538,10 @@ export default function CustomerMessagesPage() {
                           {msg.timestamp ? format(new Date(msg.timestamp), 'p') : 'Sending...'}
                         </p>
                       </div>
-                       {msg.senderId === user?.uid && userProfile && (
+                       {msg.senderId === user?.uid && (userProfile as AppUserProfileContext) && (
                          <Avatar className="h-6 w-6">
-                           <AvatarImage src={userProfile.profilePictureUrl || user.photoURL || undefined} alt={userProfile.name || 'Me'} data-ai-hint="user avatar"/>
-                           <AvatarFallback>{userProfile.name ? userProfile.name.charAt(0).toUpperCase() : 'M'}</AvatarFallback>
+                           <AvatarImage src={(userProfile as AppUserProfileContext).profilePictureUrl || user?.photoURL || undefined} alt={(userProfile as AppUserProfileContext).name || 'Me'} data-ai-hint="user avatar"/>
+                           <AvatarFallback>{(userProfile as AppUserProfileContext).name ? (userProfile as AppUserProfileContext).name!.charAt(0).toUpperCase() : 'M'}</AvatarFallback>
                          </Avatar>
                       )}
                     </div>
@@ -551,27 +555,43 @@ export default function CustomerMessagesPage() {
               <Card className="my-4 p-4 border shadow-md bg-sky-50 dark:bg-sky-800/30 border-sky-200 dark:border-sky-700">
                 <CardHeader className="p-0 pb-2">
                   <CardTitle className="text-md flex items-center text-sky-700 dark:text-sky-300">
-                    <FileText className="mr-2 h-5 w-5"/>
+                    <FileText className="mr-2 h-5 w-5" data-ai-hint="document file"/>
                     Proposal from Chef {selectedRequest.activeProposal.chefName}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-0 text-sm space-y-1 text-sky-800 dark:text-sky-200">
-                  <p><Briefcase className="inline h-4 w-4 mr-1 text-muted-foreground"/>Menu: <strong>{selectedRequest.activeProposal.menuTitle}</strong></p>
-                  <p><DollarSign className="inline h-4 w-4 mr-1 text-muted-foreground"/>Price: <strong>${selectedRequest.activeProposal.menuPricePerHead.toFixed(2)} per head</strong> (Total: ${(selectedRequest.activeProposal.menuPricePerHead * selectedRequest.pax).toFixed(2)})</p>
-                  {selectedRequest.activeProposal.notes && <p><Info className="inline h-4 w-4 mr-1 text-muted-foreground"/>Notes: {selectedRequest.activeProposal.notes}</p>}
+                  <p><Briefcase className="inline h-4 w-4 mr-1 text-muted-foreground" data-ai-hint="briefcase icon"/>Menu: <strong>{selectedRequest.activeProposal.menuTitle}</strong></p>
+                  <p><DollarSign className="inline h-4 w-4 mr-1 text-muted-foreground" data-ai-hint="money dollar"/>Price: <strong>${selectedRequest.activeProposal.menuPricePerHead.toFixed(2)} per head</strong> (Total: ${(selectedRequest.activeProposal.menuPricePerHead * selectedRequest.pax).toFixed(2)})</p>
+                  {selectedRequest.activeProposal.notes && <p><Info className="inline h-4 w-4 mr-1 text-muted-foreground" data-ai-hint="info icon"/>Notes: {selectedRequest.activeProposal.notes}</p>}
                 </CardContent>
                 {canTakeProposalAction && (
                   <CardFooter className="p-0 pt-3 flex gap-2">
                     <Button onClick={() => handleProposalAction('accept')} size="sm" className="bg-green-600 hover:bg-green-700" disabled={bookingFinalizationStatus !== 'idle' || isActuallyProcessingPayment}>
-                      <CheckCircle className="h-4 w-4 mr-1.5"/> Accept & Proceed to Pay
+                      <CheckCircle className="h-4 w-4 mr-1.5" data-ai-hint="check circle"/> Accept & Proceed to Pay
                     </Button>
                     <Button onClick={() => handleProposalAction('decline')} size="sm" variant="outline" disabled={bookingFinalizationStatus !== 'idle' || isActuallyProcessingPayment}>
-                      <XCircle className="h-4 w-4 mr-1.5"/> Decline Proposal
+                      <XCircle className="h-4 w-4 mr-1.5" data-ai-hint="cross circle"/> Decline Proposal
                     </Button>
                   </CardFooter>
                 )}
               </Card>
             )}
+             {selectedRequest.status === 'customer_confirmed' && bookingFinalizationStatus !== 'confirmed' && ( 
+                <div className="text-sm text-green-700 dark:text-green-400 mt-2 font-medium p-3 rounded-md bg-green-50 dark:bg-green-800/30 border border-green-200 dark:border-green-700 text-center">
+                    <CheckCircle className="inline h-5 w-5 mr-2" data-ai-hint="check circle"/> You have accepted the proposal. Finalizing booking... (This may redirect shortly)
+                </div>
+            )}
+            {selectedRequest.status === 'booked' && bookingFinalizationStatus !== 'confirmed' && ( 
+                <div className="text-sm text-green-700 dark:text-green-400 mt-2 font-medium p-3 rounded-md bg-green-50 dark:bg-green-800/30 border border-green-200 dark:border-green-700 text-center">
+                    <CheckCircle className="inline h-5 w-5 mr-2" data-ai-hint="check circle"/> This request has been booked. Check 'My Booked Events'.
+                </div>
+            )}
+            {selectedRequest.status === 'proposal_declined' && (
+                <div className="text-sm text-red-700 dark:text-red-400 mt-2 font-medium p-3 rounded-md bg-red-50 dark:bg-red-800/30 border border-red-200 dark:border-red-700 text-center">
+                    <XCircle className="inline h-5 w-5 mr-2" data-ai-hint="cross circle"/> You have declined this proposal.
+                </div>
+            )}
+
             {bookingFinalizationStatus === 'awaiting_confirmation' && (
                  <div className="text-sm text-blue-600 dark:text-blue-400 mt-2 font-medium p-3 rounded-md bg-blue-50 dark:bg-blue-800/30 border border-blue-200 dark:border-blue-700 text-center flex items-center justify-center">
                     <Loader2 className="animate-spin h-5 w-5 mr-2"/> Payment processed. Finalizing your booking, please wait...
@@ -579,52 +599,37 @@ export default function CustomerMessagesPage() {
             )}
             {bookingFinalizationStatus === 'confirmed' && (
                 <div className="text-sm text-green-700 dark:text-green-400 mt-2 font-medium p-3 rounded-md bg-green-50 dark:bg-green-800/30 border border-green-200 dark:border-green-700 text-center">
-                    <CheckCircle className="inline h-5 w-5 mr-2"/> Booking confirmed! Check 'My Booked Events' for details.
+                    <CheckCircle className="inline h-5 w-5 mr-2" data-ai-hint="check circle"/> Booking confirmed! Check 'My Booked Events' for details.
                 </div>
             )}
              {bookingFinalizationStatus === 'failed' && paymentError && (
                 <div className="text-sm text-red-700 dark:text-red-400 mt-2 font-medium p-3 rounded-md bg-red-50 dark:bg-red-800/30 border border-red-200 dark:border-red-700 text-center">
-                    <AlertTriangle className="inline h-5 w-5 mr-2"/> {paymentError}
-                </div>
-            )}
-            {selectedRequest.status === 'customer_confirmed' && bookingFinalizationStatus !== 'confirmed' && ( 
-                <div className="text-sm text-green-700 dark:text-green-400 mt-2 font-medium p-3 rounded-md bg-green-50 dark:bg-green-800/30 border border-green-200 dark:border-green-700 text-center">
-                    <CheckCircle className="inline h-5 w-5 mr-2"/> This request is confirmed and booking is being processed. Redirecting soon or check 'My Booked Events'.
-                </div>
-            )}
-            {selectedRequest.status === 'booked' && bookingFinalizationStatus !== 'confirmed' && ( 
-                <div className="text-sm text-green-700 dark:text-green-400 mt-2 font-medium p-3 rounded-md bg-green-50 dark:bg-green-800/30 border border-green-200 dark:border-green-700 text-center">
-                    <CheckCircle className="inline h-5 w-5 mr-2"/> This request has been booked. Check 'My Booked Events'.
-                </div>
-            )}
-            {selectedRequest.status === 'proposal_declined' && (
-                <div className="text-sm text-red-700 dark:text-red-400 mt-2 font-medium p-3 rounded-md bg-red-50 dark:bg-red-800/30 border border-red-200 dark:border-red-700 text-center">
-                    <XCircle className="inline h-5 w-5 mr-2"/> You have declined this proposal.
+                    <AlertTriangle className="inline h-5 w-5 mr-2" data-ai-hint="warning triangle"/> {paymentError}
                 </div>
             )}
           </CardContent>
 
           <CardFooter className="p-4 border-t flex flex-col space-y-3">
             <div className="flex items-center text-xs text-muted-foreground p-2 rounded-md bg-muted/50 border border-dashed w-full">
-              <AlertTriangle className="h-4 w-4 mr-2 text-yellow-600 flex-shrink-0" />
+              <AlertTriangle className="h-4 w-4 mr-2 text-yellow-600 flex-shrink-0" data-ai-hint="warning triangle" />
               <span>Remember: Keep all communication and payment on FindAChef. Do not share personal contact details.</span>
             </div>
             <div className="flex w-full items-center space-x-2">
               <Textarea
-                placeholder={isConversationFinalized || bookingFinalizationStatus !== 'idle' || isActuallyProcessingPayment ? "Conversation ended or action pending." : "Type your message..."}
+                placeholder={isConversationFinalized || bookingFinalizationStatus !== 'idle' || isActuallyProcessingPayment || isProcessingPayment ? "Conversation ended or action pending." : "Type your message..."}
                 value={newMessageText}
                 onChange={(e) => setNewMessageText(e.target.value)}
                 className="flex-1 min-h-[40px] max-h-[120px]"
                 rows={1}
-                disabled={isSendingMessage || isConversationFinalized || bookingFinalizationStatus !== 'idle' || isActuallyProcessingPayment}
+                disabled={isSendingMessage || isConversationFinalized || bookingFinalizationStatus !== 'idle' || isActuallyProcessingPayment || isProcessingPayment}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    if (newMessageText.trim() && !isConversationFinalized && bookingFinalizationStatus === 'idle' && !isActuallyProcessingPayment) handleSendMessage();
+                    if (newMessageText.trim() && !isConversationFinalized && bookingFinalizationStatus === 'idle' && !isActuallyProcessingPayment && !isProcessingPayment) handleSendMessage();
                   }
                 }}
               />
-              <Button type="submit" size="icon" onClick={handleSendMessage} disabled={isSendingMessage || !newMessageText.trim() || isConversationFinalized || bookingFinalizationStatus !== 'idle' || isActuallyProcessingPayment}>
+              <Button type="button" size="icon" onClick={handleSendMessage} disabled={isSendingMessage || !newMessageText.trim() || isConversationFinalized || bookingFinalizationStatus !== 'idle' || isActuallyProcessingPayment || isProcessingPayment}>
                 {isSendingMessage ? <Loader2 className="animate-spin h-5 w-5"/> : <Send className="h-5 w-5" />}
                 <span className="sr-only">Send</span>
               </Button>
@@ -641,8 +646,7 @@ export default function CustomerMessagesPage() {
 
       {selectedRequest && selectedRequest.activeProposal && (
         <AlertDialog open={isPaymentDialogOpen} onOpenChange={(open) => {
-            if (isProcessingPayment && open) return;
-            if (isActuallyProcessingPayment && open) return; // Also prevent closing if final backend processing simulation is active
+            if ((isProcessingPayment || isActuallyProcessingPayment) && open) return;
             if (bookingFinalizationStatus === 'awaiting_confirmation' && !isProcessingPayment && !open) {
                 setBookingFinalizationStatus('idle');
             }
@@ -650,12 +654,13 @@ export default function CustomerMessagesPage() {
         }}>
             <AlertDialogContent>
                 <AlertDialogHeader>
-                    <AlertDialogTitle className="flex items-center"><CreditCard className="mr-2 h-5 w-5 text-primary"/>Confirm Booking & Payment</AlertDialogTitle>
+                    <AlertDialogTitle className="flex items-center"><CreditCard className="mr-2 h-5 w-5 text-primary" data-ai-hint="credit card"/>Confirm Booking & Payment</AlertDialogTitle>
                     <AlertDialogDescription className="text-left space-y-2 pt-2">
                         <p>You are about to accept the proposal from <strong>Chef {selectedRequest.activeProposal.chefName}</strong> for: <strong>"{selectedRequest.activeProposal.menuTitle || selectedRequest.eventType}"</strong>.</p>
                         <p>Total Price: <strong className="text-lg">AUD {(selectedRequest.activeProposal.menuPricePerHead * selectedRequest.pax).toFixed(2)}</strong>.</p>
-                        {bookingFinalizationStatus === 'payment_processing' && !isProcessingPayment && (
-                            <div className="text-sm text-blue-600 flex items-center justify-center py-2">
+                        
+                        {(bookingFinalizationStatus === 'payment_processing' && !isProcessingPayment && !isActuallyProcessingPayment) && (
+                             <div className="text-sm text-blue-600 flex items-center justify-center py-2">
                                 <Loader2 className="h-4 w-4 animate-spin mr-2"/> Verifying payment details...
                             </div>
                         )}
@@ -669,7 +674,7 @@ export default function CustomerMessagesPage() {
                 {bookingFinalizationStatus === 'payment_processing' && (
                     <StripeElementsProvider>
                     <StripePaymentForm
-                        customerName={userProfile?.name || "Customer"}
+                        customerName={(userProfile as AppUserProfileContext)?.name || "Customer"}
                         customerEmail={user?.email || ""}
                         totalPrice={selectedRequest.activeProposal.menuPricePerHead * selectedRequest.pax}
                         onPaymentAttemptComplete={handlePaymentAttemptComplete}
@@ -686,6 +691,7 @@ export default function CustomerMessagesPage() {
                         setIsProcessingPayment(false); 
                         setIsActuallyProcessingPayment(false);
                     }} disabled={isProcessingPayment || isActuallyProcessingPayment}>Cancel Payment</AlertDialogCancel>
+                    {/* The "Confirm" button is part of StripePaymentForm now */}
                 </AlertDialogFooter>
             </AlertDialogContent>
         </AlertDialog>
@@ -693,6 +699,3 @@ export default function CustomerMessagesPage() {
     </div>
   );
 }
-
-
-    

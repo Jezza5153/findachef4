@@ -15,19 +15,19 @@ import type { ChartConfig } from "@/components/ui/chart"
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, Timestamp, orderBy, limit } from 'firebase/firestore';
-import type { ActivityItem, ChefProfile } from '@/types';
+import { collection, query, where, getDocs, Timestamp, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import type { ActivityItem, ChefProfile, Menu, CustomerRequest } from '@/types';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { formatDistanceToNow } from 'date-fns';
 
 
-const menuEngagementData = [ // This will remain mock data for now
-  { menu: "Menu A", views: 150, requests: 15 },
-  { menu: "Menu B", views: 120, requests: 22 },
-  { menu: "Menu C", views: 90, requests: 8 },
-  { menu: "Menu D", views: 200, requests: 30 },
-]
+const initialMenuEngagementData = [ 
+  { menu: "Example Menu 1", views: 100, requests: 10 },
+  { menu: "Example Menu 2", views: 130, requests: 18 },
+  { menu: "Example Menu 3", views: 70, requests: 5 },
+  { menu: "Example Menu 4", views: 180, requests: 25 },
+];
 
 const chartConfig: ChartConfig = {
   views: {
@@ -47,74 +47,152 @@ export default function ChefDashboardPage() {
   const [loadingEvents, setLoadingEvents] = useState(true);
   const [recentActivityItems, setRecentActivityItems] = useState<ActivityItem[]>([]);
   const [loadingActivity, setLoadingActivity] = useState(true);
-
-  // Placeholder for booking requests count - real implementation needs backend logic
-  // to determine which requests are relevant/new for this specific chef.
-  // This might involve querying a 'proposals' or 'requests' collection where the chef is involved.
-  const bookingRequestsCount = 5; // Static placeholder
-  const bookingRequestsChange = "+2 from last week"; // Static placeholder
-
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      if (!user) {
-        setLoadingEvents(false);
-        setLoadingActivity(false);
-        return;
-      }
-
-      // Fetch Upcoming Events Count
-      setLoadingEvents(true);
-      try {
-        const today = Timestamp.fromDate(new Date(new Date().setHours(0, 0, 0, 0)));
-        const eventsCollectionRef = collection(db, `users/${user.uid}/calendarEvents`);
-        const q = query(
-          eventsCollectionRef,
-          where("status", "==", "Confirmed"),
-          where("date", ">=", today) 
-        );
-        const querySnapshot = await getDocs(q);
-        setUpcomingEventsCount(querySnapshot.size);
-      } catch (error) {
-        console.error("Error fetching upcoming events count:", error);
-        setUpcomingEventsCount(0);
-      } finally {
-        setLoadingEvents(false);
-      }
-
-      // Fetch Recent Activity
-      setLoadingActivity(true);
-      try {
-        const activityCollectionRef = collection(db, `users/${user.uid}/activities`);
-        const activityQuery = query(activityCollectionRef, orderBy("timestamp", "desc"), limit(5));
-        const activitySnapshot = await getDocs(activityQuery);
-        const activities = activitySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ActivityItem));
-        setRecentActivityItems(activities);
-      } catch (error) {
-        console.error("Error fetching recent activity:", error);
-        setRecentActivityItems([]);
-      } finally {
-        setLoadingActivity(false);
-      }
-    };
-
-    fetchDashboardData();
-  }, [user]);
+  const [bookingRequestsCount, setBookingRequestsCount] = useState<number | null>(null);
+  const [loadingRequestsCount, setLoadingRequestsCount] = useState(true);
+  const [menuEngagementData, setMenuEngagementData] = useState(initialMenuEngagementData);
+  const [loadingMenuEngagement, setLoadingMenuEngagement] = useState(true);
 
   const chefProfile = userProfile as ChefProfile | null;
 
+  useEffect(() => {
+    if (!user) {
+      setLoadingEvents(false);
+      setLoadingActivity(false);
+      setLoadingRequestsCount(false);
+      setLoadingMenuEngagement(false);
+      return;
+    }
+
+    // Fetch Upcoming Events Count (Real-time)
+    setLoadingEvents(true);
+    const today = new Date(); // Use JS Date for client-side comparison after fetching
+    today.setHours(0,0,0,0);
+
+    const eventsCollectionRef = collection(db, `users/${user.uid}/calendarEvents`);
+    const qEvents = query(
+      eventsCollectionRef,
+      where("status", "==", "Confirmed")
+      // We'll filter by date client-side after fetching due to potential Timestamp vs Date comparison complexities in direct query
+    );
+    const unsubscribeEvents = onSnapshot(qEvents, (querySnapshot) => {
+      let count = 0;
+      querySnapshot.forEach(doc => {
+        const eventData = doc.data();
+        const eventDate = eventData.date instanceof Timestamp ? eventData.date.toDate() : new Date(eventData.date as any);
+        if (eventDate >= today) {
+          count++;
+        }
+      });
+      setUpcomingEventsCount(count);
+      setLoadingEvents(false);
+    }, (error) => {
+      console.error("Error fetching upcoming events count:", error);
+      setUpcomingEventsCount(0);
+      setLoadingEvents(false);
+    });
+
+    // Fetch Recent Activity (Real-time)
+    setLoadingActivity(true);
+    const activityCollectionRef = collection(db, `users/${user.uid}/activities`);
+    const activityQuery = query(activityCollectionRef, orderBy("timestamp", "desc"), limit(5));
+    const unsubscribeActivity = onSnapshot(activityQuery, (activitySnapshot) => {
+      const activities = activitySnapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          timestamp: data.timestamp instanceof Timestamp ? data.timestamp.toDate() : new Date(data.timestamp as any),
+        } as ActivityItem;
+      });
+      setRecentActivityItems(activities);
+      setLoadingActivity(false);
+    }, (error) => {
+      console.error("Error fetching recent activity:", error);
+      setRecentActivityItems([]);
+      setLoadingActivity(false);
+    });
+
+    // Fetch Booking Requests Count (Real-time)
+    setLoadingRequestsCount(true);
+    const requestsCollectionRef = collection(db, "customerRequests");
+    const qRequests = query(
+      requestsCollectionRef,
+      where("status", "in", ["new", "awaiting_customer_response", "proposal_sent"]),
+      // Further filtering to only include requests relevant to *this* chef
+      // This might involve checking if chefId is in respondingChefIds or is the activeProposal.chefId
+      // For simplicity here, we'll make a broader query and refine if needed or assume this chef might see all 'new' ones
+      // and ones they are actively engaged in.
+    );
+    const unsubscribeRequests = onSnapshot(qRequests, (querySnapshot) => {
+      let count = 0;
+      querySnapshot.forEach(doc => {
+        const requestData = doc.data() as CustomerRequest;
+        if (requestData.status === 'new' || 
+            (requestData.respondingChefIds && requestData.respondingChefIds.includes(user.uid)) ||
+            (requestData.activeProposal && requestData.activeProposal.chefId === user.uid && requestData.status !== 'chef_accepted' && requestData.status !== 'customer_confirmed' && requestData.status !== 'booked') // Chef is waiting on their proposal
+           ) {
+          count++;
+        }
+      });
+      setBookingRequestsCount(count);
+      setLoadingRequestsCount(false);
+    }, (error) => {
+      console.error("Error fetching booking requests count:", error);
+      setBookingRequestsCount(0);
+      setLoadingRequestsCount(false);
+    });
+
+    // Fetch Menu Engagement Data (Dynamic Mock)
+    setLoadingMenuEngagement(true);
+    const menusCollectionRef = collection(db, "menus");
+    const qMenus = query(menusCollectionRef, where("chefId", "==", user.uid), orderBy("createdAt", "desc"), limit(4));
+    getDocs(qMenus).then(menusSnapshot => {
+      if (menusSnapshot.empty) {
+        setMenuEngagementData(initialMenuEngagementData); // Fallback to static examples
+      } else {
+        const dynamicMockData = menusSnapshot.docs.map(doc => {
+          const menu = doc.data() as Menu;
+          return {
+            menu: menu.title.length > 15 ? menu.title.substring(0, 12) + "..." : menu.title, // Shorten long titles for chart
+            views: Math.floor(Math.random() * 200) + 50, // Random views
+            requests: Math.floor(Math.random() * 30) + 5,  // Random requests
+          };
+        });
+        setMenuEngagementData(dynamicMockData);
+      }
+      setLoadingMenuEngagement(false);
+    }).catch(error => {
+      console.error("Error fetching menus for engagement chart:", error);
+      setMenuEngagementData(initialMenuEngagementData);
+      setLoadingMenuEngagement(false);
+    });
+
+
+    return () => {
+      unsubscribeEvents();
+      unsubscribeActivity();
+      unsubscribeRequests();
+    };
+  }, [user]);
+
+
   return (
     <div className="space-y-8">
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3"> {/* Adjusted for 3 cards in a row */}
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         <Card className="shadow-md">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Booking Requests</CardTitle>
             <MessageCircleMore className="h-5 w-5 text-muted-foreground" data-ai-hint="message chat" />
           </CardHeader>
           <CardContent>
-            {/* This remains a placeholder as its logic is complex */}
-            <div className="text-2xl font-bold">{bookingRequestsCount}</div>
-            <p className="text-xs text-muted-foreground">{bookingRequestsChange}</p>
-            <p className="text-xs text-muted-foreground mt-1">(Placeholder - real data requires backend integration for request status)</p>
+            {loadingRequestsCount ? (
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            ) : (
+                <div className="text-2xl font-bold">{bookingRequestsCount ?? 0}</div>
+            )}
+            <p className="text-xs text-muted-foreground">
+                {loadingRequestsCount ? "Fetching data..." : "Active requests needing attention."}
+            </p>
           </CardContent>
         </Card>
         <Card className="shadow-md">
@@ -157,28 +235,33 @@ export default function ChefDashboardPage() {
       <div className="grid gap-6 md:grid-cols-2">
         <Card className="shadow-md">
           <CardHeader>
-            <CardTitle>Menu Engagement Stats</CardTitle>
+            <CardTitle>Menu Engagement (Examples)</CardTitle>
           </CardHeader>
           <CardContent>
-            {/* Menu engagement chart will be tackled later. */}
-            <ChartContainer config={chartConfig} className="h-[250px] w-full">
-               <RechartsBarChart data={menuEngagementData} layout="vertical" barCategoryGap="20%">
-                <CartesianGrid horizontal={false} />
-                <YAxis dataKey="menu" type="category" tickLine={false} axisLine={false} />
-                <XAxis type="number" />
-                <ChartTooltip content={<ChartTooltipContent />} />
-                <ChartLegend content={<ChartLegendContent />} />
-                <Bar dataKey="views" fill="var(--color-views)" radius={4} />
-                <Bar dataKey="requests" fill="var(--color-requests)" radius={4} />
-              </RechartsBarChart>
-            </ChartContainer>
+            {loadingMenuEngagement ? (
+                <div className="flex justify-center items-center h-[250px]">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary"/>
+                </div>
+            ) : (
+                <ChartContainer config={chartConfig} className="h-[250px] w-full">
+                  <RechartsBarChart data={menuEngagementData} layout="vertical" barCategoryGap="20%">
+                    <CartesianGrid horizontal={false} />
+                    <YAxis dataKey="menu" type="category" tickLine={false} axisLine={false} width={80} />
+                    <XAxis type="number" />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <ChartLegend content={<ChartLegendContent />} />
+                    <Bar dataKey="views" fill="var(--color-views)" radius={4} />
+                    <Bar dataKey="requests" fill="var(--color-requests)" radius={4} />
+                  </RechartsBarChart>
+                </ChartContainer>
+            )}
              <p className="text-xs text-muted-foreground mt-2 text-center">(Placeholder - real data requires advanced tracking)</p>
           </CardContent>
         </Card>
        
         <Card className="shadow-md">
           <CardHeader>
-            <CardTitle className="flex items-center"><ListChecks className="mr-2 h-5 w-5" /> Recent Activity</CardTitle>
+            <CardTitle className="flex items-center"><ListChecks className="mr-2 h-5 w-5" data-ai-hint="checklist tasks"/> Recent Activity</CardTitle>
           </CardHeader>
           <CardContent>
             {loadingActivity ? (
@@ -201,8 +284,8 @@ export default function ChefDashboardPage() {
                       )}
                     </div>
                     <div className="text-xs text-muted-foreground whitespace-nowrap ml-2">
-                      <Clock4 className="h-3 w-3 inline-block mr-1"/>
-                      {activity.timestamp ? formatDistanceToNow(activity.timestamp.toDate(), { addSuffix: true }) : 'Just now'}
+                      <Clock4 className="h-3 w-3 inline-block mr-1" data-ai-hint="clock time"/>
+                      {activity.timestamp ? formatDistanceToNow(new Date(activity.timestamp as any), { addSuffix: true }) : 'Just now'}
                     </div>
                   </li>
                 ))}

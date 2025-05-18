@@ -2,33 +2,60 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ShieldAlert, ListChecks, UserCog, FileWarning, UserCheck, FileSearch2, BadgeCheck, MessageCircleWarning, Gavel, Award, MessageSquare, LockKeyhole, CalendarX2, UsersRound, Banknote, PauseCircle, Undo2, ClipboardCheck, FileCheck2, BotMessageSquare, ShieldBan, CreditCard, CalendarCheck2 as CalendarCheckIcon, Download, AlertTriangle, CalendarClock, Loader2, Utensils, CheckCircle, XCircle, Send } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Input } from '@/components/ui/input'; // Added
+import { Label } from '@/components/ui/label'; // Added
+import { Textarea } from '@/components/ui/textarea'; // Added
+import { ShieldAlert, ListChecks, UserCog, FileWarning, UserCheck, FileSearch2, BadgeCheck, MessageCircleWarning, Gavel, Award, MessageSquare, LockKeyhole, CalendarX2, UsersRound, Banknote, PauseCircle, Undo2, ClipboardCheck, FileCheck2, BotMessageSquare, ShieldBan, CreditCard, CalendarCheck2 as CalendarCheckIcon, Download, AlertTriangle, CalendarClock, Loader2, Utensils, CheckCircle, XCircle, Send, Eye } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, orderBy, Timestamp, query, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import type { ChefProfile, CustomerProfile, Menu, CustomerRequest } from '@/types';
+import type { ChefProfile, CustomerProfile, Menu, CustomerRequest, RequestMessage, AppUserProfileContext } from '@/types';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/context/AuthContext';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
-type UserView = Partial<ChefProfile & CustomerProfile>; // Allows mixing fields from both
+type UserView = AppUserProfileContext;
 
 export default function AdminPage() {
   const { toast } = useToast();
+  const { isAdmin } = useAuth();
+
   const [allUsers, setAllUsers] = useState<UserView[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
   const [allMenus, setAllMenus] = useState<Menu[]>([]);
   const [isLoadingMenus, setIsLoadingMenus] = useState(true);
   const [allCustomerRequests, setAllCustomerRequests] = useState<CustomerRequest[]>([]);
   const [isLoadingCustomerRequests, setIsLoadingCustomerRequests] = useState(true);
+  
   const [isProcessingAction, setIsProcessingAction] = useState(false);
+
+  const [isRequestDetailsDialogOpen, setIsRequestDetailsDialogOpen] = useState(false);
+  const [selectedRequestForAdminView, setSelectedRequestForAdminView] = useState<CustomerRequest | null>(null);
+  const [requestMessagesForAdminView, setRequestMessagesForAdminView] = useState<RequestMessage[]>([]);
+  const [isLoadingRequestMessages, setIsLoadingRequestMessages] = useState(false);
+  const [adminNotesForRequest, setAdminNotesForRequest] = useState('');
+
+  const [isMenuReviewDialogOpen, setIsMenuReviewDialogOpen] = useState(false);
+  const [selectedMenuForReview, setSelectedMenuForReview] = useState<Menu | null>(null);
+  const [adminNotesForMenu, setAdminNotesForMenu] = useState('');
 
 
   useEffect(() => {
     const fetchAdminData = async () => {
-      // Fetch Users
       setIsLoadingUsers(true);
       try {
         const usersCollectionRef = collection(db, "users");
@@ -50,7 +77,6 @@ export default function AdminPage() {
         setIsLoadingUsers(false);
       }
 
-      // Fetch Menus
       setIsLoadingMenus(true);
       try {
         const menusCollectionRef = collection(db, "menus");
@@ -61,7 +87,7 @@ export default function AdminPage() {
           return {
             id: docSnap.id,
             ...data,
-            adminStatus: data.adminStatus || 'pending', 
+            adminStatus: data.adminStatus || 'pending',
             createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
             updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
           } as Menu;
@@ -74,7 +100,6 @@ export default function AdminPage() {
         setIsLoadingMenus(false);
       }
 
-      // Fetch Customer Requests
       setIsLoadingCustomerRequests(true);
       try {
         const requestsCollectionRef = collection(db, "customerRequests");
@@ -85,7 +110,7 @@ export default function AdminPage() {
           return {
             id: docSnap.id,
             ...data,
-            eventDate: data.eventDate instanceof Timestamp ? data.eventDate.toDate() : new Date(data.eventDate),
+            eventDate: data.eventDate instanceof Timestamp ? data.eventDate.toDate() : new Date(data.eventDate as any),
             createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
           } as CustomerRequest;
         });
@@ -101,12 +126,13 @@ export default function AdminPage() {
   }, [toast]);
 
   const handleApproveUser = async (userId: string) => {
+    if (!isAdmin) { toast({ title: "Permission Denied", variant: "destructive" }); return; }
     setIsProcessingAction(true);
     try {
       const userDocRef = doc(db, "users", userId);
       await updateDoc(userDocRef, { isApproved: true, updatedAt: serverTimestamp() });
       setAllUsers(prevUsers => prevUsers.map(u => u.id === userId ? { ...u, isApproved: true } : u));
-      toast({ title: "Chef Approved", description: `Chef with ID ${userId.substring(0,6)}... has been approved.` });
+      toast({ title: "Chef Approved", description: `Chef with ID ${userId.substring(0, 6)}... has been approved.` });
     } catch (error) {
       console.error("Error approving user:", error);
       toast({ title: "Error", description: "Could not approve chef.", variant: "destructive" });
@@ -116,14 +142,15 @@ export default function AdminPage() {
   };
 
   const handleRejectUser = async (userId: string) => {
+    if (!isAdmin) { toast({ title: "Permission Denied", variant: "destructive" }); return; }
     setIsProcessingAction(true);
     try {
       const userDocRef = doc(db, "users", userId);
-      await updateDoc(userDocRef, { isApproved: false, updatedAt: serverTimestamp() }); 
+      await updateDoc(userDocRef, { isApproved: false, updatedAt: serverTimestamp() });
       setAllUsers(prevUsers => prevUsers.map(u => u.id === userId ? { ...u, isApproved: false } : u));
-      toast({ title: "Chef Rejected (Conceptual)", description: `Chef ID ${userId.substring(0,6)}... action noted.` });
+      toast({ title: "Chef Rejected", description: `Chef ID ${userId.substring(0, 6)}... status updated to not approved.` });
     } catch (error) {
-       console.error("Error conceptually rejecting user:", error);
+      console.error("Error rejecting user:", error);
       toast({ title: "Error", description: "Could not process rejection for chef.", variant: "destructive" });
     } finally {
       setIsProcessingAction(false);
@@ -131,12 +158,15 @@ export default function AdminPage() {
   };
 
   const handleApproveMenu = async (menuId: string) => {
+    if (!isAdmin) { toast({ title: "Permission Denied", variant: "destructive" }); return; }
     setIsProcessingAction(true);
     try {
       const menuDocRef = doc(db, "menus", menuId);
-      await updateDoc(menuDocRef, { adminStatus: 'approved', updatedAt: serverTimestamp() });
-      setAllMenus(prevMenus => prevMenus.map(m => m.id === menuId ? { ...m, adminStatus: 'approved' } : m));
-      toast({ title: "Menu Approved", description: `Menu ID ${menuId.substring(0,6)}... has been approved.` });
+      await updateDoc(menuDocRef, { adminStatus: 'approved', adminNotes: adminNotesForMenu || '', updatedAt: serverTimestamp() });
+      setAllMenus(prevMenus => prevMenus.map(m => m.id === menuId ? { ...m, adminStatus: 'approved', adminNotes: adminNotesForMenu || '' } : m));
+      toast({ title: "Menu Approved", description: `Menu ID ${menuId.substring(0, 6)}... has been approved.` });
+      setIsMenuReviewDialogOpen(false);
+      setAdminNotesForMenu('');
     } catch (error) {
       console.error("Error approving menu:", error);
       toast({ title: "Error", description: "Could not approve menu.", variant: "destructive" });
@@ -146,12 +176,15 @@ export default function AdminPage() {
   };
 
   const handleRejectMenu = async (menuId: string) => {
+    if (!isAdmin) { toast({ title: "Permission Denied", variant: "destructive" }); return; }
     setIsProcessingAction(true);
     try {
       const menuDocRef = doc(db, "menus", menuId);
-      await updateDoc(menuDocRef, { adminStatus: 'rejected', updatedAt: serverTimestamp() });
-      setAllMenus(prevMenus => prevMenus.map(m => m.id === menuId ? { ...m, adminStatus: 'rejected' } : m));
-      toast({ title: "Menu Rejected", description: `Menu ID ${menuId.substring(0,6)}... has been rejected.` });
+      await updateDoc(menuDocRef, { adminStatus: 'rejected', adminNotes: adminNotesForMenu || 'Rejected by admin.', updatedAt: serverTimestamp() });
+      setAllMenus(prevMenus => prevMenus.map(m => m.id === menuId ? { ...m, adminStatus: 'rejected', adminNotes: adminNotesForMenu || 'Rejected by admin.' } : m));
+      toast({ title: "Menu Rejected", description: `Menu ID ${menuId.substring(0, 6)}... has been rejected.` });
+      setIsMenuReviewDialogOpen(false);
+      setAdminNotesForMenu('');
     } catch (error) {
       console.error("Error rejecting menu:", error);
       toast({ title: "Error", description: "Could not reject menu.", variant: "destructive" });
@@ -160,6 +193,59 @@ export default function AdminPage() {
     }
   };
 
+  const handleViewRequestDetails = async (request: CustomerRequest) => {
+    setSelectedRequestForAdminView(request);
+    setAdminNotesForRequest(request.adminNotes || '');
+    setIsRequestDetailsDialogOpen(true);
+    setIsLoadingRequestMessages(true);
+    setRequestMessagesForAdminView([]); // Clear previous messages
+    try {
+      const messagesCollectionRef = collection(db, "customerRequests", request.id, "messages");
+      const qMessages = query(messagesCollectionRef, orderBy("timestamp", "asc"));
+      const messagesSnapshot = await getDocs(qMessages);
+      const fetchedMessages = messagesSnapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        return {
+          id: docSnap.id,
+          ...data,
+          timestamp: data.timestamp instanceof Timestamp ? data.timestamp.toDate() : new Date(data.timestamp as any)
+        } as RequestMessage;
+      });
+      setRequestMessagesForAdminView(fetchedMessages);
+    } catch (error) {
+      console.error("Error fetching messages for request:", error);
+      toast({ title: "Error", description: "Could not fetch messages for this request.", variant: "destructive" });
+    } finally {
+      setIsLoadingRequestMessages(false);
+    }
+  };
+  
+  const handleModerateRequest = async (requestId: string, action: CustomerRequest['moderationStatus']) => {
+    if (!isAdmin) { toast({ title: "Permission Denied", variant: "destructive" }); return; }
+    setIsProcessingAction(true);
+    try {
+      const requestDocRef = doc(db, "customerRequests", requestId);
+      await updateDoc(requestDocRef, { 
+        moderationStatus: action, 
+        adminNotes: adminNotesForRequest,
+        updatedAt: serverTimestamp() 
+      });
+      setAllCustomerRequests(prevReqs => prevReqs.map(r => r.id === requestId ? {...r, moderationStatus: action, adminNotes: adminNotesForRequest} : r));
+      toast({ title: "Moderation Action Taken", description: `Request ${requestId.substring(0,6)}... status updated to ${action}.` });
+      setIsRequestDetailsDialogOpen(false);
+    } catch (error) {
+      console.error("Error moderating request:", error);
+      toast({ title: "Moderation Error", description: "Could not update request moderation status.", variant: "destructive" });
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  const handleOpenMenuReviewDialog = (menu: Menu) => {
+    setSelectedMenuForReview(menu);
+    setAdminNotesForMenu(menu.adminNotes || '');
+    setIsMenuReviewDialogOpen(true);
+  };
 
   const adminFeatures = [
     { name: "Approve Co-hosted Events", description: "Confirm both chefs are approved and willing to collaborate on the event.", icon: <ClipboardCheck className="mr-2 h-5 w-5 text-purple-600" /> },
@@ -190,7 +276,7 @@ export default function AdminPage() {
       <Card className="shadow-lg mb-8">
         <CardHeader className="text-center">
           <div className="mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
-            <UserCog className="h-8 w-8" />
+            <UserCog className="h-8 w-8" data-ai-hint="admin settings user" />
           </div>
           <CardTitle className="text-3xl font-bold">Admin Dashboard</CardTitle>
           <CardDescription className="text-lg">
@@ -200,9 +286,9 @@ export default function AdminPage() {
         <CardContent className="space-y-6">
           <p className="text-muted-foreground">
             This area is for platform administrators to manage users, content, and ensure the smooth operation of FindAChef.
-            Access is restricted. (Note: True role-based access control requires backend implementation).
+            {!isAdmin && <span className="text-destructive font-semibold"> (Note: Your current account does not have admin privileges. Actions will be disabled.)</span>}
           </p>
-          
+
           <div>
             <h3 className="text-xl font-semibold mb-3">Intended Features & Responsibilities:</h3>
             <ul className="space-y-3">
@@ -222,7 +308,7 @@ export default function AdminPage() {
 
       <Card className="shadow-lg mb-8">
         <CardHeader>
-          <CardTitle className="flex items-center"><UsersRound className="mr-2 h-6 w-6 text-primary"/> All Platform Users</CardTitle>
+          <CardTitle className="flex items-center"><UsersRound className="mr-2 h-6 w-6 text-primary" data-ai-hint="group users"/> All Platform Users</CardTitle>
           <CardDescription>View and manage all registered users on the platform.</CardDescription>
         </CardHeader>
         <CardContent>
@@ -252,7 +338,7 @@ export default function AdminPage() {
                       <TableCell className="font-medium">{user.name || 'N/A'}</TableCell>
                       <TableCell>{user.email}</TableCell>
                       <TableCell>
-                        <Badge variant={user.role === 'chef' ? 'default' : 'secondary'} className="capitalize">
+                        <Badge variant={user.role === 'chef' ? 'default' : (user.role === 'admin' ? 'destructive' : 'secondary')} className="capitalize">
                           {user.role || 'N/A'}
                         </Badge>
                       </TableCell>
@@ -261,7 +347,7 @@ export default function AdminPage() {
                       </TableCell>
                       <TableCell>
                         {user.role === 'chef' ? (
-                          user.isApproved ? (
+                          (user as ChefProfile).isApproved ? (
                             <Badge variant="default" className="bg-green-500 hover:bg-green-600">Approved</Badge>
                           ) : (
                             <Badge variant="destructive">Pending</Badge>
@@ -271,34 +357,46 @@ export default function AdminPage() {
                         )}
                       </TableCell>
                       <TableCell>
-                        {user.role === 'chef' && !user.isApproved && (
-                          <div className="flex space-x-1">
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
-                              onClick={() => handleApproveUser(user.id!)}
-                              disabled={isProcessingAction}
-                              className="bg-green-500 hover:bg-green-600 text-white text-xs px-2 py-1"
-                            >
-                              {isProcessingAction ? <Loader2 className="h-3 w-3 animate-spin"/> : <CheckCircle className="h-3 w-3"/>}
-                              <span className="ml-1">Approve</span>
-                            </Button>
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
-                              onClick={() => handleRejectUser(user.id!)}
-                              disabled={isProcessingAction}
-                              className="bg-red-500 hover:bg-red-600 text-white text-xs px-2 py-1"
-                            >
-                             {isProcessingAction ? <Loader2 className="h-3 w-3 animate-spin"/> : <XCircle className="h-3 w-3"/>}
-                             <span className="ml-1">Reject</span>
-                            </Button>
-                          </div>
+                        {user.role === 'chef' && !(user as ChefProfile).isApproved && (
+                          <TooltipProvider>
+                            <div className="flex space-x-1">
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleApproveUser(user.id!)}
+                                    disabled={!isAdmin || isProcessingAction}
+                                    className="bg-green-500 hover:bg-green-600 text-white text-xs px-2 py-1"
+                                  >
+                                    {isProcessingAction ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />}
+                                    <span className="ml-1">Approve</span>
+                                  </Button>
+                                </TooltipTrigger>
+                                {!isAdmin && <TooltipContent><p>Admin privileges required.</p></TooltipContent>}
+                              </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleRejectUser(user.id!)}
+                                    disabled={!isAdmin || isProcessingAction}
+                                    className="bg-red-500 hover:bg-red-600 text-white text-xs px-2 py-1"
+                                  >
+                                    {isProcessingAction ? <Loader2 className="h-3 w-3 animate-spin" /> : <XCircle className="h-3 w-3" />}
+                                    <span className="ml-1">Reject</span>
+                                  </Button>
+                                </TooltipTrigger>
+                                {!isAdmin && <TooltipContent><p>Admin privileges required.</p></TooltipContent>}
+                              </Tooltip>
+                            </div>
+                          </TooltipProvider>
                         )}
-                         {user.role === 'chef' && user.isApproved && (
+                        {user.role === 'chef' && (user as ChefProfile).isApproved && (
                           <span className="text-xs text-muted-foreground">No actions</span>
                         )}
-                         {user.role !== 'chef' && (
+                        {user.role !== 'chef' && (
                           <span className="text-xs text-muted-foreground">N/A</span>
                         )}
                       </TableCell>
@@ -313,7 +411,7 @@ export default function AdminPage() {
 
       <Card className="shadow-lg mb-8">
         <CardHeader>
-          <CardTitle className="flex items-center"><Utensils className="mr-2 h-6 w-6 text-primary"/> All Platform Menus</CardTitle>
+          <CardTitle className="flex items-center"><Utensils className="mr-2 h-6 w-6 text-primary" data-ai-hint="restaurant menu"/> All Platform Menus</CardTitle>
           <CardDescription>Review and manage all menus created by chefs.</CardDescription>
         </CardHeader>
         <CardContent>
@@ -335,7 +433,7 @@ export default function AdminPage() {
                     <TableHead className="text-right">Price/Head</TableHead>
                     <TableHead>Public</TableHead>
                     <TableHead>Admin Status</TableHead>
-                    <TableHead>Actions</TableHead> 
+                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -350,51 +448,25 @@ export default function AdminPage() {
                           {menu.isPublic ? 'Yes' : 'No'}
                         </Badge>
                       </TableCell>
-                       <TableCell>
-                        <Badge 
+                      <TableCell>
+                        <Badge
                           variant={
-                            menu.adminStatus === 'approved' ? 'default' : 
-                            menu.adminStatus === 'rejected' ? 'destructive' : 
-                            'secondary'
+                            menu.adminStatus === 'approved' ? 'default' :
+                              menu.adminStatus === 'rejected' ? 'destructive' :
+                                'secondary'
                           }
                           className={
                             menu.adminStatus === 'approved' ? 'bg-green-500 hover:bg-green-600' :
-                            menu.adminStatus === 'rejected' ? '' : '' 
+                              menu.adminStatus === 'rejected' ? '' : ''
                           }
                         >
                           {menu.adminStatus?.charAt(0).toUpperCase() + menu.adminStatus?.slice(1) || 'Pending'}
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        {menu.adminStatus === 'pending' && (
-                           <div className="flex space-x-1">
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
-                              onClick={() => handleApproveMenu(menu.id)}
-                              disabled={isProcessingAction}
-                              className="bg-green-500 hover:bg-green-600 text-white text-xs px-2 py-1"
-                            >
-                              {isProcessingAction ? <Loader2 className="h-3 w-3 animate-spin"/> : <CheckCircle className="h-3 w-3"/>}
-                              <span className="ml-1">Approve</span>
-                            </Button>
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
-                              onClick={() => handleRejectMenu(menu.id)}
-                              disabled={isProcessingAction}
-                              className="bg-red-500 hover:bg-red-600 text-white text-xs px-2 py-1"
-                            >
-                              {isProcessingAction ? <Loader2 className="h-3 w-3 animate-spin"/> : <XCircle className="h-3 w-3"/>}
-                              <span className="ml-1">Reject</span>
-                            </Button>
-                          </div>
-                        )}
-                        {menu.adminStatus !== 'pending' && (
-                           <Button variant="outline" size="sm" onClick={() => alert(`Viewing menu: ${menu.title}`)} className="text-xs">
-                             View
-                           </Button>
-                        )}
+                         <Button variant="outline" size="sm" onClick={() => handleOpenMenuReviewDialog(menu)} className="text-xs">
+                           <Eye className="h-3 w-3 mr-1"/> Review
+                         </Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -407,7 +479,7 @@ export default function AdminPage() {
 
       <Card className="shadow-lg">
         <CardHeader>
-          <CardTitle className="flex items-center"><Send className="mr-2 h-6 w-6 text-primary"/> All Customer Requests</CardTitle>
+          <CardTitle className="flex items-center"><Send className="mr-2 h-6 w-6 text-primary" data-ai-hint="message send"/> All Customer Requests</CardTitle>
           <CardDescription>Review all event requests made by customers.</CardDescription>
         </CardHeader>
         <CardContent>
@@ -430,31 +502,31 @@ export default function AdminPage() {
                     <TableHead className="text-right">PAX</TableHead>
                     <TableHead className="text-right">Budget</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>Actions</TableHead> 
+                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {allCustomerRequests.map((request) => (
                     <TableRow key={request.id}>
-                      <TableCell className="font-mono text-xs">{request.id.substring(0,8)}...</TableCell>
+                      <TableCell className="font-mono text-xs">{request.id.substring(0, 8)}...</TableCell>
                       <TableCell className="font-medium">{request.eventType}</TableCell>
-                      <TableCell className="text-xs">{request.customerId.substring(0,8)}...</TableCell>
-                      <TableCell>{format(request.eventDate, 'PP')}</TableCell>
+                      <TableCell className="text-xs">{request.customerId.substring(0, 8)}...</TableCell>
+                      <TableCell>{format(new Date(request.eventDate as any), 'PP')}</TableCell>
                       <TableCell className="text-right">{request.pax}</TableCell>
                       <TableCell className="text-right">${request.budget.toFixed(2)}</TableCell>
                       <TableCell>
                         <Badge variant={
-                            request.status === 'booked' || request.status === 'customer_confirmed' ? 'default' :
-                            request.status === 'cancelled_by_customer' || request.status === 'chef_declined' ? 'destructive' :
-                            'secondary'
+                          request.status === 'booked' || request.status === 'customer_confirmed' ? 'default' :
+                            request.status === 'cancelled_by_customer' || request.status === 'chef_declined' || request.status === 'proposal_declined' ? 'destructive' :
+                              'secondary'
                         } className="capitalize">
-                            {request.status?.replace(/_/g, ' ') || 'Unknown'}
+                          {request.status?.replace(/_/g, ' ') || 'Unknown'}
                         </Badge>
                       </TableCell>
                       <TableCell>
-                         <Button variant="outline" size="sm" onClick={() => alert(`Viewing request: ${request.id}`)} className="text-xs">
-                           View/Moderate
-                         </Button>
+                        <Button variant="outline" size="sm" onClick={() => handleViewRequestDetails(request)} className="text-xs">
+                          <Eye className="h-3 w-3 mr-1"/> View/Moderate
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -465,12 +537,153 @@ export default function AdminPage() {
         </CardContent>
       </Card>
 
+      {/* Dialog for Viewing/Moderating Customer Request */}
+      {selectedRequestForAdminView && (
+        <AlertDialog open={isRequestDetailsDialogOpen} onOpenChange={setIsRequestDetailsDialogOpen}>
+          <AlertDialogContent className="sm:max-w-2xl">
+            <AlertDialogHeader>
+              <AlertDialogTitle>View Customer Request Details - ID: {selectedRequestForAdminView.id.substring(0,8)}...</AlertDialogTitle>
+            </AlertDialogHeader>
+            <div className="max-h-[60vh] overflow-y-auto space-y-4 p-1">
+              <h4 className="font-semibold">Request Information:</h4>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <p><strong>Event Type:</strong> {selectedRequestForAdminView.eventType}</p>
+                <p><strong>Customer ID:</strong> <span className="font-mono text-xs">{selectedRequestForAdminView.customerId}</span></p>
+                <p><strong>Event Date:</strong> {format(new Date(selectedRequestForAdminView.eventDate as any), 'PPP')}</p>
+                <p><strong>PAX:</strong> {selectedRequestForAdminView.pax}</p>
+                <p><strong>Budget:</strong> ${selectedRequestForAdminView.budget.toFixed(2)}</p>
+                <p><strong>Cuisine:</strong> {selectedRequestForAdminView.cuisinePreference}</p>
+                <p><strong>Status:</strong> <Badge variant={selectedRequestForAdminView.status === 'booked' ? 'default' : 'secondary'} className="capitalize">{selectedRequestForAdminView.status?.replace(/_/g, ' ') || 'Unknown'}</Badge></p>
+                {selectedRequestForAdminView.location && <p className="col-span-2"><strong>Location:</strong> {selectedRequestForAdminView.location}</p>}
+                {selectedRequestForAdminView.notes && <p className="col-span-2"><strong>Notes:</strong> {selectedRequestForAdminView.notes}</p>}
+              </div>
+              <div className="mt-2">
+                <Label htmlFor="adminNotesRequest">Admin Notes:</Label>
+                <Textarea 
+                  id="adminNotesRequest"
+                  value={adminNotesForRequest}
+                  onChange={(e) => setAdminNotesForRequest(e.target.value)}
+                  placeholder="Internal notes for this request..."
+                  className="mt-1"
+                  disabled={!isAdmin || isProcessingAction}
+                />
+              </div>
+
+              <h4 className="font-semibold mt-4 pt-2 border-t">Messages ({requestMessagesForAdminView.length}):</h4>
+              {isLoadingRequestMessages ? (
+                <div className="flex items-center justify-center py-4"><Loader2 className="h-6 w-6 animate-spin" /> Loading messages...</div>
+              ) : requestMessagesForAdminView.length > 0 ? (
+                <div className="space-y-2 text-xs max-h-48 overflow-y-auto border p-2 rounded-md bg-muted/30">
+                  {requestMessagesForAdminView.map(msg => (
+                    <div key={msg.id} className="p-1.5 rounded-md bg-background shadow-sm">
+                      <p className="font-medium">{msg.senderName || msg.senderRole} ({msg.senderRole?.startsWith('customer') ? 'Cust.' : (msg.senderRole?.startsWith('chef') ? 'Chef' : 'Sys.')}):</p>
+                      <p className="text-muted-foreground">{msg.text}</p>
+                      <p className="text-right text-muted-foreground/70 text-[10px]">{format(new Date(msg.timestamp as any), 'PP p')}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">No messages for this request.</p>
+              )}
+            </div>
+            <AlertDialogFooter className="mt-4">
+              <AlertDialogCancel disabled={isProcessingAction}>Close</AlertDialogCancel>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button onClick={() => handleModerateRequest(selectedRequestForAdminView.id, 'resolved')} variant="default" disabled={!isAdmin || isProcessingAction}>
+                      {isProcessingAction ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Mark as Resolved
+                    </Button>
+                  </TooltipTrigger>
+                  {!isAdmin && <TooltipContent><p>Admin privileges required.</p></TooltipContent>}
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button onClick={() => handleModerateRequest(selectedRequestForAdminView.id, 'customer_warned')} variant="outline" disabled={!isAdmin || isProcessingAction}>
+                      {isProcessingAction ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Warn Customer
+                    </Button>
+                  </TooltipTrigger>
+                  {!isAdmin && <TooltipContent><p>Admin privileges required.</p></TooltipContent>}
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button onClick={() => handleModerateRequest(selectedRequestForAdminView.id, 'customer_suspended')} variant="destructive" disabled={!isAdmin || isProcessingAction}>
+                      {isProcessingAction ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Suspend Customer
+                    </Button>
+                  </TooltipTrigger>
+                  {!isAdmin && <TooltipContent><p>Admin privileges required.</p></TooltipContent>}
+                </Tooltip>
+              </TooltipProvider>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+
+      {/* Dialog for Reviewing Menu */}
+      {selectedMenuForReview && (
+        <AlertDialog open={isMenuReviewDialogOpen} onOpenChange={setIsMenuReviewDialogOpen}>
+          <AlertDialogContent className="sm:max-w-lg">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Review Menu: {selectedMenuForReview.title}</AlertDialogTitle>
+              {selectedMenuForReview.imageUrl && (
+                <div className="my-2 rounded-md overflow-hidden aspect-video relative">
+                  <Image src={selectedMenuForReview.imageUrl} alt={selectedMenuForReview.title} layout="fill" objectFit="cover" data-ai-hint={selectedMenuForReview.dataAiHint || "menu food item"} />
+                </div>
+              )}
+            </AlertDialogHeader>
+            <div className="text-sm space-y-1 max-h-[50vh] overflow-y-auto p-1">
+              <p><strong>Chef:</strong> {selectedMenuForReview.chefName}</p>
+              <p><strong>Cuisine:</strong> {selectedMenuForReview.cuisine}</p>
+              <p><strong>Price/Head:</strong> ${selectedMenuForReview.pricePerHead.toFixed(2)}</p>
+              <p><strong>PAX:</strong> {selectedMenuForReview.pax || 'N/A'}</p>
+              <p><strong>Description:</strong> {selectedMenuForReview.description}</p>
+              {selectedMenuForReview.dietaryInfo && selectedMenuForReview.dietaryInfo.length > 0 && (
+                <p><strong>Dietary:</strong> {selectedMenuForReview.dietaryInfo.join(', ')}</p>
+              )}
+              <p><strong>Public:</strong> {selectedMenuForReview.isPublic ? 'Yes' : 'No'}</p>
+              <p><strong>Current Status:</strong> <Badge variant={selectedMenuForReview.adminStatus === 'approved' ? 'default' : (selectedMenuForReview.adminStatus === 'rejected' ? 'destructive' : 'secondary')} className="capitalize">{selectedMenuForReview.adminStatus}</Badge></p>
+              <div className="mt-2">
+                <Label htmlFor="adminNotesMenu">Admin Notes:</Label>
+                <Textarea 
+                  id="adminNotesMenu"
+                  value={adminNotesForMenu}
+                  onChange={(e) => setAdminNotesForMenu(e.target.value)}
+                  placeholder="Internal notes for this menu..."
+                  className="mt-1"
+                  disabled={!isAdmin || isProcessingAction}
+                />
+              </div>
+            </div>
+            <AlertDialogFooter className="mt-4">
+              <AlertDialogCancel disabled={isProcessingAction}>Close</AlertDialogCancel>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button onClick={() => handleApproveMenu(selectedMenuForReview.id)} variant="default" disabled={!isAdmin || isProcessingAction || selectedMenuForReview.adminStatus === 'approved'}>
+                      {isProcessingAction ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Approve
+                    </Button>
+                  </TooltipTrigger>
+                  {!isAdmin && <TooltipContent><p>Admin privileges required.</p></TooltipContent>}
+                </Tooltip>
+                 <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button onClick={() => handleRejectMenu(selectedMenuForReview.id)} variant="destructive" disabled={!isAdmin || isProcessingAction || selectedMenuForReview.adminStatus === 'rejected'}>
+                      {isProcessingAction ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Reject
+                    </Button>
+                  </TooltipTrigger>
+                  {!isAdmin && <TooltipContent><p>Admin privileges required.</p></TooltipContent>}
+                </Tooltip>
+              </TooltipProvider>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
 
       <div className="mt-8 p-4 border-l-4 border-yellow-500 bg-yellow-500/10 rounded-md">
         <h4 className="font-semibold text-yellow-700">Development Note:</h4>
         <p className="text-sm text-yellow-600">
-          Admin actions now update Firestore. Full admin functionality, including secure role-based access control (preventing non-admins from viewing this page or performing actions),
-          and detailed logs, requires significant backend development and secure infrastructure (e.g., Firebase Auth custom claims for admin roles).
+          Admin actions now update Firestore. Full admin functionality, including secure role-based access control (preventing non-admins from performing actions even if buttons were enabled via client-side manipulation),
+          and detailed audit logs, requires robust backend logic and Firebase Security Rules that verify admin custom claims for write operations.
         </p>
       </div>
     </div>
