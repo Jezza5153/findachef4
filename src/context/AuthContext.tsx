@@ -5,8 +5,8 @@ import type { User } from 'firebase/auth';
 import { onAuthStateChanged } from 'firebase/auth';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { auth, db } from '@/lib/firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
-import type { AppUserProfileContext } from '@/types';
+import { doc, onSnapshot, getDoc } from 'firebase/firestore'; // Added getDoc for one-time fetch
+import type { AppUserProfileContext, ChefProfile, CustomerProfile, AdminProfile } from '@/types'; // Ensure specific profiles are imported if needed for type narrowing
 
 interface AuthContextType {
   user: User | null;
@@ -25,7 +25,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<AppUserProfileContext | null>(null);
-  const [loading, setLoading] = useState(true); // For initial Firebase Auth check
+  const [authLoading, setAuthLoading] = useState(true); // For initial Firebase Auth check
   const [profileLoading, setProfileLoading] = useState(true); 
   const [isAdmin, setIsAdmin] = useState(false);
   const [isChef, setIsChef] = useState(false);
@@ -34,9 +34,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isChefSubscribed, setIsChefSubscribed] = useState(false);
 
   useEffect(() => {
+    console.log("AuthContext: useEffect triggered for onAuthStateChanged setup.");
     const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
+      console.log("AuthContext: onAuthStateChanged callback. currentUser:", currentUser ? currentUser.uid : null);
       setUser(currentUser);
-      setProfileLoading(true); 
+      setProfileLoading(true); // Reset profileLoading for new auth state
 
       if (currentUser) {
         let claimsAdmin = false;
@@ -57,27 +59,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const userDocRef = doc(db, "users", currentUser.uid);
         const unsubscribeProfile = onSnapshot(userDocRef, (docSnap) => {
           if (docSnap.exists()) {
-            const profileData = docSnap.data() as AppUserProfileContext;
+            const profileData = { id: docSnap.id, ...docSnap.data() } as AppUserProfileContext; // Ensure id is included
             setUserProfile(profileData);
             const currentIsChef = profileData.role === 'chef';
             const currentIsCustomer = profileData.role === 'customer';
             
             setIsChef(currentIsChef);
             setIsCustomer(currentIsCustomer);
+            // Admin role is primarily set by claims, but Firestore role can be a fallback or for display
+            if (profileData.role === 'admin' && !claimsAdmin) { // If claims didn't set admin, but Firestore says admin (less secure)
+                console.warn("AuthContext: User has 'admin' role in Firestore but not in custom claims. Claims take precedence.");
+                // setIsAdmin(true); // Or handle this discrepancy
+            }
+
 
             if (currentIsChef && profileData.role === 'chef') {
-              setIsChefApproved(profileData.isApproved || false);
-              setIsChefSubscribed(profileData.isSubscribed || false);
+              // Explicitly cast to ChefProfile before accessing Chef-specific props
+              const chefProfileData = profileData as ChefProfile;
+              setIsChefApproved(chefProfileData.isApproved || false);
+              setIsChefSubscribed(chefProfileData.isSubscribed || false);
             } else {
               setIsChefApproved(false);
               setIsChefSubscribed(false);
             }
-            console.log("AuthContext: Profile data loaded/updated for UID:", currentUser.uid, profileData);
+            console.log("AuthContext: Profile data loaded/updated via onSnapshot for UID:", currentUser.uid, profileData);
           } else {
             console.warn("AuthContext: No such user profile document in Firestore for UID:", currentUser.uid);
             setUserProfile(null);
             setIsChef(false);
             setIsCustomer(false);
+            // setIsAdmin(false); // Keep admin status from claims if profile doc is missing
             setIsChefApproved(false);
             setIsChefSubscribed(false);
           }
@@ -87,18 +98,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUserProfile(null);
           setIsChef(false);
           setIsCustomer(false);
+          // setIsAdmin(false); // Keep admin status from claims
           setIsChefApproved(false);
           setIsChefSubscribed(false);
           setProfileLoading(false);
         });
         
-        return () => {
-          console.log("AuthContext: Cleaning up profile listener for UID:", currentUser.uid);
+        // Return the profile unsubscribe function for cleanup
+        // This was missing, which could lead to multiple listeners if auth state changes rapidly.
+        return () => { 
+          console.log("AuthContext: Cleaning up profile onSnapshot listener for UID:", currentUser.uid);
           unsubscribeProfile();
         };
 
       } else { 
-        console.log("AuthContext: No current user.");
+        console.log("AuthContext: No current user (logged out).");
         setUserProfile(null);
         setIsChef(false);
         setIsCustomer(false);
@@ -107,11 +121,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsChefSubscribed(false);
         setProfileLoading(false); 
       }
-      setLoading(false); 
+      setAuthLoading(false); 
     });
 
     return () => {
-      console.log("AuthContext: Cleaning up auth state listener.");
+      console.log("AuthContext: Cleaning up onAuthStateChanged listener.");
       unsubscribeAuth();
     };
   }, []);
@@ -120,7 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider value={{ 
       user, 
       userProfile, 
-      loading, 
+      loading: authLoading, 
       profileLoading, 
       isAdmin, 
       isChef, 

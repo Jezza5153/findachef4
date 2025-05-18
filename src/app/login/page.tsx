@@ -23,7 +23,7 @@ import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/aut
 import { auth, db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { useState } from 'react';
-import type { ChefProfile, CustomerProfile } from '@/types';
+import type { AppUserProfileContext } from '@/types';
 
 const loginSchema = z.object({
   email: z.string().email({ message: 'Invalid email address.' }),
@@ -48,41 +48,55 @@ export default function LoginPage() {
   const handleLogin = async (data: LoginFormValues) => {
     setIsLoading(true);
     try {
+      console.log("Login attempt for:", data.email);
       const userCredential = await signInWithEmailAndPassword(auth, data.email, data.password);
       const user = userCredential.user;
+      console.log("Firebase Auth successful for UID:", user.uid);
       
       toast({
         title: 'Login Successful',
-        description: 'Welcome back!',
+        description: 'Welcome back! Redirecting...',
       });
 
       // AuthContext will now handle fetching profile and determining role/admin status based on claims.
-      // The redirection will occur based on AuthContext updates in dashboard layouts.
-      // For now, we can attempt to fetch profile to determine initial redirect or rely on AuthContext.
+      // The redirection here is an initial guess; dashboard layouts will enforce final access.
       
-      let roleForRedirect = 'customer'; // Default assumption
+      let roleForRedirect: AppUserProfileContext['role'] = 'customer'; // Default assumption
 
       if (user) {
         const userDocRef = doc(db, "users", user.uid);
         const userDoc = await getDoc(userDocRef);
+
         if (userDoc.exists()) {
-          const userData = userDoc.data() as ChefProfile | CustomerProfile;
+          const userData = userDoc.data() as AppUserProfileContext;
+          console.log("Login: Firestore profile found:", userData);
           roleForRedirect = userData.role || 'customer';
-          // Admin status is now handled by custom claims via AuthContext
+          
+          // REMOVED localStorage setters for isChefApproved and isChefSubscribed
+          // AuthContext will derive these from the fetched userData.
+
         } else {
-          // This case should be rare for existing users. 
-          // New users are created via signup, which creates a Firestore profile.
-          console.warn("No profile document found for user during login:", user.uid, "Defaulting to customer role.");
+          console.warn("Login: No profile document found in Firestore for UID:", user.uid);
+          // This case should be rare if signup flows correctly create profiles.
+          // If it happens, AuthContext will handle it by having a null userProfile initially.
+          // We can keep a very basic fallback for initial redirect, but AuthContext is king.
+          if (data.email.toLowerCase().includes('chef@')) {
+            roleForRedirect = 'chef';
+          } else if (data.email.toLowerCase() === 'admin@example.com' || data.email.toLowerCase() === 'jezza5152@gmail.com') { // Example admin email check
+            roleForRedirect = 'admin';
+          }
         }
       }
       
+      console.log("Login: Determined role for initial redirect:", roleForRedirect);
+
       // Redirect based on role fetched or default
-      if (roleForRedirect === 'chef') {
-        router.push('/chef/dashboard');
-      } else if (roleForRedirect === 'admin') { // Though admin check is now via claims primarily
+      // The AuthContext and respective dashboard layouts will handle final authorization.
+      if (roleForRedirect === 'admin') {
         router.push('/admin');
-      }
-       else {
+      } else if (roleForRedirect === 'chef') {
+        router.push('/chef/dashboard');
+      } else {
         router.push('/customer/dashboard');
       }
 
