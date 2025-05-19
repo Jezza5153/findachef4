@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { db } from '@/lib/firebase'; // Assuming firebase-admin is NOT configured here. This needs to be admin SDK for server-side.
 import { collection, doc, updateDoc, serverTimestamp, writeBatch, Timestamp, getDoc, addDoc, query, where, getDocs } from 'firebase/firestore';
-import type { Booking, CalendarEvent, CustomerRequest, AppUserProfileContext } from '@/types';
+import type { Booking, CalendarEvent, CustomerRequest, AppUserProfileContext, ChefProfile } from '@/types';
 
 // Initialize Stripe with your SECRET key
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
@@ -32,7 +32,7 @@ const ensureTimestamp = (date: any): Timestamp => {
   if (date && typeof date.seconds === 'number' && typeof date.nanoseconds === 'number') {
     return new Timestamp(date.seconds, date.nanoseconds);
   }
-  console.warn("ensureTimestamp: Could not convert date, returning current time as fallback:", date);
+  console.warn("STRIPE WEBHOOK: ensureTimestamp: Could not convert date, returning current time as fallback:", date);
   return Timestamp.now(); // Fallback, consider error handling
 };
 
@@ -59,19 +59,19 @@ export async function POST(request: Request) {
   switch (event.type) {
     case 'payment_intent.succeeded':
       const paymentIntentSucceeded = event.data.object as Stripe.PaymentIntent;
-      console.log(`STRIPE WEBHOOK: PaymentIntent ${paymentIntentSucceeded.id} was successful!`);
+      console.log(`STRIPE WEBHOOK: PaymentIntent ${paymentIntentSucceeded.id} was successful! Amount: ${paymentIntentSucceeded.amount_received} ${paymentIntentSucceeded.currency}`);
       
-      // Extract metadata
       const requestId = paymentIntentSucceeded.metadata?.requestId;
       const customerIdFromMeta = paymentIntentSucceeded.metadata?.customerId; 
       
       if (!requestId || !customerIdFromMeta) {
         console.error('STRIPE WEBHOOK ERROR: Missing requestId or customerId in PaymentIntent metadata for', paymentIntentSucceeded.id);
+        // Still return 200 to Stripe to acknowledge receipt, but log the error.
         return NextResponse.json({ received: true, error: 'Missing metadata in PaymentIntent' });
       }
 
       try {
-        // Check if booking already exists for this paymentIntent to prevent duplicates
+        // Idempotency Check: See if a booking for this paymentIntent already exists.
         const bookingsRef = collection(db, "bookings");
         const qBooking = query(bookingsRef, where("paymentIntentId", "==", paymentIntentSucceeded.id));
         const existingBookingSnap = await getDocs(qBooking);
@@ -81,7 +81,7 @@ export async function POST(request: Request) {
             return NextResponse.json({ received: true, message: 'Booking already processed.' });
         }
 
-
+        // Fetch the original CustomerRequest
         const requestDocRef = doc(db, 'customerRequests', requestId);
         const requestSnap = await getDoc(requestDocRef);
 
@@ -97,17 +97,35 @@ export async function POST(request: Request) {
           console.error('STRIPE WEBHOOK ERROR: No active proposal or chefId found for CustomerRequest:', requestId);
           return NextResponse.json({ received: true, error: 'No active proposal on request' });
         }
-
-        const batch = writeBatch(db);
-        const bookingDocRef = doc(collection(db, "bookings")); // Generate new Booking ID
-
+        
+        // Fetch customer's name for the booking
         let customerName = "Valued Customer";
         const customerProfileDocRef = doc(db, "users", customerIdFromMeta);
         const customerProfileSnap = await getDoc(customerProfileDocRef);
         if (customerProfileSnap.exists()) {
           customerName = (customerProfileSnap.data() as AppUserProfileContext)?.name || customerName;
         }
-        
+
+        // Fetch chef's Stripe Account ID (You need to store this when they onboard with Stripe Connect)
+        const chefProfileDocRef = doc(db, "users", activeProposal.chefId);
+        const chefProfileSnap = await getDoc(chefProfileDocRef);
+        let chefStripeAccountId: string | undefined;
+        if (chefProfileSnap.exists()) {
+          chefStripeAccountId = (chefProfileSnap.data() as ChefProfile)?.stripeAccountId;
+        }
+
+        if (!chefStripeAccountId) {
+            console.error(`STRIPE WEBHOOK ERROR: Chef ${activeProposal.chefId} does not have a Stripe Account ID set up. Cannot process payouts.`);
+            // Depending on policy, you might still create the booking but flag it for admin review regarding payout.
+            // Or, if payout is critical for booking confirmation, this could be an error state.
+            // For now, we'll log and proceed with booking creation, but payouts would fail.
+        }
+
+
+        // --- Perform Firestore updates in a batch for atomicity ---
+        const batch = writeBatch(db);
+        const bookingDocRef = doc(collection(db, "bookings")); // Generate new Booking ID
+
         const newBookingData: Omit<Booking, 'id'> = {
             customerId: customerRequestData.customerId,
             customerName: customerName,
@@ -119,7 +137,7 @@ export async function POST(request: Request) {
             pax: customerRequestData.pax,
             totalPrice: activeProposal.menuPricePerHead * customerRequestData.pax,
             pricePerHead: activeProposal.menuPricePerHead,
-            status: 'confirmed', // Booking is confirmed upon successful payment
+            status: 'confirmed', 
             menuTitle: activeProposal.menuTitle,
             location: customerRequestData.location || undefined,
             requestId: requestId,
@@ -141,6 +159,7 @@ export async function POST(request: Request) {
             notes: `Booking for request ${requestId}. Booking ID: ${bookingDocRef.id}`,
             status: 'Confirmed',
             isWallEvent: false, 
+            bookingId: bookingDocRef.id,
         };
         const chefCalendarEventDocRef = doc(db, `users/${activeProposal.chefId}/calendarEvents`, bookingDocRef.id);
         batch.set(chefCalendarEventDocRef, { ...calendarEventData, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
@@ -153,24 +172,66 @@ export async function POST(request: Request) {
             requestId: requestId,
             senderId: 'system',
             senderRole: 'system',
-            text: `Payment confirmed for proposal from Chef ${activeProposal.chefName}. Booking ID: ${bookingDocRef.id.substring(0,6)}... Your event is now confirmed.`,
+            text: `Payment confirmed for proposal from Chef ${activeProposal.chefName}. Booking ID: ${bookingDocRef.id.substring(0,6)}... Event is confirmed.`,
             timestamp: serverTimestamp()
         });
 
         await batch.commit();
-        console.log(`STRIPE WEBHOOK: Booking ${bookingDocRef.id} created and CustomerRequest ${requestId} updated to 'booked'.`);
+        console.log(`STRIPE WEBHOOK: Firestore updated: Booking ${bookingDocRef.id} created, CustomerRequest ${requestId} status 'booked'.`);
 
-        // TODO: Implement actual fund distribution logic with Stripe Connect:
-        // This is where your backend would interact with Stripe Connect to:
-        // 1. Transfer 46% to the chef's connected account immediately.
-        // 2. Transfer 4% to your platform's Stripe account immediately.
-        // 3. Hold the remaining 50% (e.g., in your platform's balance or using Stripe's escrow/holding features if applicable)
-        //    for later release upon event completion.
-        // This requires chefs to be onboarded as Stripe Connect accounts.
-        console.log('STRIPE WEBHOOK: Placeholder for fund distribution logic (46% chef, 4% platform, 50% held). This needs Stripe Connect setup.');
+        // --- YOUR CORE BUSINESS LOGIC: Implement Your Stripe Connect Fund Distribution ---
+        // This is where you use the Stripe Node.js SDK to perform the 
+        // 46% to chef (immediately), 4% to platform (immediately), and 50% hold (for later release).
+        // This requires the chef to have a Stripe Connected Account (chefStripeAccountId).
+
+        if (chefStripeAccountId) {
+          const totalAmountReceived = paymentIntentSucceeded.amount_received; // Amount in cents
+          const currency = paymentIntentSucceeded.currency;
+
+          const chefShareAmount = Math.round(totalAmountReceived * 0.46);
+          // The platform fee (4%) can often be taken as an `application_fee_amount`
+          // when creating the PaymentIntent OR by a separate transfer.
+          // For simplicity here, let's assume the platform fee is handled.
+          // The crucial part is the immediate transfer to the chef.
+
+          try {
+            // Example: Create a transfer to the chef's connected account for their initial 46%
+            // This depends on your Stripe Connect setup (Direct Charges, Destination Charges, or Separate Charges and Transfers).
+            // If using Separate Charges and Transfers (most common for platforms):
+            const transferToChef = await stripe.transfers.create({
+              amount: chefShareAmount,
+              currency: currency,
+              destination: chefStripeAccountId,
+              transfer_group: paymentIntentSucceeded.id, // Group transfers related to this payment
+              description: `Payout for booking ${bookingDocRef.id} (initial 46%)`,
+              metadata: {
+                bookingId: bookingDocRef.id,
+                requestId: requestId,
+                payout_type: 'initial_46_percent'
+              }
+            });
+            console.log(`STRIPE WEBHOOK: Successfully created transfer ${transferToChef.id} of ${chefShareAmount} ${currency.toUpperCase()} to chef ${chefStripeAccountId}.`);
+            
+            // The remaining ~50% is implicitly held on your platform's Stripe balance.
+            // You will need another backend process (triggered by QR code scan confirmation)
+            // to create a second transfer for this remaining amount.
+            // Store bookingDocRef.id and the remaining amount to be paid out later.
+
+          } catch (stripeError: any) {
+            console.error(`STRIPE WEBHOOK: Stripe Connect fund distribution error for PI ${paymentIntentSucceeded.id}:`, stripeError.message);
+            // Log this critical error. You might need manual intervention or a retry mechanism.
+            // Decide if this should prevent the 200 OK. Usually, if DB writes are done, you send 200 OK
+            // and handle payout issues separately to avoid Stripe resending the same webhook.
+          }
+        } else {
+          console.warn(`STRIPE WEBHOOK: Chef ${activeProposal.chefId} does not have a Stripe Account ID. Initial 46% payout for PI ${paymentIntentSucceeded.id} cannot be processed automatically.`);
+          // Implement alerting for admin to handle this manually.
+        }
+        // --- END OF YOUR STRIPE CONNECT LOGIC ---
 
       } catch (dbError: any) {
         console.error('STRIPE WEBHOOK DB ERROR: Failed to process payment_intent.succeeded for PI:', paymentIntentSucceeded.id, dbError);
+        // If DB operations fail, it's safer to return 500 to Stripe so it retries.
         return NextResponse.json({ error: `Database error: ${dbError.message}` }, { status: 500 });
       }
       break;
@@ -182,26 +243,35 @@ export async function POST(request: Request) {
       if (failedRequestId) {
           try {
             const reqRef = doc(db, 'customerRequests', failedRequestId);
-            await updateDoc(reqRef, { status: 'payment_failed', updatedAt: serverTimestamp() });
-            
-            // Add a system message to the customer request chat
-            const messagesCollectionRef = collection(reqRef, "messages");
-            await addDoc(messagesCollectionRef, {
-                requestId: failedRequestId,
-                senderId: 'system',
-                senderRole: 'system',
-                text: `Payment attempt failed for the proposal from Chef ${paymentIntentFailed.metadata?.chefName || 'the chef'}. Please try again or contact support.`,
-                timestamp: serverTimestamp()
-            });
-            console.log(`STRIPE WEBHOOK: CustomerRequest ${failedRequestId} updated to 'payment_failed'.`);
+            // Check if the request exists before trying to update
+            const reqSnap = await getDoc(reqRef);
+            if (reqSnap.exists()) {
+                await updateDoc(reqRef, { status: 'payment_failed', updatedAt: serverTimestamp() });
+                
+                const messagesCollectionRef = collection(reqRef, "messages");
+                await addDoc(messagesCollectionRef, {
+                    requestId: failedRequestId,
+                    senderId: 'system',
+                    senderRole: 'system',
+                    text: `Payment attempt failed for the proposal from Chef ${paymentIntentFailed.metadata?.chefName || 'the chef'}. Please try again or contact support.`,
+                    timestamp: serverTimestamp()
+                });
+                console.log(`STRIPE WEBHOOK: CustomerRequest ${failedRequestId} updated to 'payment_failed'.`);
+            } else {
+                console.warn(`STRIPE WEBHOOK: CustomerRequest ${failedRequestId} not found for failed payment PI ${paymentIntentFailed.id}.`);
+            }
           } catch (dbError: any) {
-             console.error('STRIPE WEBHOOK DB ERROR: Failed to update CustomerRequest status for payment_intent.payment_failed:', paymentIntentFailed.id, dbError);
+             console.error(`STRIPE WEBHOOK DB ERROR: Failed to update CustomerRequest status for payment_intent.payment_failed PI ${paymentIntentFailed.id}:`, dbError);
           }
       }
       // TODO: Notify the customer via other means if necessary.
       break;
 
-    // ... handle other event types as needed (e.g., disputes, refunds, payout updates for the 50% release)
+    // TODO: Handle other event types as needed:
+    // - 'charge.dispute.created': Freeze payouts for the chef, investigate.
+    // - 'transfer.paid', 'payout.paid': Log successful payouts.
+    // - 'transfer.failed', 'payout.failed': Alert admin.
+    // - Events related to Stripe Connect account updates for chefs.
 
     default:
       console.log(`STRIPE WEBHOOK: Unhandled event type ${event.type}`);

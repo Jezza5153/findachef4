@@ -86,6 +86,8 @@ export interface ChefProfile extends UserProfileBase {
   collaboratorIds?: string[];
   outgoingCollaborationRequests?: string[];
   incomingCollaborationRequests?: string[];
+  stripeAccountId?: string; // For Stripe Connect
+  stripeOnboardingComplete?: boolean; // For Stripe Connect
 }
 
 export interface CustomerProfile extends UserProfileBase {
@@ -107,8 +109,12 @@ export interface AdminProfile extends UserProfileBase {
   // Admin-specific fields can be added here if needed
 }
 
-export type AppUserProfile = ChefProfile | CustomerProfile | AdminProfile;
-export type AppUserProfileContext = UserProfileBase & Partial<ChefProfile> & Partial<CustomerProfile> & Partial<AdminProfile>;
+// AppUserProfileContext is used by AuthContext to provide a merged view.
+// It includes all fields from UserProfileBase, and makes specific profile fields optional.
+export type AppUserProfileContext = UserProfileBase & 
+  Partial<Omit<ChefProfile, keyof UserProfileBase>> & 
+  Partial<Omit<CustomerProfile, keyof UserProfileBase>> &
+  Partial<Omit<AdminProfile, keyof UserProfileBase>>;
 
 
 export interface CustomerRequest {
@@ -121,7 +127,7 @@ export interface CustomerRequest {
   location?: string;
   notes?: string;
   customerId: string;
-  status?: 'new' | 'awaiting_customer_response' | 'proposal_sent' | 'chef_declined' | 'chef_accepted' | 'customer_confirmed' | 'booked' | 'cancelled_by_customer' | 'proposal_declined';
+  status?: 'new' | 'awaiting_customer_response' | 'proposal_sent' | 'chef_declined' | 'chef_accepted' | 'customer_confirmed' | 'booked' | 'cancelled_by_customer' | 'proposal_declined' | 'payment_failed';
   createdAt?: any; // Firestore Timestamp or Date object
   updatedAt?: any; // Firestore Timestamp or Date object
   respondingChefIds?: string[];
@@ -201,6 +207,7 @@ export interface CalendarEvent {
   updatedAt?: any; 
   teamId?: string;
   isWallEvent?: boolean; // Indicates if event originated from a ChefWallEvent
+  bookingId?: string; // Link back to the booking document if it's a booked event
 }
 
 export interface ChefWallEvent {
@@ -336,4 +343,14 @@ export interface Proposal {
   notes?: string; // Chef's notes for this specific proposal
   proposedAt: any; // Firestore Timestamp
   status: 'pending' | 'accepted' | 'declined_by_customer' | 'withdrawn_by_chef';
+}
+
+export interface CollaborationRequest {
+  fromChefId: string;
+  fromChefName: string; // Denormalized for easier display
+  fromChefAvatarUrl?: string; // Denormalized
+  toChefId: string;
+  status: 'pending' | 'accepted' | 'declined';
+  requestedAt: any; // Firestore Timestamp
+  respondedAt?: any; // Firestore Timestamp
 }

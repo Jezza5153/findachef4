@@ -78,7 +78,7 @@ export default function ChefSignupPage() {
 
   const handleResumeParsed = (data: { parsedData: ParseResumeOutput; file: File }) => {
     setResumeParsedData(data.parsedData);
-    setResumeFile(data.file); // Store the actual File object
+    setResumeFile(data.file); 
     setIsResumeUploaded(true);
     if (data.parsedData.experience && form.getValues('bio') === '') {
         form.setValue('bio', data.parsedData.experience.substring(0,500));
@@ -123,6 +123,7 @@ export default function ChefSignupPage() {
       let profilePictureUrl = '';
       let resumeFileUrl = '';
 
+      // Upload Profile Picture if provided
       if (data.profilePicture) {
         const file = data.profilePicture;
         const fileExtension = file.name.split('.').pop();
@@ -135,6 +136,7 @@ export default function ChefSignupPage() {
         console.log("Profile picture uploaded:", profilePictureUrl);
       }
       
+      // Upload Resume
       if (resumeFile) {
         toast({ title: "Uploading Resume...", description: "Please wait.", duration: 2000 });
         const resumeFileExtension = resumeFile.name.split('.').pop() || 'pdf';
@@ -145,14 +147,16 @@ export default function ChefSignupPage() {
         console.log("Resume uploaded:", resumeFileUrl);
       }
 
+      // Update Firebase Auth Profile
       await updateAuthProfile(user, { 
         displayName: data.name, 
         photoURL: profilePictureUrl || null 
       });
       console.log("Firebase Auth profile updated with displayName and photoURL.");
 
+      // Prepare Firestore Profile Data
       const userProfileData: ChefProfile = {
-        id: user.uid, // Crucial: matches the doc ID and auth UID
+        id: user.uid,
         email: user.email!,
         name: data.name,
         abn: data.abn,
@@ -172,6 +176,8 @@ export default function ChefSignupPage() {
         collaboratorIds: [],
         outgoingCollaborationRequests: [],
         incomingCollaborationRequests: [],
+        stripeAccountId: '', // Initialize Stripe fields
+        stripeOnboardingComplete: false, // Initialize Stripe fields
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
@@ -191,7 +197,6 @@ export default function ChefSignupPage() {
       setResumeFile(null);
       setIsResumeUploaded(false);
       setProfilePicturePreview(null);
-      // Redirect to login or a pending approval page
       router.push('/login'); 
     } catch (error: any) {
       console.error('Signup error:', error);

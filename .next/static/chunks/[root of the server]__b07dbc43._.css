@@ -1071,6 +1071,10 @@ body {
   max-height: 50vh;
 }
 
+.max-h-\[250px\] {
+  max-height: 250px;
+}
+
 .min-h-0 {
   min-height: 0;
 }
