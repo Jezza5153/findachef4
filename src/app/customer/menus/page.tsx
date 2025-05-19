@@ -1,14 +1,14 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react'; // Explicitly import React
 import { MenuCard } from '@/components/menu-card';
 import type { Menu, CustomerRequest } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { Search, Filter, ListFilter, Loader2 } from 'lucide-react';
+import { Search, ListFilter, Loader2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { collection, query, where, getDocs, orderBy, Timestamp, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -32,12 +32,15 @@ export default function CustomerMenusPage() {
         const menusCollectionRef = collection(db, "menus");
         const q = query(menusCollectionRef, where("isPublic", "==", true), orderBy("createdAt", "desc"));
         const querySnapshot = await getDocs(q);
-        const fetchedMenus = querySnapshot.docs.map(docSnap => ({
-          id: docSnap.id,
-          ...docSnap.data(),
-          createdAt: docSnap.data().createdAt ? (docSnap.data().createdAt as Timestamp).toDate() : undefined,
-          updatedAt: docSnap.data().updatedAt ? (docSnap.data().updatedAt as Timestamp).toDate() : undefined,
-        } as Menu));
+        const fetchedMenus = querySnapshot.docs.map(docSnap => {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id,
+            ...data,
+            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
+          } as Menu
+        });
         setMenus(fetchedMenus);
       } catch (error) {
         console.error("Error fetching public menus:", error);
@@ -57,27 +60,36 @@ export default function CustomerMenusPage() {
     if (!user) {
       toast({
         title: 'Login Required',
-        description: 'Please log in or create an account to request a menu.',
+        description: 'Please log in or create an account to request this menu.',
         variant: 'destructive',
       });
       router.push('/login');
       return;
     }
 
+    setIsLoadingMenus(true); // Indicate loading for this action specifically
     try {
       const requestsCollectionRef = collection(db, "customerRequests");
+      
+      // Ensure eventDate is a Firestore Timestamp. Placeholder: 7 days from now.
+      const futureDate = new Date();
+      futureDate.setDate(futureDate.getDate() + 7);
+      const eventDateForFirestore = Timestamp.fromDate(futureDate);
+
       const newRequest: Omit<CustomerRequest, 'id' | 'createdAt' | 'updatedAt'> = {
         eventType: `Menu Request: ${menu.title}`,
         budget: menu.pricePerHead * (menu.pax || 1),
         cuisinePreference: menu.cuisine,
         pax: menu.pax || 1,
-        eventDate: Timestamp.fromDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)), // Placeholder: 7 days from now
+        eventDate: eventDateForFirestore,
         notes: `Interested in the menu: "${menu.title}" by Chef ${menu.chefName || 'Unknown Chef'}.`,
         status: 'new',
         customerId: user.uid,
         requestedMenuId: menu.id,
         requestedMenuTitle: menu.title,
-        respondingChefIds: [menu.chefId], // Directly assign to the chef who owns the menu
+        respondingChefIds: [menu.chefId], 
+        activeProposal: null,
+        declinedChefIds: [],
       };
 
       const docRef = await addDoc(requestsCollectionRef, {
@@ -99,21 +111,36 @@ export default function CustomerMenusPage() {
         description: "Could not send your request. Please try again.",
         variant: "destructive",
       });
+    } finally {
+      setIsLoadingMenus(false);
     }
   };
 
-  const filteredMenus = menus.filter(menu => {
-    const matchesSearch = menu.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          menu.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          menu.cuisine.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          (menu.chefName && menu.chefName.toLowerCase().includes(searchTerm.toLowerCase()));
-    const matchesCuisine = cuisineFilter === 'all' || menu.cuisine.toLowerCase() === cuisineFilter.toLowerCase();
-    const matchesDietary = dietaryFilter === 'all' || (menu.dietaryInfo && menu.dietaryInfo.some(d => d.toLowerCase().includes(dietaryFilter.toLowerCase())));
-    return matchesSearch && matchesCuisine && matchesDietary;
-  });
+  const uniqueCuisines = useMemo(() => {
+    if (menus.length === 0) return ['all'];
+    return ['all', ...new Set(menus.map(menu => menu.cuisine).filter(Boolean).sort())]
+  }, [menus]);
   
-  const uniqueCuisines = useMemo(() => ['all', ...new Set(menus.map(menu => menu.cuisine).filter(Boolean).sort())], [menus]);
-  const uniqueDietaryOptions = useMemo(() => ['all', ...new Set(menus.flatMap(menu => menu.dietaryInfo).filter(Boolean).sort())], [menus]);
+  const uniqueDietaryOptions = useMemo(() => {
+    if (menus.length === 0) return ['all'];
+    return ['all', ...new Set(menus.flatMap(menu => menu.dietaryInfo || []).filter(Boolean).sort())]
+  }, [menus]);
+
+  const filteredMenus = useMemo(() => {
+    return menus.filter(menu => {
+      const searchLower = searchTerm.toLowerCase();
+      const matchesSearch = 
+        menu.title.toLowerCase().includes(searchLower) ||
+        menu.description.toLowerCase().includes(searchLower) ||
+        menu.cuisine.toLowerCase().includes(searchLower) ||
+        (menu.chefName && menu.chefName.toLowerCase().includes(searchLower)) ||
+        (menu.tags && menu.tags.some(tag => tag.toLowerCase().includes(searchLower)));
+      const matchesCuisine = cuisineFilter === 'all' || menu.cuisine.toLowerCase() === cuisineFilter.toLowerCase();
+      const matchesDietary = dietaryFilter === 'all' || (menu.dietaryInfo && menu.dietaryInfo.some(d => d.toLowerCase().includes(dietaryFilter.toLowerCase())));
+      return matchesSearch && matchesCuisine && matchesDietary;
+    });
+  }, [menus, searchTerm, cuisineFilter, dietaryFilter]);
+
 
   return (
     <div className="container mx-auto py-12 px-4 sm:px-6 lg:px-8">
