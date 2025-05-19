@@ -11,7 +11,7 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
-  AlertDialogDescription,
+  AlertDialogDescription as ShadAlertDialogDescription, // Aliased to avoid conflict
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
@@ -21,8 +21,8 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { ShieldAlert, ListChecks, UserCog, FileWarning, UserCheck, FileSearch2, BadgeCheck, MessageCircleWarning, Gavel, Award, MessageSquare, LockKeyhole, CalendarX2, UsersRound, Banknote, PauseCircle, Undo2, ClipboardCheck, FileCheck2, BotMessageSquare, ShieldBan, CreditCard, CalendarCheck2 as CalendarCheckIcon, Download, AlertTriangle, CalendarClock, Loader2, Utensils, CheckCircle, XCircle, Send, Eye } from 'lucide-react';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, orderBy, Timestamp, query, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import type { Menu, CustomerRequest, RequestMessage, AppUserProfileContext, ChefProfile } from '@/types';
+import { collection, getDocs, orderBy, Timestamp, query, doc, updateDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import type { Menu, CustomerRequest, RequestMessage, AppUserProfileContext, ChefProfile, CustomerProfile, UserProfileBase } from '@/types';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
@@ -30,11 +30,11 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import Image from 'next/image';
 
 
-type UserView = AppUserProfileContext;
+type UserView = AppUserProfileContext; // Using the broader AppUserProfileContext
 
 export default function AdminPage() {
   const { toast } = useToast();
-  const { isAdmin } = useAuth();
+  const { isAdmin } = useAuth(); // Get isAdmin status from context
 
   const [allUsers, setAllUsers] = useState<UserView[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
@@ -57,84 +57,85 @@ export default function AdminPage() {
 
 
   useEffect(() => {
-    const fetchAdminData = async () => {
-      setIsLoadingUsers(true);
-      try {
-        const usersCollectionRef = collection(db, "users");
-        const usersQuery = query(usersCollectionRef, orderBy("createdAt", "desc"));
-        const usersSnapshot = await getDocs(usersQuery);
-        const fetchedUsers = usersSnapshot.docs.map(docSnap => {
-          const data = docSnap.data();
-          return {
-            id: docSnap.id,
-            ...data,
-            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
-          } as UserView;
-        });
-        setAllUsers(fetchedUsers);
-      } catch (error) {
-        console.error("Error fetching users:", error);
-        toast({ title: "Error", description: "Could not fetch users.", variant: "destructive" });
-      } finally {
-        setIsLoadingUsers(false);
-      }
+    setIsLoadingUsers(true);
+    const usersCollectionRef = collection(db, "users");
+    const usersQuery = query(usersCollectionRef, orderBy("createdAt", "desc"));
+    const unsubscribeUsers = onSnapshot(usersQuery, (usersSnapshot) => {
+      const fetchedUsers = usersSnapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        return {
+          id: docSnap.id,
+          ...data,
+          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+          accountStatus: data.accountStatus || 'active', // Default to active if not set
+        } as UserView;
+      });
+      setAllUsers(fetchedUsers);
+      setIsLoadingUsers(false);
+    }, (error) => {
+      console.error("Error fetching users:", error);
+      toast({ title: "Error", description: "Could not fetch users.", variant: "destructive" });
+      setIsLoadingUsers(false);
+    });
 
-      setIsLoadingMenus(true);
-      try {
-        const menusCollectionRef = collection(db, "menus");
-        const menusQuery = query(menusCollectionRef, orderBy("createdAt", "desc"));
-        const menusSnapshot = await getDocs(menusQuery);
-        const fetchedMenus = menusSnapshot.docs.map(docSnap => {
-          const data = docSnap.data();
-          return {
-            id: docSnap.id,
-            ...data,
-            adminStatus: data.adminStatus || 'pending',
-            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
-            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
-          } as Menu;
-        });
-        setAllMenus(fetchedMenus);
-      } catch (error) {
-        console.error("Error fetching menus:", error);
-        toast({ title: "Error", description: "Could not fetch menus.", variant: "destructive" });
-      } finally {
-        setIsLoadingMenus(false);
-      }
+    setIsLoadingMenus(true);
+    const menusCollectionRef = collection(db, "menus");
+    const menusQuery = query(menusCollectionRef, orderBy("createdAt", "desc"));
+    const unsubscribeMenus = onSnapshot(menusQuery, (menusSnapshot) => {
+      const fetchedMenus = menusSnapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        return {
+          id: docSnap.id,
+          ...data,
+          adminStatus: data.adminStatus || 'pending',
+          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
+        } as Menu;
+      });
+      setAllMenus(fetchedMenus);
+      setIsLoadingMenus(false);
+    }, (error) => {
+      console.error("Error fetching menus:", error);
+      toast({ title: "Error", description: "Could not fetch menus.", variant: "destructive" });
+      setIsLoadingMenus(false);
+    });
 
-      setIsLoadingCustomerRequests(true);
-      try {
-        const requestsCollectionRef = collection(db, "customerRequests");
-        const requestsQuery = query(requestsCollectionRef, orderBy("createdAt", "desc"));
-        const requestsSnapshot = await getDocs(requestsQuery);
-        const fetchedRequests = requestsSnapshot.docs.map(docSnap => {
-          const data = docSnap.data();
-          return {
-            id: docSnap.id,
-            ...data,
-            eventDate: data.eventDate instanceof Timestamp ? data.eventDate.toDate() : new Date(data.eventDate as any),
-            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
-          } as CustomerRequest;
-        });
-        setAllCustomerRequests(fetchedRequests);
-      } catch (error) {
-        console.error("Error fetching customer requests:", error);
-        toast({ title: "Error", description: "Could not fetch customer requests.", variant: "destructive" });
-      } finally {
-        setIsLoadingCustomerRequests(false);
-      }
-    };
-    fetchAdminData();
+    setIsLoadingCustomerRequests(true);
+    const requestsCollectionRef = collection(db, "customerRequests");
+    const requestsQuery = query(requestsCollectionRef, orderBy("createdAt", "desc"));
+    const unsubscribeRequests = onSnapshot(requestsCollectionRef, (requestsSnapshot) => {
+      const fetchedRequests = requestsSnapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        return {
+          id: docSnap.id,
+          ...data,
+          eventDate: data.eventDate instanceof Timestamp ? data.eventDate.toDate() : new Date(data.eventDate as any),
+          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+        } as CustomerRequest;
+      });
+      setAllCustomerRequests(fetchedRequests);
+      setIsLoadingCustomerRequests(false);
+    }, (error) => {
+      console.error("Error fetching customer requests:", error);
+      toast({ title: "Error", description: "Could not fetch customer requests.", variant: "destructive" });
+      setIsLoadingCustomerRequests(false);
+    });
+    
+    return () => {
+        unsubscribeUsers();
+        unsubscribeMenus();
+        unsubscribeRequests();
+    }
   }, [toast]);
 
   const handleApproveUser = async (userId: string) => {
-    if (!isAdmin) { toast({ title: "Permission Denied", variant: "destructive" }); return; }
+    if (!isAdmin) { toast({ title: "Permission Denied", description: "You do not have permission to perform this action.", variant: "destructive" }); return; }
     setIsProcessingAction(true);
     try {
       const userDocRef = doc(db, "users", userId);
       await updateDoc(userDocRef, { isApproved: true, updatedAt: serverTimestamp() });
-      setAllUsers(prevUsers => prevUsers.map(u => u.id === userId ? { ...u, isApproved: true } : u));
-      toast({ title: "Chef Approved", description: `Chef with ID ${userId.substring(0, 6)}... has been approved.` });
+      // Local state update will be handled by onSnapshot
+      toast({ title: "Chef Approved", description: `Chef has been approved.` });
     } catch (error) {
       console.error("Error approving user:", error);
       toast({ title: "Error", description: "Could not approve chef.", variant: "destructive" });
@@ -144,13 +145,12 @@ export default function AdminPage() {
   };
 
   const handleRejectUser = async (userId: string) => {
-    if (!isAdmin) { toast({ title: "Permission Denied", variant: "destructive" }); return; }
+    if (!isAdmin) { toast({ title: "Permission Denied", description: "You do not have permission to perform this action.", variant: "destructive" }); return; }
     setIsProcessingAction(true);
     try {
       const userDocRef = doc(db, "users", userId);
-      await updateDoc(userDocRef, { isApproved: false, updatedAt: serverTimestamp() }); // Example: just unapprove
-      setAllUsers(prevUsers => prevUsers.map(u => u.id === userId ? { ...u, isApproved: false } : u));
-      toast({ title: "Chef Rejected", description: `Chef ID ${userId.substring(0, 6)}... status updated to not approved.` });
+      await updateDoc(userDocRef, { isApproved: false, updatedAt: serverTimestamp() }); 
+      toast({ title: "Chef Rejected", description: `Chef status updated to not approved.` });
     } catch (error) {
       console.error("Error rejecting user:", error);
       toast({ title: "Error", description: "Could not process rejection for chef.", variant: "destructive" });
@@ -160,13 +160,12 @@ export default function AdminPage() {
   };
 
   const handleApproveMenu = async (menuId: string) => {
-    if (!isAdmin) { toast({ title: "Permission Denied", variant: "destructive" }); return; }
+    if (!isAdmin) { toast({ title: "Permission Denied", description: "You do not have permission to perform this action.", variant: "destructive" }); return; }
     setIsProcessingAction(true);
     try {
       const menuDocRef = doc(db, "menus", menuId);
       await updateDoc(menuDocRef, { adminStatus: 'approved', adminNotes: adminNotesForMenu || '', updatedAt: serverTimestamp() });
-      setAllMenus(prevMenus => prevMenus.map(m => m.id === menuId ? { ...m, adminStatus: 'approved', adminNotes: adminNotesForMenu || '' } : m));
-      toast({ title: "Menu Approved", description: `Menu ID ${menuId.substring(0, 6)}... has been approved.` });
+      toast({ title: "Menu Approved", description: `Menu has been approved.` });
       setIsMenuReviewDialogOpen(false);
       setAdminNotesForMenu('');
     } catch (error) {
@@ -178,13 +177,12 @@ export default function AdminPage() {
   };
 
   const handleRejectMenu = async (menuId: string) => {
-    if (!isAdmin) { toast({ title: "Permission Denied", variant: "destructive" }); return; }
+    if (!isAdmin) { toast({ title: "Permission Denied", description: "You do not have permission to perform this action.", variant: "destructive" }); return; }
     setIsProcessingAction(true);
     try {
       const menuDocRef = doc(db, "menus", menuId);
       await updateDoc(menuDocRef, { adminStatus: 'rejected', adminNotes: adminNotesForMenu || 'Rejected by admin.', updatedAt: serverTimestamp() });
-      setAllMenus(prevMenus => prevMenus.map(m => m.id === menuId ? { ...m, adminStatus: 'rejected', adminNotes: adminNotesForMenu || 'Rejected by admin.' } : m));
-      toast({ title: "Menu Rejected", description: `Menu ID ${menuId.substring(0, 6)}... has been rejected.` });
+      toast({ title: "Menu Rejected", description: `Menu has been rejected.` });
       setIsMenuReviewDialogOpen(false);
       setAdminNotesForMenu('');
     } catch (error) {
@@ -200,40 +198,60 @@ export default function AdminPage() {
     setAdminNotesForRequest(request.adminNotes || '');
     setIsRequestDetailsDialogOpen(true);
     setIsLoadingRequestMessages(true);
-    setRequestMessagesForAdminView([]); // Clear previous messages
+    setRequestMessagesForAdminView([]); 
     try {
       const messagesCollectionRef = collection(db, "customerRequests", request.id, "messages");
       const qMessages = query(messagesCollectionRef, orderBy("timestamp", "asc"));
-      const messagesSnapshot = await getDocs(qMessages);
-      const fetchedMessages = messagesSnapshot.docs.map(docSnap => {
-        const data = docSnap.data();
-        return {
-          id: docSnap.id,
-          ...data,
-          timestamp: data.timestamp instanceof Timestamp ? data.timestamp.toDate() : new Date(data.timestamp as any)
-        } as RequestMessage;
+      // Using onSnapshot for real-time message updates while dialog is open
+      const unsubscribeMessages = onSnapshot(qMessages, (messagesSnapshot) => {
+          const fetchedMessages = messagesSnapshot.docs.map(docSnap => {
+            const data = docSnap.data();
+            return {
+              id: docSnap.id,
+              ...data,
+              timestamp: data.timestamp instanceof Timestamp ? data.timestamp.toDate() : new Date(data.timestamp as any)
+            } as RequestMessage;
+          });
+          setRequestMessagesForAdminView(fetchedMessages);
+          setIsLoadingRequestMessages(false);
+      }, (error) => {
+          console.error("Error fetching messages for request:", error);
+          toast({ title: "Error", description: "Could not fetch messages for this request.", variant: "destructive" });
+          setIsLoadingRequestMessages(false);
       });
-      setRequestMessagesForAdminView(fetchedMessages);
+      // Store unsubscribe function to call when dialog closes
+      setSelectedRequestForAdminView(prev => prev ? {...prev, unsubscribeMessages } : null);
+
     } catch (error) {
-      console.error("Error fetching messages for request:", error);
-      toast({ title: "Error", description: "Could not fetch messages for this request.", variant: "destructive" });
-    } finally {
+      console.error("Error setting up messages listener for request:", error);
+      toast({ title: "Error", description: "Could not set up listener for messages.", variant: "destructive" });
       setIsLoadingRequestMessages(false);
     }
   };
   
-  const handleModerateRequest = async (requestId: string, action: CustomerRequest['moderationStatus']) => {
+  const handleModerateRequest = async (requestId: string, moderationAction: CustomerRequest['moderationStatus'], targetCustomerId?: string) => {
     if (!isAdmin) { toast({ title: "Permission Denied", variant: "destructive" }); return; }
     setIsProcessingAction(true);
     try {
       const requestDocRef = doc(db, "customerRequests", requestId);
       await updateDoc(requestDocRef, { 
-        moderationStatus: action, 
+        moderationStatus: moderationAction, 
         adminNotes: adminNotesForRequest,
         updatedAt: serverTimestamp() 
       });
-      setAllCustomerRequests(prevReqs => prevReqs.map(r => r.id === requestId ? {...r, moderationStatus: action, adminNotes: adminNotesForRequest} : r));
-      toast({ title: "Moderation Action Taken", description: `Request ${requestId.substring(0,6)}... status updated to ${action}.` });
+
+      if (targetCustomerId && (moderationAction === 'customer_warned' || moderationAction === 'customer_suspended')) {
+        const userDocRef = doc(db, "users", targetCustomerId);
+        await updateDoc(userDocRef, {
+          accountStatus: moderationAction === 'customer_warned' ? 'warned' : 'suspended',
+          updatedAt: serverTimestamp()
+        });
+        toast({ title: "Moderation Action Taken", description: `Request status updated to ${moderationAction} and customer account status updated.` });
+      } else {
+        toast({ title: "Moderation Action Taken", description: `Request status updated to ${moderationAction}.` });
+      }
+      
+      // Local state updates will be handled by onSnapshot
       setIsRequestDetailsDialogOpen(false);
     } catch (error) {
       console.error("Error moderating request:", error);
@@ -248,6 +266,16 @@ export default function AdminPage() {
     setAdminNotesForMenu(menu.adminNotes || '');
     setIsMenuReviewDialogOpen(true);
   };
+  
+  const getAccountStatusBadgeVariant = (status?: UserProfileBase['accountStatus']) => {
+    switch (status) {
+      case 'active': return 'default'; // Default often green-ish or primary
+      case 'warned': return 'secondary'; // Secondary might be yellow/orange
+      case 'suspended': return 'destructive';
+      default: return 'outline';
+    }
+  };
+
 
   const adminFeatures = [
     { name: "Approve Co-hosted Events", description: "Confirm both chefs are approved and willing to collaborate on the event.", icon: <ClipboardCheck className="mr-2 h-5 w-5 text-purple-600" /> },
@@ -329,6 +357,7 @@ export default function AdminPage() {
                     <TableHead>Name</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Role</TableHead>
+                    <TableHead>Account Status</TableHead>
                     <TableHead>Joined</TableHead>
                     <TableHead>Chef Approved</TableHead>
                     <TableHead>Actions</TableHead>
@@ -342,6 +371,11 @@ export default function AdminPage() {
                       <TableCell>
                         <Badge variant={user.role === 'chef' ? 'default' : (user.role === 'admin' ? 'destructive' : 'secondary')} className="capitalize">
                           {user.role || 'N/A'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={getAccountStatusBadgeVariant(user.accountStatus)} className="capitalize">
+                          {user.accountStatus || 'N/A'}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -396,7 +430,7 @@ export default function AdminPage() {
                           </TooltipProvider>
                         )}
                         {user.role === 'chef' && (user as ChefProfile).isApproved && (
-                          <span className="text-xs text-muted-foreground">No actions</span>
+                          <span className="text-xs text-muted-foreground">No approval actions</span>
                         )}
                         {user.role !== 'chef' && (
                           <span className="text-xs text-muted-foreground">N/A</span>
@@ -466,7 +500,7 @@ export default function AdminPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                         <Button variant="outline" size="sm" onClick={() => handleOpenMenuReviewDialog(menu)} className="text-xs">
+                         <Button variant="outline" size="sm" onClick={() => handleOpenMenuReviewDialog(menu)} className="text-xs" disabled={!isAdmin || isProcessingAction}>
                            <Eye className="h-3 w-3 mr-1"/> Review
                          </Button>
                       </TableCell>
@@ -526,7 +560,7 @@ export default function AdminPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <Button variant="outline" size="sm" onClick={() => handleViewRequestDetails(request)} className="text-xs">
+                        <Button variant="outline" size="sm" onClick={() => handleViewRequestDetails(request)} className="text-xs" disabled={!isAdmin || isProcessingAction}>
                           <Eye className="h-3 w-3 mr-1"/> View/Moderate
                         </Button>
                       </TableCell>
@@ -541,7 +575,13 @@ export default function AdminPage() {
 
       {/* Dialog for Viewing/Moderating Customer Request */}
       {selectedRequestForAdminView && (
-        <AlertDialog open={isRequestDetailsDialogOpen} onOpenChange={setIsRequestDetailsDialogOpen}>
+        <AlertDialog open={isRequestDetailsDialogOpen} onOpenChange={(open) => {
+            if (!open && selectedRequestForAdminView && (selectedRequestForAdminView as any).unsubscribeMessages) {
+                (selectedRequestForAdminView as any).unsubscribeMessages(); // Clean up listener
+            }
+            setIsRequestDetailsDialogOpen(open);
+            if (!open) setSelectedRequestForAdminView(null); // Clear selection on close
+        }}>
           <AlertDialogContent className="sm:max-w-2xl">
             <AlertDialogHeader>
               <AlertDialogTitle>View Customer Request Details - ID: {selectedRequestForAdminView.id.substring(0,8)}...</AlertDialogTitle>
@@ -558,6 +598,7 @@ export default function AdminPage() {
                 <p><strong>Status:</strong> <Badge variant={selectedRequestForAdminView.status === 'booked' ? 'default' : 'secondary'} className="capitalize">{selectedRequestForAdminView.status?.replace(/_/g, ' ') || 'Unknown'}</Badge></p>
                 {selectedRequestForAdminView.location && <p className="col-span-2"><strong>Location:</strong> {selectedRequestForAdminView.location}</p>}
                 {selectedRequestForAdminView.notes && <p className="col-span-2"><strong>Notes:</strong> {selectedRequestForAdminView.notes}</p>}
+                <p><strong>Moderation Status:</strong> <Badge variant={selectedRequestForAdminView.moderationStatus === 'resolved' ? 'default' : (selectedRequestForAdminView.moderationStatus === 'customer_suspended' ? 'destructive' : 'secondary')} className="capitalize">{selectedRequestForAdminView.moderationStatus?.replace(/_/g, ' ') || 'Pending Review'}</Badge></p>
               </div>
               <div className="mt-2">
                 <Label htmlFor="adminNotesRequest">Admin Notes:</Label>
@@ -601,7 +642,7 @@ export default function AdminPage() {
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button onClick={() => handleModerateRequest(selectedRequestForAdminView.id, 'customer_warned')} variant="outline" disabled={!isAdmin || isProcessingAction}>
+                    <Button onClick={() => handleModerateRequest(selectedRequestForAdminView.id, 'customer_warned', selectedRequestForAdminView.customerId)} variant="outline" disabled={!isAdmin || isProcessingAction}>
                       {isProcessingAction ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Warn Customer
                     </Button>
                   </TooltipTrigger>
@@ -609,7 +650,7 @@ export default function AdminPage() {
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button onClick={() => handleModerateRequest(selectedRequestForAdminView.id, 'customer_suspended')} variant="destructive" disabled={!isAdmin || isProcessingAction}>
+                    <Button onClick={() => handleModerateRequest(selectedRequestForAdminView.id, 'customer_suspended', selectedRequestForAdminView.customerId)} variant="destructive" disabled={!isAdmin || isProcessingAction}>
                       {isProcessingAction ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Suspend Customer
                     </Button>
                   </TooltipTrigger>
@@ -691,4 +732,3 @@ export default function AdminPage() {
     </div>
   );
 }
-

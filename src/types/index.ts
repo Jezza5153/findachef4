@@ -57,6 +57,7 @@ export interface UserProfileBase {
   email: string;
   profilePictureUrl?: string;
   role: 'chef' | 'customer' | 'admin';
+  accountStatus?: 'active' | 'warned' | 'suspended'; // Added for admin moderation
   createdAt?: any; // Firestore Timestamp
   updatedAt?: any; // Firestore Timestamp
 }
@@ -86,8 +87,8 @@ export interface ChefProfile extends UserProfileBase {
   collaboratorIds?: string[];
   outgoingCollaborationRequests?: string[];
   incomingCollaborationRequests?: string[];
-  stripeAccountId?: string; // For Stripe Connect
-  stripeOnboardingComplete?: boolean; // For Stripe Connect
+  stripeAccountId?: string; 
+  stripeOnboardingComplete?: boolean; 
 }
 
 export interface CustomerProfile extends UserProfileBase {
@@ -109,8 +110,6 @@ export interface AdminProfile extends UserProfileBase {
   // Admin-specific fields can be added here if needed
 }
 
-// AppUserProfileContext is used by AuthContext to provide a merged view.
-// It includes all fields from UserProfileBase, and makes specific profile fields optional.
 export type AppUserProfileContext = UserProfileBase & 
   Partial<Omit<ChefProfile, keyof UserProfileBase>> & 
   Partial<Omit<CustomerProfile, keyof UserProfileBase>> &
@@ -206,8 +205,8 @@ export interface CalendarEvent {
   createdAt?: any; 
   updatedAt?: any; 
   teamId?: string;
-  isWallEvent?: boolean; // Indicates if event originated from a ChefWallEvent
-  bookingId?: string; // Link back to the booking document if it's a booked event
+  isWallEvent?: boolean; 
+  bookingId?: string; 
 }
 
 export interface ChefWallEvent {
@@ -277,10 +276,10 @@ export interface TaxAdviceOutput {
 
 export interface ActivityItem {
   id: string;
-  type: string; // e.g., 'new_message', 'booking_confirmed', 'menu_updated'
+  type: string; 
   description: string;
-  timestamp: any; // Firestore Timestamp or Date object
-  linkTo?: string; // e.g., /chef/dashboard/requests/XYZ or /customer/dashboard/events/ABC
+  timestamp: any; 
+  linkTo?: string; 
   isRead?: boolean;
 }
 
@@ -323,34 +322,32 @@ export interface Booking {
   updatedAt?: any; 
   menuTitle?: string; 
   location?: string;
-  qrCodeScannedAt?: any; // Timestamp for when QR was scanned
-  paymentIntentId?: string; // From Stripe
-  requestId?: string; // Link to the original CustomerRequest if applicable
-  chefWallEventId?: string; // Link if booked from a ChefWallEvent
+  qrCodeScannedAt?: any; 
+  paymentIntentId?: string; 
+  requestId?: string; 
+  chefWallEventId?: string; 
 }
 
-
-// Represents a proposal object, could be part of CustomerRequest or a separate subcollection
 export interface Proposal {
-  id: string; // Could be the chef's UID if only one proposal per chef is allowed per request
+  id: string; 
   chefId: string;
   chefName: string;
   chefAvatarUrl?: string;
-  menuId?: string; // If proposing an existing menu
+  menuId?: string; 
   menuTitle: string;
-  menuDescription?: string; // If a custom menu for this proposal
+  menuDescription?: string; 
   pricePerHead: number;
-  notes?: string; // Chef's notes for this specific proposal
-  proposedAt: any; // Firestore Timestamp
+  notes?: string; 
+  proposedAt: any; 
   status: 'pending' | 'accepted' | 'declined_by_customer' | 'withdrawn_by_chef';
 }
 
 export interface CollaborationRequest {
   fromChefId: string;
-  fromChefName: string; // Denormalized for easier display
-  fromChefAvatarUrl?: string; // Denormalized
+  fromChefName: string; 
+  fromChefAvatarUrl?: string; 
   toChefId: string;
   status: 'pending' | 'accepted' | 'declined';
-  requestedAt: any; // Firestore Timestamp
-  respondedAt?: any; // Firestore Timestamp
+  requestedAt: any; 
+  respondedAt?: any; 
 }

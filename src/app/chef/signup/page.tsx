@@ -57,6 +57,7 @@ export default function ChefSignupPage() {
   const [resumeParsedData, setResumeParsedData] = useState<ParseResumeOutput | null>(null);
   const [isResumeUploaded, setIsResumeUploaded] = useState(false);
   const [profilePicturePreview, setProfilePicturePreview] = useState<string | null>(null);
+  const [profilePictureFile, setProfilePictureFile] = useState<File | null>(null);
   const { toast } = useToast();
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
@@ -92,6 +93,7 @@ export default function ChefSignupPage() {
     const file = event.target.files?.[0];
     if (file) {
       form.setValue('profilePicture', file, { shouldValidate: true });
+      setProfilePictureFile(file); // Store the file object
       const reader = new FileReader();
       reader.onloadend = () => {
         setProfilePicturePreview(reader.result as string);
@@ -99,6 +101,7 @@ export default function ChefSignupPage() {
       reader.readAsDataURL(file);
     } else {
       form.setValue('profilePicture', undefined);
+      setProfilePictureFile(null);
       setProfilePicturePreview(null);
     }
   };
@@ -120,41 +123,36 @@ export default function ChefSignupPage() {
       const user = userCredential.user;
       console.log("Firebase Auth user created successfully:", user.uid);
 
-      let profilePictureUrl = '';
-      let resumeFileUrl = '';
+      let profilePictureUrlToSave = '';
+      let resumeFileUrlToSave = '';
 
-      // Upload Profile Picture if provided
-      if (data.profilePicture) {
-        const file = data.profilePicture;
-        const fileExtension = file.name.split('.').pop();
-        const profilePicRefPath = `users/${user.uid}/profilePicture.${fileExtension}`;
-        const profilePicRef = storageRef(storage, profilePicRefPath);
+      if (profilePictureFile) {
+        const fileExt = profilePictureFile.name.split('.').pop();
+        const profilePicRefPath = `users/${user.uid}/profilePicture.${fileExt}`;
+        const profilePicStorageRefInstance = storageRef(storage, profilePicRefPath);
         
         toast({ title: "Uploading Profile Picture...", description: "Please wait.", duration: 2000 });
-        const uploadTaskSnapshot = await uploadBytesResumable(profilePicRef, file);
-        profilePictureUrl = await getDownloadURL(uploadTaskSnapshot.ref);
-        console.log("Profile picture uploaded:", profilePictureUrl);
+        const uploadTaskSnapshot = await uploadBytesResumable(profilePicStorageRefInstance, profilePictureFile);
+        profilePictureUrlToSave = await getDownloadURL(uploadTaskSnapshot.ref);
+        console.log("Profile picture uploaded:", profilePictureUrlToSave);
       }
       
-      // Upload Resume
       if (resumeFile) {
         toast({ title: "Uploading Resume...", description: "Please wait.", duration: 2000 });
         const resumeFileExtension = resumeFile.name.split('.').pop() || 'pdf';
         const resumeStorageRefPath = `users/${user.uid}/resume.${resumeFileExtension}`;
         const resumeStorageRefInstance = storageRef(storage, resumeStorageRefPath);
         const resumeUploadTask = await uploadBytesResumable(resumeStorageRefInstance, resumeFile);
-        resumeFileUrl = await getDownloadURL(resumeUploadTask.ref);
-        console.log("Resume uploaded:", resumeFileUrl);
+        resumeFileUrlToSave = await getDownloadURL(resumeUploadTask.ref);
+        console.log("Resume uploaded:", resumeFileUrlToSave);
       }
 
-      // Update Firebase Auth Profile
       await updateAuthProfile(user, { 
         displayName: data.name, 
-        photoURL: profilePictureUrl || null 
+        photoURL: profilePictureUrlToSave || null 
       });
       console.log("Firebase Auth profile updated with displayName and photoURL.");
 
-      // Prepare Firestore Profile Data
       const userProfileData: ChefProfile = {
         id: user.uid,
         email: user.email!,
@@ -165,9 +163,10 @@ export default function ChefSignupPage() {
         experienceSummary: resumeParsedData.experience || "",
         skills: resumeParsedData.skills || [],
         education: resumeParsedData.education || "",
-        profilePictureUrl: profilePictureUrl || '',
-        resumeFileUrl: resumeFileUrl || '',
+        profilePictureUrl: profilePictureUrlToSave || '',
+        resumeFileUrl: resumeFileUrlToSave || '',
         role: 'chef',
+        accountStatus: 'active', // Initialize accountStatus
         isApproved: false, 
         isSubscribed: false, 
         trustScore: 3.0,
@@ -176,8 +175,8 @@ export default function ChefSignupPage() {
         collaboratorIds: [],
         outgoingCollaborationRequests: [],
         incomingCollaborationRequests: [],
-        stripeAccountId: '', // Initialize Stripe fields
-        stripeOnboardingComplete: false, // Initialize Stripe fields
+        stripeAccountId: '', 
+        stripeOnboardingComplete: false, 
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       };
@@ -196,6 +195,7 @@ export default function ChefSignupPage() {
       setResumeParsedData(null);
       setResumeFile(null);
       setIsResumeUploaded(false);
+      setProfilePictureFile(null);
       setProfilePicturePreview(null);
       router.push('/login'); 
     } catch (error: any) {
@@ -206,7 +206,7 @@ export default function ChefSignupPage() {
       } else if (error.code === 'permission-denied' || error.message?.toLowerCase().includes('permission-denied')) {
         errorMessage = 'Failed to save profile data due to permissions. Please contact support.';
       } else if (error.code) {
-        errorMessage = `An error occurred: ${error.message}`;
+        errorMessage = `An error occurred: ${error.code} - ${error.message}`;
       }
       toast({
         title: 'Signup Failed',

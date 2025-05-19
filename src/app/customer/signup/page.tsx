@@ -1,35 +1,214 @@
 
-// src/app/customer/signup/page.tsx
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+'use client';
+
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useForm } from 'react-hook-form';
+import * as z from 'zod';
 import { Button } from '@/components/ui/button';
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { useToast } from '@/hooks/use-toast';
+import { UserPlus, ShieldCheck, Loader2 } from 'lucide-react';
 import Link from 'next/link';
-import { UserPlus } from 'lucide-react';
+import { createUserWithEmailAndPassword, updateProfile as updateAuthProfile } from 'firebase/auth';
+import { auth, db } from '@/lib/firebase';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
+import type { CustomerProfile } from '@/types';
+
+const customerSignupSchema = z.object({
+  email: z.string().email({ message: 'Invalid email address.' }),
+  password: z.string().min(8, { message: 'Password must be at least 8 characters.' }),
+  confirmPassword: z.string(),
+  name: z.string().min(2, { message: 'Name must be at least 2 characters.' }),
+  agreedToTerms: z.boolean().refine(value => value === true, {
+    message: 'You must agree to the terms and policies to continue.',
+  }),
+}).refine(data => data.password === data.confirmPassword, {
+  message: "Passwords don't match",
+  path: ['confirmPassword'],
+});
+
+type CustomerSignupFormValues = z.infer<typeof customerSignupSchema>;
 
 export default function CustomerSignupPage() {
+  const { toast } = useToast();
+  const router = useRouter();
+  const [isLoading, setIsLoading] = useState(false);
+
+  const form = useForm<CustomerSignupFormValues>({
+    resolver: zodResolver(customerSignupSchema),
+    defaultValues: {
+      email: '',
+      password: '',
+      confirmPassword: '',
+      name: '',
+      agreedToTerms: false,
+    },
+  });
+
+  const onSubmit = async (data: CustomerSignupFormValues) => {
+    setIsLoading(true);
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password);
+      const user = userCredential.user;
+
+      await updateAuthProfile(user, { displayName: data.name });
+
+      const userProfileData: CustomerProfile = {
+        id: user.uid,
+        email: user.email!,
+        name: data.name,
+        role: 'customer',
+        accountStatus: 'active', // Initialize accountStatus
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        // Initialize other optional CustomerProfile fields if needed
+        phone: '',
+        kitchenEquipment: [],
+        addressDetails: '',
+      };
+      
+      await setDoc(doc(db, "users", user.uid), userProfileData);
+      
+      toast({
+        title: 'Account Created Successfully!',
+        description: 'Welcome to FindAChef! You can now log in.',
+        duration: 5000,
+      });
+      
+      router.push('/login'); 
+    } catch (error: any) {
+      console.error('Customer signup error:', error);
+      let errorMessage = 'Failed to create account.';
+      if (error.code === 'auth/email-already-in-use') {
+        errorMessage = 'This email address is already in use.';
+      } else if (error.code) {
+        errorMessage = `An error occurred: ${error.code} - ${error.message}`;
+      }
+      toast({
+        title: 'Signup Failed',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="container mx-auto flex min-h-[calc(100vh-8rem)] items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-      <Card className="w-full max-w-lg text-center shadow-xl">
-        <CardHeader>
-           <div className="mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
-            <UserPlus className="h-8 w-8" />
+      <Card className="w-full max-w-md shadow-xl">
+        <CardHeader className="text-center">
+          <div className="mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
+            <UserPlus className="h-8 w-8" data-ai-hint="user add person" />
           </div>
-          <CardTitle className="text-3xl font-bold">Customer Signup</CardTitle>
+          <CardTitle className="text-3xl font-bold">Create Your Customer Account</CardTitle>
           <CardDescription className="text-lg">
             Join FindAChef to discover amazing culinary experiences.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6">
-          <p className="text-muted-foreground">
-            The customer signup process is being refined. 
-            For now, please imagine a simple form here for email, password, and name.
+        <CardContent className="space-y-8">
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+              <FormField
+                control={form.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Full Name</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g., Alex Smith" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="email"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Email Address</FormLabel>
+                    <FormControl>
+                      <Input type="email" placeholder="you@example.com" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="password"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Password</FormLabel>
+                    <FormControl>
+                      <Input type="password" placeholder="•••••••• (min. 8 characters)" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="confirmPassword"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Confirm Password</FormLabel>
+                    <FormControl>
+                      <Input type="password" placeholder="••••••••" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="agreedToTerms"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4 shadow-sm">
+                    <FormControl>
+                      <Checkbox
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                    <div className="space-y-1 leading-none">
+                      <FormLabel className="flex items-center">
+                        <ShieldCheck className="mr-2 h-4 w-4 text-muted-foreground" />
+                        Agreement & Policies
+                      </FormLabel>
+                      <FormDescription>
+                        I agree to the FindAChef <Link href="/terms" className="underline hover:text-primary">Terms of Service</Link> and acknowledge the <Link href="/privacy-policy" className="underline hover:text-primary">Privacy Policy</Link>.
+                      </FormDescription>
+                      <FormMessage />
+                    </div>
+                  </FormItem>
+                )}
+              />
+              <Button type="submit" className="w-full text-lg py-3" size="lg" disabled={isLoading}>
+                {isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <><UserPlus className="mr-2 h-5 w-5" /> Create Account</>}
+              </Button>
+            </form>
+          </Form>
+          <p className="text-center text-sm text-muted-foreground">
+            Already have an account?{' '}
+            <Link href="/login" className="font-medium text-primary hover:underline">
+              Log In
+            </Link>
           </p>
-          <p className="text-muted-foreground">
-            In a full implementation, this page would contain a form similar to the Chef Signup,
-            but tailored for customer information.
-          </p>
-          <Button asChild className="w-full">
-            <Link href="/login">Back to Login</Link>
-          </Button>
         </CardContent>
       </Card>
     </div>
