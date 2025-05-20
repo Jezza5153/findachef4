@@ -7,20 +7,20 @@ import Stripe from 'stripe';
 // For local development, this will be in your .env.local file
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
 
-if (!stripeSecretKey) {
-  console.error("Stripe Secret Key is not defined. Please set STRIPE_SECRET_KEY in your environment variables.");
-  // Return a generic error or a more specific one if you prefer not to expose this detail
-  // For debugging, this specific message is helpful.
-  // For production, you might want a more generic server error.
-  return NextResponse.json({ error: 'Stripe is not configured on the server. STRIPE_SECRET_KEY might be missing.' }, { status: 500 });
+// Initialize Stripe only if the key is available
+let stripe: Stripe | null = null;
+if (stripeSecretKey) {
+  stripe = new Stripe(stripeSecretKey, {
+    apiVersion: '2024-04-10', // Use the latest API version
+  });
 }
 
-// Initialize Stripe only if the key is available
-const stripe = new Stripe(stripeSecretKey, {
-  apiVersion: '2024-04-10', // Use the latest API version
-});
-
 export async function POST(request: Request) {
+  // Move the check inside the POST function
+  if (!stripeSecretKey || !stripe) {
+    console.error("Stripe Secret Key is not defined. Please set STRIPE_SECRET_KEY in your environment variables.");
+    return NextResponse.json({ error: 'Stripe is not configured on the server. STRIPE_SECRET_KEY might be missing.' }, { status: 500 });
+  }
   try {
     const { amount, currency = 'aud', requestId, customerId } = await request.json(); // Expect amount in cents
 
