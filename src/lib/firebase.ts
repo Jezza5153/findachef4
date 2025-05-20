@@ -4,6 +4,7 @@ import { getAuth } from "firebase/auth";
 import { getStorage } from "firebase/storage";
 import { getFirestore } from "firebase/firestore"; 
 
+// These are placeholders and should be overridden by your .env.local file
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -15,12 +16,14 @@ const firebaseConfig = {
 };
 
 // Log the project ID being used (for debugging .env.local setup)
+// This will only log on the client-side where process.env.NEXT_PUBLIC_... is available
 if (typeof window !== 'undefined') { 
     console.log("Firebase Initializing with Project ID:", firebaseConfig.projectId);
     if (!firebaseConfig.apiKey) {
         console.error("Firebase API Key is missing! Check your .env.local file for NEXT_PUBLIC_FIREBASE_API_KEY.");
     }
 }
+
 
 let app: FirebaseApp;
 
@@ -32,6 +35,6 @@ if (!getApps().length) {
 
 const auth = getAuth(app);
 const storage = getStorage(app);
-const db = getFirestore(app);
+const db = getFirestore(app); // Initialize Firestore instance
 
 export { app, auth, storage, db };

@@ -11,6 +11,8 @@ const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
 
 if (!stripeSecretKey) {
   console.error("Stripe Secret Key is not defined for webhooks. Please set STRIPE_SECRET_KEY.");
+  // This function might not be able to return NextResponse directly if this check is at module scope
+  // and an error is thrown. For robustness, Stripe SDK init check is better inside POST.
 }
 if (!webhookSecret) {
   console.error("Stripe Webhook Secret is not defined. Please set STRIPE_WEBHOOK_SECRET.");
@@ -182,7 +184,7 @@ export async function POST(request: Request) {
           const totalAmountReceived = paymentIntentSucceeded.amount_received; 
           const currency = paymentIntentSucceeded.currency;
           const chefShareAmount = Math.round(totalAmountReceived * 0.46);
-          // const platformFeeAmount = Math.round(totalAmountReceived * 0.04);
+          // const platformFeeAmount = Math.round(totalAmountReceived * 0.04); // This might be an application_fee_amount
           // const amountToHold = totalAmountReceived - chefShareAmount - platformFeeAmount;
           
           console.log(`STRIPE WEBHOOK: Chef Stripe Account ID for payout: ${chefStripeAccountId}`);
@@ -190,27 +192,27 @@ export async function POST(request: Request) {
           console.log(`STRIPE WEBHOOK: Calculated chef share: ${chefShareAmount} ${currency.toUpperCase()}`);
 
           // TODO: Replace with actual Stripe API calls for transfers/payouts.
-          // Example (conceptual - adapt to your Stripe Connect model):
+          // Example (conceptual - adapt to your Stripe Connect model like 'separate charges and transfers'):
           // try {
           //   const transferToChef = await stripe.transfers.create({
           //     amount: chefShareAmount,
           //     currency: currency,
           //     destination: chefStripeAccountId,
-          //     transfer_group: paymentIntentSucceeded.id,
+          //     source_transaction: paymentIntentSucceeded.latest_charge as string, // Or use transfer_group
+          //     transfer_group: paymentIntentSucceeded.id, // Good practice to group transfers for a payment
           //     description: `Initial 46% payout for booking ${bookingDocRef.id}`,
           //     metadata: { bookingId: bookingDocRef.id, requestId: requestId, payout_type: 'initial_46_percent' }
           //   });
           //   console.log(`STRIPE WEBHOOK: Successfully created Stripe transfer ${transferToChef.id} to chef ${chefStripeAccountId}.`);
+          //
           //   // The platform fee (4%) might be handled via application_fee_amount on the PaymentIntent,
-          //   // or as a separate transfer if using Separate Charges and Transfers.
+          //   // or as a separate transfer if using Separate Charges and Transfers and you are the destination of the charge.
           //   // The remaining ~50% is implicitly held on your platform's Stripe balance for later release.
           // } catch (stripeError: any) {
           //   console.error(`STRIPE WEBHOOK: Stripe Connect fund distribution error for PI ${paymentIntentSucceeded.id}:`, stripeError.message);
           //   // Log this critical error. You might need manual intervention or a retry mechanism.
-          //   // Decide if this should prevent the 200 OK. Usually, if DB writes are done, you send 200 OK
-          //   // and handle payout issues separately to avoid Stripe resending the same webhook.
           // }
-          console.warn("STRIPE WEBHOOK: Skipping actual Stripe Connect fund distribution - IMPLEMENTATION NEEDED.");
+          console.warn("STRIPE WEBHOOK: Skipping actual Stripe Connect fund distribution - IMPLEMENTATION NEEDED BY YOU.");
 
         } else {
           console.warn(`STRIPE WEBHOOK: Chef ${activeProposal.chefId} does not have a Stripe Account ID. Initial 46% payout for PI ${paymentIntentSucceeded.id} cannot be processed automatically. Booking ${bookingDocRef.id} created without payout attempt.`);
@@ -240,7 +242,7 @@ export async function POST(request: Request) {
                     requestId: failedRequestId,
                     senderId: 'system',
                     senderRole: 'system',
-                    text: `Payment attempt failed for the proposal from Chef ${paymentIntentFailed.metadata?.chefName || (reqSnap.data().activeProposal?.chefName || 'the chef') }. Please try again or contact support.`,
+                    text: `Payment attempt failed for the proposal from Chef ${paymentIntentFailed.metadata?.chefName || (reqSnap.data()?.activeProposal?.chefName || 'the chef') }. Please try again or contact support.`,
                     timestamp: serverTimestamp()
                 });
                 console.log(`STRIPE WEBHOOK: CustomerRequest ${failedRequestId} updated to 'payment_failed'.`);
