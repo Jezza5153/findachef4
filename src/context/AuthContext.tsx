@@ -35,11 +35,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     console.log("AuthContext: Setting up onAuthStateChanged listener.");
+    let profileUnsubscribe: Unsubscribe | undefined = undefined;
+
     const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
       console.log("AuthContext: onAuthStateChanged triggered. UID:", currentUser?.uid || null);
       setUser(currentUser);
       
-      let profileUnsubscribe: Unsubscribe | undefined = undefined;
+      // Clean up previous profile listener if it exists
+      if (profileUnsubscribe) {
+        console.log("AuthContext: Cleaning up previous profile onSnapshot listener for UID:", user?.uid || 'N/A (old user)');
+        profileUnsubscribe();
+        profileUnsubscribe = undefined;
+      }
 
       if (currentUser) {
         setProfileLoading(true); // Start profile loading when user is found
@@ -69,8 +76,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setIsChef(currentIsChef);
             setIsCustomer(currentIsCustomer);
             
-            if (profileData.role === 'admin' && !claimsAdmin) {
-                console.warn("AuthContext: User has 'admin' role in Firestore but not in custom claims. Claims take precedence for isAdmin flag.");
+            if (profileData.role === 'admin' && !claimsAdmin && !isAdmin) { // Check !isAdmin to avoid repeated warnings if claims just haven't propagated yet
+                console.warn("AuthContext: User has 'admin' role in Firestore but not (yet) in custom claims. Claims take precedence for isAdmin flag once fetched.");
             }
 
             if (currentIsChef && profileData.role === 'chef') {
@@ -87,7 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setUserProfile(null);
             setIsChef(false);
             setIsCustomer(false);
-            // Keep isAdmin from claims if profile doc is missing
+            // isAdmin from claims is preserved even if profile doc is missing
             setIsChefApproved(false);
             setIsChefSubscribed(false);
           }
@@ -97,10 +104,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUserProfile(null);
           setIsChef(false);
           setIsCustomer(false);
-          // Keep isAdmin from claims
           setIsChefApproved(false);
           setIsChefSubscribed(false);
-          setProfileLoading(false);
+          setProfileLoading(false); // Ensure loading is set to false on error too
         });
       } else { 
         console.log("AuthContext: No current user (logged out). Resetting states.");
@@ -112,21 +118,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setIsChefSubscribed(false);
         setProfileLoading(false); 
       }
-      setAuthLoading(false);
-
-      return () => {
-        if (profileUnsubscribe) {
-          console.log("AuthContext: Cleaning up profile onSnapshot listener for UID:", currentUser?.uid || 'N/A (user logged out during cleanup)');
-          profileUnsubscribe();
-        }
-      };
+      setAuthLoading(false); // Firebase auth state itself is resolved
     });
 
     return () => {
       console.log("AuthContext: Cleaning up onAuthStateChanged listener.");
       unsubscribeAuth();
+      if (profileUnsubscribe) {
+        console.log("AuthContext: Cleaning up profile onSnapshot listener on AuthProvider unmount for UID:", user?.uid || 'N/A');
+        profileUnsubscribe();
+      }
     };
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // user dependency removed to prevent re-running listeners excessively; auth state is the trigger
 
   return (
     <AuthContext.Provider value={{ 
@@ -152,3 +156,4 @@ export function useAuth() {
   }
   return context;
 }
+    

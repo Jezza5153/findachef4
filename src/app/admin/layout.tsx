@@ -1,15 +1,21 @@
-
 'use client';
 
-import { useEffect } from 'react';
+import React, { useEffect, useState } from 'react'; // Added React import
 import { useRouter } from 'next/navigation';
-import { DashboardLayout, type NavItem } from '@/components/dashboard-layout';
+// import { DashboardLayout, type NavItem } from '@/components/dashboard-layout'; // Dynamic import
 import { LayoutGrid, Users, ShieldAlert, NotebookText, FileText, MessageSquare } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2 } from 'lucide-react'; // Added Loader2
+import { Loader2 } from 'lucide-react'; 
 import { useToast } from '@/hooks/use-toast';
+import type { NavItem } from '@/components/dashboard-layout'; // Import type directly
+import dynamic from 'next/dynamic';
+
+const DashboardLayout = dynamic(() => 
+  import('@/components/dashboard-layout').then(mod => mod.DashboardLayout),
+  { ssr: false, loading: () => <div className="flex h-screen items-center justify-center"><Loader2 className="h-12 w-12 animate-spin text-primary"/> Loading Dashboard Layout...</div> }
+);
 
 
 const adminNavItems: NavItem[] = [
@@ -27,8 +33,9 @@ export default function AdminLayout({
   const router = useRouter();
   const { user, isAdmin, loading: authLoading, profileLoading } = useAuth();
   const { toast } = useToast();
-
-  const isLoading = authLoading || profileLoading; // Combine both loading states
+  
+  // Combine loading states: auth state + profile (which includes claims)
+  const isLoading = authLoading || profileLoading;
 
   useEffect(() => {
     console.log("AdminLayout: isLoading:", isLoading, "user:", !!user, "isAdmin:", isAdmin);
@@ -61,8 +68,8 @@ export default function AdminLayout({
   }
 
   // This secondary check handles the brief moment after loading but before redirection effect runs
+  // or if something unexpected happens where isAdmin might be false despite user being present.
   if (!user || !isAdmin) { 
-    // This content might flash briefly if redirection is quick, or show if something unexpected happens
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background p-4">
         <Card className="w-full max-w-md text-center shadow-lg">

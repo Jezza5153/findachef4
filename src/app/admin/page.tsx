@@ -1,20 +1,12 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react'; // Explicitly import React
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-  DialogClose,
-  DialogDescription as ShadDialogDescription,
-} from "@/components/ui/dialog"; // Using ShadCN Dialog
+import dynamic from 'next/dynamic';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -28,16 +20,23 @@ import { useAuth } from '@/context/AuthContext';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import Image from 'next/image';
 
-// Dynamic imports for dialogs
-const RequestDetailsDialog = dynamic(() => 
-  import('@/components/ui/dialog').then(mod => ({ default: mod.DialogContent })), 
-  { ssr: false, loading: () => <p>Loading details...</p> }
+const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false });
+const DialogContent = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogContent), { ssr: false });
+const DialogHeader = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogHeader), { ssr: false });
+const DialogTitle = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogTitle), { ssr: false });
+const DialogFooter = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogFooter), { ssr: false });
+const DialogClose = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogClose), { ssr: false });
+const ShadDialogDescription = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogDescription), { ssr: false });
+
+// For dynamic imports inside this component specifically for RequestDetails and MenuReview
+const RequestDetailsDialogContent = dynamic(() => 
+  import('@/components/ui/dialog').then(mod => mod.DialogContent), 
+  { ssr: false, loading: () => <div className="p-4 text-center"><Loader2 className="h-6 w-6 animate-spin inline-block"/> Loading details...</div> }
 );
 const MenuReviewDialogContent = dynamic(() => 
-  import('@/components/ui/dialog').then(mod => ({ default: mod.DialogContent })), 
-  { ssr: false, loading: () => <p>Loading menu...</p> }
+  import('@/components/ui/dialog').then(mod => mod.DialogContent), 
+  { ssr: false, loading: () => <div className="p-4 text-center"><Loader2 className="h-6 w-6 animate-spin inline-block"/> Loading menu...</div> }
 );
-import dynamic from 'next/dynamic';
 
 
 type UserView = AppUserProfileContext; 
@@ -53,7 +52,7 @@ export default function AdminPage() {
   const [allCustomerRequests, setAllCustomerRequests] = useState<CustomerRequest[]>([]);
   const [isLoadingCustomerRequests, setIsLoadingCustomerRequests] = useState(true);
   
-  const [isProcessingAction, setIsProcessingAction] = useState<string | null>(null); // Store ID of item being processed
+  const [isProcessingAction, setIsProcessingAction] = useState<string | null>(null); 
 
   const [isRequestDetailsDialogOpen, setIsRequestDetailsDialogOpen] = useState(false);
   const [selectedRequestForAdminView, setSelectedRequestForAdminView] = useState<CustomerRequest | null>(null);
@@ -114,8 +113,8 @@ export default function AdminPage() {
 
     setIsLoadingCustomerRequests(true);
     const requestsCollectionRef = collection(db, "customerRequests");
-    const requestsQuery = query(requestsCollectionRef, orderBy("createdAt", "desc"));
-    const unsubscribeRequests = onSnapshot(requestsQuery, (requestsSnapshot) => { // Changed to requestsQuery
+    const requestsQuery = query(requestsCollectionRef, orderBy("createdAt", "desc")); 
+    const unsubscribeRequests = onSnapshot(requestsQuery, (requestsSnapshot) => { 
       const fetchedRequests = requestsSnapshot.docs.map(docSnap => {
         const data = docSnap.data();
         return {
@@ -138,17 +137,20 @@ export default function AdminPage() {
         if (unsubscribeUsers) unsubscribeUsers();
         if (unsubscribeMenus) unsubscribeMenus();
         if (unsubscribeRequests) unsubscribeRequests();
-        if (messagesUnsubscribe) messagesUnsubscribe();
+        if (messagesUnsubscribe) {
+          messagesUnsubscribe();
+          messagesUnsubscribe = null; 
+        }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toast]); // messagesUnsubscribe dependency removed to avoid re-triggering main useEffect
+  }, [toast]); 
 
   const handleApproveUser = async (userId: string) => {
     if (!isAdmin) { toast({ title: "Permission Denied", description: "You do not have permission to perform this action.", variant: "destructive" }); return; }
     setIsProcessingAction(userId);
     try {
       const userDocRef = doc(db, "users", userId);
-      await updateDoc(userDocRef, { isApproved: true, updatedAt: serverTimestamp() });
+      await updateDoc(userDocRef, { isApproved: true, accountStatus: 'active', updatedAt: serverTimestamp() });
       toast({ title: "Chef Approved", description: `Chef has been approved.` });
     } catch (error) {
       console.error("Error approving user:", error);
@@ -163,12 +165,11 @@ export default function AdminPage() {
     setIsProcessingAction(userId);
     try {
       const userDocRef = doc(db, "users", userId);
-      // For rejection, we might just set isApproved to false, or have another status like 'rejected'
       await updateDoc(userDocRef, { isApproved: false, accountStatus: 'active', updatedAt: serverTimestamp() }); 
-      toast({ title: "Chef Rejected", description: `Chef status updated to not approved.` });
+      toast({ title: "Chef Status Updated", description: `Chef status updated to not approved.` });
     } catch (error) {
-      console.error("Error rejecting user:", error);
-      toast({ title: "Error", description: "Could not process rejection for chef.", variant: "destructive" });
+      console.error("Error updating user approval status:", error);
+      toast({ title: "Error", description: "Could not process action for chef.", variant: "destructive" });
     } finally {
       setIsProcessingAction(null);
     }
@@ -176,6 +177,10 @@ export default function AdminPage() {
 
   const handleApproveMenu = async (menuId: string) => {
     if (!isAdmin) { toast({ title: "Permission Denied", description: "You do not have permission to perform this action.", variant: "destructive" }); return; }
+    if (!selectedMenuForReview || selectedMenuForReview.id !== menuId) {
+      toast({ title: "Error", description: "Menu context lost. Please reopen review.", variant: "destructive" });
+      return;
+    }
     setIsProcessingAction(menuId);
     try {
       const menuDocRef = doc(db, "menus", menuId);
@@ -193,6 +198,10 @@ export default function AdminPage() {
 
   const handleRejectMenu = async (menuId: string) => {
     if (!isAdmin) { toast({ title: "Permission Denied", description: "You do not have permission to perform this action.", variant: "destructive" }); return; }
+     if (!selectedMenuForReview || selectedMenuForReview.id !== menuId) {
+      toast({ title: "Error", description: "Menu context lost. Please reopen review.", variant: "destructive" });
+      return;
+    }
     setIsProcessingAction(menuId);
     try {
       const menuDocRef = doc(db, "menus", menuId);
@@ -214,14 +223,14 @@ export default function AdminPage() {
     setIsLoadingRequestMessages(true);
     setRequestMessagesForAdminView([]); 
     
+    if (messagesUnsubscribe) {
+      messagesUnsubscribe();
+      messagesUnsubscribe = null;
+    }
+
     const messagesCollectionRef = collection(db, "customerRequests", request.id, "messages");
     const qMessages = query(messagesCollectionRef, orderBy("timestamp", "asc"));
     
-    // Clear previous listener if any
-    if (messagesUnsubscribe) {
-      messagesUnsubscribe();
-    }
-
     messagesUnsubscribe = onSnapshot(qMessages, (messagesSnapshot) => {
         const fetchedMessages = messagesSnapshot.docs.map(docSnap => {
           const data = docSnap.data();
@@ -238,11 +247,15 @@ export default function AdminPage() {
         toast({ title: "Error", description: "Could not fetch messages for this request.", variant: "destructive" });
         setIsLoadingRequestMessages(false);
     });
-    setIsRequestDetailsDialogOpen(true); // Open dialog after setting up listener
+    setIsRequestDetailsDialogOpen(true); 
   };
   
   const handleModerateRequest = async (requestId: string, moderationAction: CustomerRequest['moderationStatus'], targetCustomerId?: string) => {
     if (!isAdmin) { toast({ title: "Permission Denied", variant: "destructive" }); return; }
+    if (!selectedRequestForAdminView || selectedRequestForAdminView.id !== requestId) {
+        toast({ title: "Error", description: "Request context lost. Please reopen and try again.", variant: "destructive" });
+        return;
+    }
     setIsProcessingAction(requestId);
     try {
       const requestDocRef = doc(db, "customerRequests", requestId);
@@ -315,12 +328,12 @@ export default function AdminPage() {
     { name: "View Flagged Resumes (Contact Info, Unsafe Content)", description: "Review resumes, especially those AI-flagged for containing direct contact information or inappropriate content.", icon: <FileSearch2 className="mr-2 h-5 w-5 text-destructive" /> },
   ];
 
-  const getChefSubscriptionBadge = (chef: UserView) => {
-    if (chef.role !== 'chef') return 'N/A';
-    const chefProfile = chef as ChefProfile;
+  const getChefSubscriptionBadge = (user: UserView) => {
+    if (user.role !== 'chef') return <Badge variant="outline" className="text-xs">N/A</Badge>;
+    const chefProfile = user as ChefProfile; 
     return chefProfile.isSubscribed ? 
-      <Badge variant="default" className="bg-blue-500 hover:bg-blue-600">Subscribed</Badge> : 
-      <Badge variant="secondary">Not Subscribed</Badge>;
+      <Badge variant="default" className="bg-blue-500 hover:bg-blue-600 text-xs">Subscribed</Badge> : 
+      <Badge variant="secondary" className="text-xs">Not Subscribed</Badge>;
   }
 
   return (
@@ -392,27 +405,27 @@ export default function AdminPage() {
                       <TableCell className="font-medium">{user.name || 'N/A'}</TableCell>
                       <TableCell>{user.email}</TableCell>
                       <TableCell>
-                        <Badge variant={user.role === 'chef' ? 'default' : (user.role === 'admin' ? 'destructive' : 'secondary')} className="capitalize">
+                        <Badge variant={user.role === 'chef' ? 'default' : (user.role === 'admin' ? 'destructive' : 'secondary')} className="capitalize text-xs">
                           {user.role || 'N/A'}
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={getAccountStatusBadgeVariant(user.accountStatus)} className="capitalize">
+                        <Badge variant={getAccountStatusBadgeVariant(user.accountStatus)} className="capitalize text-xs">
                           {user.accountStatus || 'N/A'}
                         </Badge>
                       </TableCell>
-                      <TableCell>
-                        {user.createdAt ? format(new Date(user.createdAt), 'PP') : 'N/A'}
+                      <TableCell className="text-xs">
+                        {user.createdAt ? format(new Date(user.createdAt as any), 'PP') : 'N/A'}
                       </TableCell>
                       <TableCell>
                         {user.role === 'chef' ? (
                           (user as ChefProfile).isApproved ? (
-                            <Badge variant="default" className="bg-green-500 hover:bg-green-600">Approved</Badge>
+                            <Badge variant="default" className="bg-green-500 hover:bg-green-600 text-xs">Approved</Badge>
                           ) : (
-                            <Badge variant="destructive">Pending</Badge>
+                            <Badge variant="destructive" className="text-xs">Pending</Badge>
                           )
                         ) : (
-                          'N/A'
+                          <Badge variant="outline" className="text-xs">N/A</Badge>
                         )}
                       </TableCell>
                       <TableCell>
@@ -506,7 +519,7 @@ export default function AdminPage() {
                       <TableCell>{menu.cuisine}</TableCell>
                       <TableCell className="text-right">${menu.pricePerHead.toFixed(2)}</TableCell>
                       <TableCell>
-                        <Badge variant={menu.isPublic ? 'default' : 'secondary'}>
+                        <Badge variant={menu.isPublic ? 'default' : 'secondary'} className="text-xs">
                           {menu.isPublic ? 'Yes' : 'No'}
                         </Badge>
                       </TableCell>
@@ -517,17 +530,16 @@ export default function AdminPage() {
                               menu.adminStatus === 'rejected' ? 'destructive' :
                                 'secondary'
                           }
-                          className={
-                            menu.adminStatus === 'approved' ? 'bg-green-500 hover:bg-green-600' :
-                              menu.adminStatus === 'rejected' ? '' : ''
-                          }
+                          className={`text-xs capitalize ${
+                            menu.adminStatus === 'approved' ? 'bg-green-500 hover:bg-green-600' : ''
+                          }`}
                         >
-                          {menu.adminStatus?.charAt(0).toUpperCase() + menu.adminStatus?.slice(1) || 'Pending'}
+                          {menu.adminStatus || 'Pending'}
                         </Badge>
                       </TableCell>
                       <TableCell>
                          <Button variant="outline" size="sm" onClick={() => handleOpenMenuReviewDialog(menu)} className="text-xs" disabled={!isAdmin || isProcessingAction === menu.id}>
-                           {isProcessingAction === menu.id ? <Loader2 className="h-3 w-3 animate-spin mr-1"/> : <Eye className="h-3 w-3 mr-1"/>} Review
+                           {isProcessingAction === menu.id && selectedMenuForReview?.id === menu.id ? <Loader2 className="h-3 w-3 animate-spin mr-1"/> : <Eye className="h-3 w-3 mr-1"/>} Review
                          </Button>
                       </TableCell>
                     </TableRow>
@@ -574,15 +586,15 @@ export default function AdminPage() {
                       <TableCell className="font-mono text-xs">{request.id.substring(0, 8)}...</TableCell>
                       <TableCell className="font-medium">{request.eventType}</TableCell>
                       <TableCell className="text-xs">{request.customerId.substring(0, 8)}...</TableCell>
-                      <TableCell>{request.eventDate ? format(new Date(request.eventDate as any), 'PP') : 'N/A'}</TableCell>
+                      <TableCell className="text-xs">{request.eventDate ? format(new Date(request.eventDate as any), 'PP') : 'N/A'}</TableCell>
                       <TableCell className="text-right">{request.pax}</TableCell>
                       <TableCell className="text-right">${request.budget.toFixed(2)}</TableCell>
                       <TableCell>
                         <Badge variant={
                           request.status === 'booked' || request.status === 'customer_confirmed' ? 'default' :
-                            request.status === 'cancelled_by_customer' || request.status === 'chef_declined' || request.status === 'proposal_declined' ? 'destructive' :
+                            request.status === 'cancelled_by_customer' || request.status === 'chef_declined' || request.status === 'proposal_declined' || request.status === 'payment_failed' ? 'destructive' :
                               'secondary'
-                        } className="capitalize">
+                        } className="capitalize text-xs">
                           {request.status?.replace(/_/g, ' ') || 'Unknown'}
                         </Badge>
                       </TableCell>
@@ -590,13 +602,13 @@ export default function AdminPage() {
                         <Badge variant={
                           request.moderationStatus === 'resolved' ? 'default' :
                           request.moderationStatus === 'customer_suspended' ? 'destructive' :
-                          'secondary'} className="capitalize">
+                          'secondary'} className="capitalize text-xs">
                             {request.moderationStatus?.replace(/_/g, ' ') || 'Pending'}
                         </Badge>
                       </TableCell>
                       <TableCell>
                         <Button variant="outline" size="sm" onClick={() => handleViewRequestDetails(request)} className="text-xs" disabled={!isAdmin || isProcessingAction === request.id}>
-                           {isProcessingAction === request.id ? <Loader2 className="h-3 w-3 animate-spin mr-1"/> : <Eye className="h-3 w-3 mr-1"/>} View/Moderate
+                           {isProcessingAction === request.id && selectedRequestForAdminView?.id === request.id ? <Loader2 className="h-3 w-3 animate-spin mr-1"/> : <Eye className="h-3 w-3 mr-1"/>} View/Moderate
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -608,7 +620,7 @@ export default function AdminPage() {
         </CardContent>
       </Card>
 
-      {selectedRequestForAdminView && (
+      {selectedRequestForAdminView && isRequestDetailsDialogOpen && (
         <Dialog open={isRequestDetailsDialogOpen} onOpenChange={(open) => {
             if (!open && messagesUnsubscribe) {
                 messagesUnsubscribe(); 
@@ -617,7 +629,7 @@ export default function AdminPage() {
             setIsRequestDetailsDialogOpen(open);
             if (!open) setSelectedRequestForAdminView(null); 
         }}>
-          <RequestDetailsDialog className="sm:max-w-2xl"> {/* Using dynamic import */}
+          <RequestDetailsDialogContent className="sm:max-w-2xl"> 
             <DialogHeader>
               <DialogTitle>View Customer Request Details - ID: {selectedRequestForAdminView.id.substring(0,8)}...</DialogTitle>
             </DialogHeader>
@@ -630,10 +642,10 @@ export default function AdminPage() {
                 <p><strong>PAX:</strong> {selectedRequestForAdminView.pax}</p>
                 <p><strong>Budget:</strong> ${selectedRequestForAdminView.budget.toFixed(2)}</p>
                 <p><strong>Cuisine:</strong> {selectedRequestForAdminView.cuisinePreference}</p>
-                <p><strong>Status:</strong> <Badge variant={selectedRequestForAdminView.status === 'booked' ? 'default' : 'secondary'} className="capitalize">{selectedRequestForAdminView.status?.replace(/_/g, ' ') || 'Unknown'}</Badge></p>
+                <p><strong>Status:</strong> <Badge variant={selectedRequestForAdminView.status === 'booked' ? 'default' : 'secondary'} className="capitalize text-xs">{selectedRequestForAdminView.status?.replace(/_/g, ' ') || 'Unknown'}</Badge></p>
                 {selectedRequestForAdminView.location && <p className="col-span-2"><strong>Location:</strong> {selectedRequestForAdminView.location}</p>}
                 {selectedRequestForAdminView.notes && <p className="col-span-2"><strong>Notes:</strong> {selectedRequestForAdminView.notes}</p>}
-                <p><strong>Moderation Status:</strong> <Badge variant={selectedRequestForAdminView.moderationStatus === 'resolved' ? 'default' : (selectedRequestForAdminView.moderationStatus === 'customer_suspended' ? 'destructive' : 'secondary')} className="capitalize">{selectedRequestForAdminView.moderationStatus?.replace(/_/g, ' ') || 'Pending Review'}</Badge></p>
+                <p><strong>Moderation Status:</strong> <Badge variant={selectedRequestForAdminView.moderationStatus === 'resolved' ? 'default' : (selectedRequestForAdminView.moderationStatus === 'customer_suspended' ? 'destructive' : 'secondary')} className="capitalize text-xs">{selectedRequestForAdminView.moderationStatus?.replace(/_/g, ' ') || 'Pending Review'}</Badge></p>
               </div>
               <div className="mt-2">
                 <Label htmlFor="adminNotesRequest">Admin Notes:</Label>
@@ -671,7 +683,7 @@ export default function AdminPage() {
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button onClick={() => handleModerateRequest(selectedRequestForAdminView.id, 'resolved')} variant="default" disabled={!isAdmin || !!isProcessingAction}>
+                    <Button onClick={() => handleModerateRequest(selectedRequestForAdminView.id, 'resolved')} variant="default" disabled={!isAdmin || !!isProcessingAction || selectedRequestForAdminView.moderationStatus === 'resolved'}>
                       {isProcessingAction === selectedRequestForAdminView.id && selectedRequestForAdminView.moderationStatus === 'resolved' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Mark as Resolved
                     </Button>
                   </TooltipTrigger>
@@ -679,7 +691,7 @@ export default function AdminPage() {
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button onClick={() => handleModerateRequest(selectedRequestForAdminView.id, 'customer_warned', selectedRequestForAdminView.customerId)} variant="outline" disabled={!isAdmin || !!isProcessingAction}>
+                    <Button onClick={() => handleModerateRequest(selectedRequestForAdminView.id, 'customer_warned', selectedRequestForAdminView.customerId)} variant="outline" disabled={!isAdmin || !!isProcessingAction || selectedRequestForAdminView.moderationStatus === 'customer_warned'}>
                       {isProcessingAction === selectedRequestForAdminView.id && selectedRequestForAdminView.moderationStatus === 'customer_warned' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Warn Customer
                     </Button>
                   </TooltipTrigger>
@@ -687,7 +699,7 @@ export default function AdminPage() {
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button onClick={() => handleModerateRequest(selectedRequestForAdminView.id, 'customer_suspended', selectedRequestForAdminView.customerId)} variant="destructive" disabled={!isAdmin || !!isProcessingAction}>
+                    <Button onClick={() => handleModerateRequest(selectedRequestForAdminView.id, 'customer_suspended', selectedRequestForAdminView.customerId)} variant="destructive" disabled={!isAdmin || !!isProcessingAction || selectedRequestForAdminView.moderationStatus === 'customer_suspended'}>
                       {isProcessingAction === selectedRequestForAdminView.id && selectedRequestForAdminView.moderationStatus === 'customer_suspended' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Suspend Customer
                     </Button>
                   </TooltipTrigger>
@@ -695,13 +707,13 @@ export default function AdminPage() {
                 </Tooltip>
               </TooltipProvider>
             </DialogFooter>
-          </RequestDetailsDialog>
+          </RequestDetailsDialogContent>
         </Dialog>
       )}
 
-      {selectedMenuForReview && (
+      {selectedMenuForReview && isMenuReviewDialogOpen && (
         <Dialog open={isMenuReviewDialogOpen} onOpenChange={setIsMenuReviewDialogOpen}>
-          <MenuReviewDialogContent className="sm:max-w-lg"> {/* Using dynamic import */}
+          <MenuReviewDialogContent className="sm:max-w-lg"> 
             <DialogHeader>
               <DialogTitle>Review Menu: {selectedMenuForReview.title}</DialogTitle>
               {selectedMenuForReview.imageUrl && (
@@ -720,7 +732,7 @@ export default function AdminPage() {
                 <p><strong>Dietary:</strong> {selectedMenuForReview.dietaryInfo.join(', ')}</p>
               )}
               <p><strong>Public:</strong> {selectedMenuForReview.isPublic ? 'Yes' : 'No'}</p>
-              <p><strong>Current Admin Status:</strong> <Badge variant={selectedMenuForReview.adminStatus === 'approved' ? 'default' : (selectedMenuForReview.adminStatus === 'rejected' ? 'destructive' : 'secondary')} className="capitalize">{selectedMenuForReview.adminStatus}</Badge></p>
+              <p><strong>Current Admin Status:</strong> <Badge variant={selectedMenuForReview.adminStatus === 'approved' ? 'default' : (selectedMenuForReview.adminStatus === 'rejected' ? 'destructive' : 'secondary')} className={`capitalize text-xs ${selectedMenuForReview.adminStatus === 'approved' ? 'bg-green-500 hover:bg-green-600' : ''}`}>{selectedMenuForReview.adminStatus}</Badge></p>
               <div className="mt-2">
                 <Label htmlFor="adminNotesMenu">Admin Notes:</Label>
                 <Textarea 
@@ -770,3 +782,4 @@ export default function AdminPage() {
     </div>
   );
 }
+    

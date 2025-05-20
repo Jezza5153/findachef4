@@ -23,7 +23,7 @@ import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/aut
 import { auth, db } from '@/lib/firebase';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { useState } from 'react';
-import type { AppUserProfileContext } from '@/types';
+import type { AppUserProfileContext, CustomerProfile } from '@/types'; // Ensure CustomerProfile is imported if used for new profile creation
 
 const loginSchema = z.object({
   email: z.string().email({ message: 'Invalid email address.' }),
@@ -48,21 +48,18 @@ export default function LoginPage() {
   const handleLogin = async (data: LoginFormValues) => {
     setIsLoading(true);
     try {
-      console.log("Login attempt for:", data.email);
+      console.log("LoginPage: Attempting login for:", data.email);
       const userCredential = await signInWithEmailAndPassword(auth, data.email, data.password);
       const user = userCredential.user;
-      console.log("Login: Firebase Auth successful for UID:", user.uid);
+      console.log("LoginPage: Firebase Auth successful for UID:", user.uid);
       
       toast({
         title: 'Login Successful',
-        description: 'Welcome back! Fetching profile and redirecting...',
+        description: 'Welcome back! Redirecting to your dashboard...',
       });
 
-      // AuthContext will now handle fetching profile from Firestore
-      // and custom claims for admin status.
-      // The redirection here is an initial guess; dashboard layouts will
-      // enforce final access based on data from AuthContext.
-      
+      // AuthContext will handle fetching full profile & claims.
+      // Initial redirect is based on Firestore role or fallback.
       let roleForRedirect: AppUserProfileContext['role'] = 'customer'; // Default assumption
 
       if (user) {
@@ -71,46 +68,39 @@ export default function LoginPage() {
 
         if (userDoc.exists()) {
           const userData = userDoc.data() as AppUserProfileContext;
-          console.log("Login: Firestore profile found:", userData);
-          roleForRedirect = userData.role || 'customer';
+          console.log("LoginPage: Firestore profile found:", userData);
+          roleForRedirect = userData.role || 'customer'; 
           
-          // If admin role from Firestore, also log it here for quick check
-          if (userData.role === 'admin') {
-            console.log("Login: User has 'admin' role in Firestore profile.");
-          }
+          // Store user's name from Firestore if available, otherwise from Auth profile
+          localStorage.setItem('userName', userData.name || user.displayName || data.email.split('@')[0]);
 
-        } else {
-          // User authenticated with Firebase but no profile in Firestore
-          console.warn("Login: No profile document found in Firestore for UID:", user.uid, "This might be an issue if the user hasn't completed a signup flow.");
-          // Fallback: Attempt to infer role from email for initial redirection (less reliable)
-          // This fallback is mainly for cases where a user might have been created directly in Firebase Auth console
-          // without going through the app's signup which creates the Firestore profile.
-          if (data.email.toLowerCase() === 'admin@example.com' || data.email.toLowerCase() === 'jezza5152@gmail.com') { 
-            roleForRedirect = 'admin';
-            console.log("Login: Firestore profile missing, inferred admin role from email for initial redirect.");
-            // Consider creating a basic profile here if essential and missing,
-            // but ideally signup flows should create these.
-            // Example of creating a very basic admin profile if it's missing:
-            // await setDoc(userDocRef, { 
-            //   id: user.uid, 
-            //   email: user.email, 
-            //   name: user.displayName || data.email.split('@')[0], 
-            //   role: 'admin', 
-            //   createdAt: serverTimestamp(), 
-            //   updatedAt: serverTimestamp(),
-            //   isApproved: true, // Admins are pre-approved
-            //   accountStatus: 'active'
-            // });
-            // console.log("Login: Created basic admin profile in Firestore as it was missing.");
-          } else if (data.email.includes('chef@')) { 
-            roleForRedirect = 'chef';
+          if (userData.role === 'admin') {
+            console.log("LoginPage: User has 'admin' role in Firestore profile.");
           }
+        } else {
+          console.warn("LoginPage: No profile document found in Firestore for UID:", user.uid, "Creating a basic customer profile.");
+          // Fallback: if no Firestore profile, create a basic customer profile.
+          // This shouldn't happen if signup flows are correctly creating profiles.
+          const basicCustomerProfile: CustomerProfile = {
+            id: user.uid,
+            email: user.email!,
+            name: user.displayName || data.email.split('@')[0],
+            role: 'customer',
+            accountStatus: 'active',
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          };
+          await setDoc(userDocRef, basicCustomerProfile);
+          console.log("LoginPage: Created basic customer profile in Firestore as it was missing.");
+          roleForRedirect = 'customer';
+          localStorage.setItem('userName', basicCustomerProfile.name);
         }
+        // User role is now set based on Firestore or fallback.
+        localStorage.setItem('userRole', roleForRedirect);
       }
       
-      console.log("Login: Determined role for initial redirect:", roleForRedirect);
+      console.log("LoginPage: Determined role for initial redirect:", roleForRedirect);
 
-      // Redirect based on role
       if (roleForRedirect === 'admin') {
         router.push('/admin');
       } else if (roleForRedirect === 'chef') {
@@ -120,7 +110,7 @@ export default function LoginPage() {
       }
 
     } catch (error: any) {
-      console.error('Login error:', error);
+      console.error('LoginPage: Login error:', error);
       let errorMessage = 'Failed to login. Please check your credentials.';
       if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
         errorMessage = 'Invalid email or password.';
@@ -166,7 +156,7 @@ export default function LoginPage() {
         description: 'If an account exists for this email, a password reset link has been sent. Please check your inbox.',
       });
     } catch (error: any) {
-      console.error('Password reset error:', error);
+      console.error('LoginPage: Password reset error:', error);
       toast({
         title: 'Password Reset Failed',
         description: error.message || 'Could not send password reset email. Please try again.',
@@ -247,3 +237,4 @@ export default function LoginPage() {
     </div>
   );
 }
+    

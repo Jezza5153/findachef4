@@ -60,14 +60,16 @@ export default function CustomerSignupPage() {
 
   const onSubmit = async (data: CustomerSignupFormValues) => {
     setIsLoading(true);
+    console.log("CustomerSignup: Starting signup process for:", data.email);
     try {
-      console.log("Customer Signup: Attempting to create user with email:", data.email);
+      console.log("CustomerSignup: Attempting to create Firebase Auth user...");
       const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password);
       const user = userCredential.user;
-      console.log("Customer Signup: Firebase Auth user created successfully:", user.uid);
+      console.log("CustomerSignup: Firebase Auth user created successfully. UID:", user.uid);
 
+      console.log("CustomerSignup: Updating Firebase Auth profile (displayName)...");
       await updateAuthProfile(user, { displayName: data.name });
-      console.log("Customer Signup: Firebase Auth profile updated with displayName.");
+      console.log("CustomerSignup: Firebase Auth profile updated.");
 
       const userProfileData: CustomerProfile = {
         id: user.uid,
@@ -77,15 +79,15 @@ export default function CustomerSignupPage() {
         accountStatus: 'active',
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-        phone: '', // Initialize optional fields
+        phone: '', 
         kitchenEquipment: [],
         addressDetails: '',
-        profilePictureUrl: user.photoURL || '', // Use auth photoURL if available
+        profilePictureUrl: user.photoURL || '', 
       };
       
-      console.log("Customer Signup: Attempting to set Firestore document for user:", user.uid);
+      console.log("CustomerSignup: Preparing to save customer profile to Firestore for UID:", user.uid, userProfileData);
       await setDoc(doc(db, "users", user.uid), userProfileData);
-      console.log("Customer Signup: Firestore document created successfully for user:", user.uid);
+      console.log("CustomerSignup: Firestore document created successfully for user:", user.uid);
       
       toast({
         title: 'Account Created Successfully!',
@@ -95,12 +97,12 @@ export default function CustomerSignupPage() {
       
       router.push('/login'); 
     } catch (error: any) {
-      console.error('Customer signup error:', error);
+      console.error('CustomerSignup: Signup error:', error);
       let errorMessage = 'Failed to create account.';
       if (error.code === 'auth/email-already-in-use') {
         errorMessage = 'This email address is already in use.';
-      } else if (error.message?.includes('permission-denied') || error.message?.includes('Missing or insufficient permissions')) {
-        errorMessage = 'Failed to save profile data due to permissions. This might be a Firestore security rule issue for creating user profiles.';
+      } else if (error.code === 'permission-denied' || error.message?.includes('permission-denied') || error.message?.includes('Missing or insufficient permissions')) {
+        errorMessage = 'Failed to save profile data due to permissions. Please check Firestore security rules for creating user profiles.';
       } else if (error.code) {
         errorMessage = `An error occurred: ${error.code} - ${error.message}`;
       }
@@ -227,3 +229,4 @@ export default function CustomerSignupPage() {
     </div>
   );
 }
+    

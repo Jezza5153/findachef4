@@ -81,7 +81,6 @@ export default function ChefSignupPage() {
     setResumeParsedData(data.parsedData);
     setResumeFile(data.file); 
     setIsResumeUploadedAndParsed(true);
-    // Auto-fill bio and specialties if they are empty and resume data is available
     if (data.parsedData.experience && form.getValues('bio') === '') {
         form.setValue('bio', data.parsedData.experience.substring(0,500), { shouldValidate: true });
     }
@@ -118,41 +117,41 @@ export default function ChefSignupPage() {
     }
     
     setIsLoading(true);
+    console.log("ChefSignup: Starting signup process for:", data.email);
     try {
-      console.log("Chef Signup: Attempting to create user with email:", data.email);
+      console.log("ChefSignup: Attempting to create Firebase Auth user...");
       const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password);
       const user = userCredential.user;
-      console.log("Chef Signup: Firebase Auth user created successfully:", user.uid);
+      console.log("ChefSignup: Firebase Auth user created successfully. UID:", user.uid);
 
       let profilePictureUrlToSave = '';
       let resumeFileUrlToSave = '';
 
       if (profilePictureFile) {
+        console.log("ChefSignup: Uploading profile picture...");
         const fileExt = profilePictureFile.name.split('.').pop();
         const profilePicRefPath = `users/${user.uid}/profilePicture.${fileExt}`;
         const profilePicStorageRefInstance = storageRef(storage, profilePicRefPath);
         
-        toast({ title: "Uploading Profile Picture...", description: "Please wait.", duration: 2000 });
         const uploadTaskSnapshot = await uploadBytesResumable(profilePicStorageRefInstance, profilePictureFile);
         profilePictureUrlToSave = await getDownloadURL(uploadTaskSnapshot.ref);
-        console.log("Chef Signup: Profile picture uploaded:", profilePictureUrlToSave);
+        console.log("ChefSignup: Profile picture uploaded:", profilePictureUrlToSave);
       }
       
-      // Resume file is already validated as PDF by ResumeUploadForm
-      toast({ title: "Uploading Resume...", description: "Please wait.", duration: 2000 });
+      console.log("ChefSignup: Uploading resume file...");
       const resumeFileExtension = resumeFile.name.split('.').pop() || 'pdf';
       const resumeStorageRefPath = `users/${user.uid}/resume.${resumeFileExtension}`;
       const resumeStorageRefInstance = storageRef(storage, resumeStorageRefPath);
       const resumeUploadTask = await uploadBytesResumable(resumeStorageRefInstance, resumeFile);
       resumeFileUrlToSave = await getDownloadURL(resumeUploadTask.ref);
-      console.log("Chef Signup: Resume uploaded:", resumeFileUrlToSave);
+      console.log("ChefSignup: Resume uploaded:", resumeFileUrlToSave);
       
-
+      console.log("ChefSignup: Updating Firebase Auth profile (displayName, photoURL)...");
       await updateAuthProfile(user, { 
         displayName: data.name, 
         photoURL: profilePictureUrlToSave || null 
       });
-      console.log("Chef Signup: Firebase Auth profile updated with displayName and photoURL.");
+      console.log("ChefSignup: Firebase Auth profile updated.");
 
       const userProfileData: ChefProfile = {
         id: user.uid,
@@ -182,9 +181,9 @@ export default function ChefSignupPage() {
         updatedAt: serverTimestamp(),
       };
       
-      console.log("Chef Signup: Attempting to set Firestore document for user:", user.uid);
+      console.log("ChefSignup: Preparing to save chef profile to Firestore for UID:", user.uid, userProfileData);
       await setDoc(doc(db, "users", user.uid), userProfileData);
-      console.log("Chef Signup: Firestore document created successfully for user:", user.uid);
+      console.log("ChefSignup: Firestore document created successfully for user:", user.uid);
       
       toast({
         title: 'Signup Successful!',
@@ -193,21 +192,20 @@ export default function ChefSignupPage() {
       });
       
       form.reset();
-      // Reset resume related state too
       setResumeParsedData(null);
       setResumeFile(null);
       setIsResumeUploadedAndParsed(false);
       setProfilePictureFile(null);
       setProfilePicturePreview(null);
-      // Consider if ResumeUploadForm needs an internal reset function
+      // TODO: Consider if ResumeUploadForm needs an internal reset function or prop
       router.push('/login'); 
     } catch (error: any) {
-      console.error('Chef Signup error:', error);
+      console.error('ChefSignup: Signup error:', error);
       let errorMessage = 'Failed to create account.';
       if (error.code === 'auth/email-already-in-use') {
         errorMessage = 'This email address is already in use.';
-      } else if (error.message?.includes('permission-denied') || error.message?.includes('Missing or insufficient permissions')) {
-        errorMessage = 'Failed to save profile data due to permissions. This might be a Firestore security rule issue for creating user profiles.';
+      } else if (error.code === 'permission-denied' || error.message?.includes('permission-denied') || error.message?.includes('Missing or insufficient permissions')) {
+        errorMessage = 'Failed to save profile data due to permissions. Please check Firestore security rules for creating user profiles.';
       } else if (error.code) {
         errorMessage = `An error occurred: ${error.code} - ${error.message}`;
       }
@@ -417,3 +415,4 @@ export default function ChefSignupPage() {
     </div>
   );
 }
+    

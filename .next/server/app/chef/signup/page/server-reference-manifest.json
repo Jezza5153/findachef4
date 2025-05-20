@@ -1,0 +1,16 @@
+{
+  "node": {
+    "40987b11f547acce22ae697d90ecfe27e705493a5e": {
+      "workers": {
+        "app/chef/signup/page": {
+          "moduleId": "[project]/.next-internal/server/app/chef/signup/page/actions.js { ACTIONS_MODULE0 => \"[project]/src/ai/flows/resume-parser.ts [app-rsc] (ecmascript)\" } [app-rsc] (server actions loader, ecmascript)",
+          "async": false
+        }
+      },
+      "layer": {
+        "app/chef/signup/page": "action-browser"
+      }
+    }
+  },
+  "edge": {}
+}

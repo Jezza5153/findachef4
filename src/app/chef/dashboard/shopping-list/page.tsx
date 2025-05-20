@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
@@ -6,15 +5,6 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import * as z from 'zod';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogFooter,
-  DialogClose,
-} from '@/components/ui/dialog';
 import {
   Form,
   FormControl,
@@ -38,19 +28,28 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import type { ShoppingListItem } from '@/types';
-import { PlusCircle, Trash2, ShoppingCart, FileDown, Edit, DollarSign, Loader2 } from 'lucide-react';
+import { PlusCircle, Trash2, ShoppingCart, FileDown, Edit, DollarSign, Loader2, Mic } from 'lucide-react'; // Added Mic icon
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, doc, updateDoc, deleteDoc, query, serverTimestamp, Timestamp, onSnapshot, orderBy } from 'firebase/firestore';
+import dynamic from 'next/dynamic';
+
+const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false });
+const DialogContent = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogContent), { ssr: false });
+const DialogHeader = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogHeader), { ssr: false });
+const DialogTitle = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogTitle), { ssr: false });
+const DialogFooter = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogFooter), { ssr: false });
+const DialogClose = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogClose), { ssr: false });
+
 
 const shoppingListItemSchema = z.object({
   name: z.string().min(1, { message: 'Item name is required.' }),
   quantity: z.coerce.number().min(0.01, { message: 'Quantity must be greater than 0.' }),
   unit: z.string().min(1, { message: 'Unit is required (e.g., kg, pcs, L).' }),
-  estimatedCost: z.coerce.number().min(0, { message: 'Estimated cost must be a positive number.' }),
+  estimatedCost: z.coerce.number().min(0, { message: 'Estimated cost (per unit) must be non-negative.' }),
   notes: z.string().optional(),
-  menuId: z.string().optional(), // To link back to a menu
-  eventId: z.string().optional(), // To link back to an event
+  menuId: z.string().optional(), 
+  eventId: z.string().optional(), 
 });
 
 type ShoppingListItemFormValues = z.infer<typeof shoppingListItemSchema>;
@@ -88,12 +87,15 @@ export default function ShoppingListPage() {
     const q = query(itemsCollectionRef, orderBy("createdAt", "desc"));
     
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const fetchedItems = querySnapshot.docs.map(docSnap => ({ 
-        id: docSnap.id, 
-        ...docSnap.data(),
-        createdAt: docSnap.data().createdAt ? (docSnap.data().createdAt as Timestamp).toDate() : undefined,
-        updatedAt: docSnap.data().updatedAt ? (docSnap.data().updatedAt as Timestamp).toDate() : undefined,
-      } as ShoppingListItem));
+      const fetchedItems = querySnapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        return { 
+          id: docSnap.id, 
+          ...data,
+          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
+        } as ShoppingListItem
+      });
       setItems(fetchedItems);
       setIsLoading(false);
     }, (error) => {
@@ -112,7 +114,7 @@ export default function ShoppingListPage() {
         name: itemToEdit.name,
         quantity: itemToEdit.quantity,
         unit: itemToEdit.unit,
-        estimatedCost: itemToEdit.estimatedCost,
+        estimatedCost: itemToEdit.estimatedCost, // This is cost per unit
         notes: itemToEdit.notes || '',
         menuId: itemToEdit.menuId || '',
         eventId: itemToEdit.eventId || '',
@@ -172,12 +174,15 @@ export default function ShoppingListPage() {
     if (!user) return;
     const itemToDelete = items.find(item => item.id === itemId);
     if (window.confirm(`Are you sure you want to delete "${itemToDelete?.name}"?`)) {
+      setIsSubmitting(true); // Use isSubmitting to disable buttons during delete
       try {
         await deleteDoc(doc(db, "users", user.uid, "shoppingListItems", itemId));
         toast({ title: 'Item Deleted', description: `"${itemToDelete?.name}" removed.`, variant: "destructive" });
       } catch (error) {
         console.error("Error deleting item:", error);
         toast({ title: "Delete Error", description: "Could not delete item.", variant: "destructive" });
+      } finally {
+        setIsSubmitting(false);
       }
     }
   };
@@ -187,24 +192,28 @@ export default function ShoppingListPage() {
     const itemToUpdate = items.find(item => item.id === itemId);
     if (itemToUpdate) {
       const newPurchasedStatus = !itemToUpdate.purchased;
+      setIsSubmitting(true); // Disable actions during update
       try {
         const itemDocRef = doc(db, "users", user.uid, "shoppingListItems", itemId);
         await updateDoc(itemDocRef, { purchased: newPurchasedStatus, updatedAt: serverTimestamp() });
+        // No toast needed for this, UI updates via onSnapshot
       } catch (error) {
         console.error("Error updating purchased status:", error);
         toast({ title: "Update Error", description: "Could not update status.", variant: "destructive" });
+      } finally {
+        setIsSubmitting(false);
       }
     }
   };
 
   const totalEstimatedCost = useMemo(() => {
-    return items.reduce((sum, item) => sum + item.estimatedCost * item.quantity, 0);
+    return items.reduce((sum, item) => sum + (item.estimatedCost * item.quantity), 0);
   }, [items]);
 
   const remainingCost = useMemo(() => {
     return items
       .filter(item => !item.purchased)
-      .reduce((sum, item) => sum + item.estimatedCost * item.quantity, 0);
+      .reduce((sum, item) => sum + (item.estimatedCost * item.quantity), 0);
   }, [items]);
 
   const handleExportToCSV = () => {
@@ -216,7 +225,7 @@ export default function ShoppingListPage() {
     const csvRows = [
       headers.join(','),
       ...items.map(item => [
-        `"${item.name.replace(/"/g, '""')}"`, // Escape double quotes
+        `"${item.name.replace(/"/g, '""')}"`, 
         item.quantity,
         `"${item.unit.replace(/"/g, '""')}"`,
         (item.estimatedCost * item.quantity).toFixed(2),
@@ -242,6 +251,14 @@ export default function ShoppingListPage() {
     toast({ title: 'Export Successful', description: 'Shopping list exported to CSV.' });
   };
 
+  const handleVoiceNotePlaceholder = () => {
+    toast({
+      title: "Voice Note to Shopping List: Coming Soon!",
+      description: "This feature will allow you to add items by speaking.",
+      duration: 5000,
+    });
+  };
+
   if (isLoading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -253,113 +270,120 @@ export default function ShoppingListPage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
         <h1 className="text-3xl font-bold flex items-center">
           <ShoppingCart className="mr-3 h-8 w-8 text-primary" /> My Shopping List
         </h1>
-        <Button onClick={() => openAddItemDialog()} disabled={isSubmitting}>
-          <PlusCircle className="mr-2 h-5 w-5" /> Add New Item
-        </Button>
+        <div className="flex space-x-2">
+          <Button onClick={handleVoiceNotePlaceholder} variant="outline" disabled={isSubmitting}>
+            <Mic className="mr-2 h-5 w-5" /> Add via Voice Note
+          </Button>
+          <Button onClick={() => openAddItemDialog()} disabled={isSubmitting}>
+            <PlusCircle className="mr-2 h-5 w-5" /> Add New Item
+          </Button>
+        </div>
       </div>
 
-      <Dialog open={isAddItemDialogOpen} onOpenChange={setIsAddItemDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{editingItem ? 'Edit Item' : 'Add New Shopping List Item'}</DialogTitle>
-          </DialogHeader>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmitItem)} className="space-y-4 p-1">
-              <FormField
-                control={form.control}
-                name="name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Item Name</FormLabel>
-                    <FormControl><Input placeholder="e.g., Flour" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <div className="grid grid-cols-2 gap-4">
+      {isAddItemDialogOpen && (
+        <Dialog open={isAddItemDialogOpen} onOpenChange={(open) => { if(!isSubmitting) setIsAddItemDialogOpen(open)}}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>{editingItem ? 'Edit Item' : 'Add New Shopping List Item'}</DialogTitle>
+            </DialogHeader>
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmitItem)} className="space-y-4 p-1">
                 <FormField
                   control={form.control}
-                  name="quantity"
+                  name="name"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Quantity</FormLabel>
-                      <FormControl><Input type="number" step="0.01" placeholder="e.g., 2.5" {...field} /></FormControl>
+                      <FormLabel>Item Name</FormLabel>
+                      <FormControl><Input placeholder="e.g., Flour" {...field} /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="quantity"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Quantity</FormLabel>
+                        <FormControl><Input type="number" step="0.01" placeholder="e.g., 2.5" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="unit"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Unit</FormLabel>
+                        <FormControl><Input placeholder="e.g., kg, pcs, L" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <FormField
+                  control={form.control}
+                  name="estimatedCost"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Estimated Cost (per unit)</FormLabel>
+                      <FormControl><Input type="number" step="0.01" placeholder="e.g., 5.99" {...field} /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
                 <FormField
                   control={form.control}
-                  name="unit"
+                  name="notes"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Unit</FormLabel>
-                      <FormControl><Input placeholder="e.g., kg, pcs, L" {...field} /></FormControl>
+                      <FormLabel>Notes (Optional)</FormLabel>
+                      <FormControl><Textarea placeholder="e.g., Organic, brand preference" {...field} /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-              </div>
-              <FormField
-                control={form.control}
-                name="estimatedCost"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Estimated Cost (per unit)</FormLabel>
-                    <FormControl><Input type="number" step="0.01" placeholder="e.g., 5.99" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="notes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Notes (Optional)</FormLabel>
-                    <FormControl><Textarea placeholder="e.g., Organic, brand preference" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="menuId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Link to Menu ID (Optional)</FormLabel>
-                      <FormControl><Input placeholder="e.g., menuXYZ" {...field} /></FormControl>
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="eventId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Link to Event ID (Optional)</FormLabel>
-                      <FormControl><Input placeholder="e.g., event123" {...field} /></FormControl>
-                    </FormItem>
-                  )}
-                />
-              </div>
-              <DialogFooter>
-                <DialogClose asChild>
-                  <Button type="button" variant="outline" disabled={isSubmitting}>Cancel</Button>
-                </DialogClose>
-                <Button type="submit" disabled={isSubmitting}>
-                  {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (editingItem ? 'Save Changes' : 'Add Item')}
-                  </Button>
-              </DialogFooter>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
+                <div className="grid grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="menuId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Link to Menu ID (Optional)</FormLabel>
+                        <FormControl><Input placeholder="e.g., menuXYZ" {...field} /></FormControl>
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="eventId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Link to Event ID (Optional)</FormLabel>
+                        <FormControl><Input placeholder="e.g., event123" {...field} /></FormControl>
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <DialogFooter>
+                  <DialogClose asChild>
+                    <Button type="button" variant="outline" disabled={isSubmitting}>Cancel</Button>
+                  </DialogClose>
+                  <Button type="submit" disabled={isSubmitting}>
+                    {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (editingItem ? 'Save Changes' : 'Add Item')}
+                    </Button>
+                </DialogFooter>
+              </form>
+            </Form>
+          </DialogContent>
+        </Dialog>
+      )}
 
       <Card>
         <CardHeader>
@@ -388,6 +412,7 @@ export default function ShoppingListPage() {
                         checked={item.purchased}
                         onCheckedChange={() => handleTogglePurchased(item.id)}
                         aria-label={item.purchased ? 'Mark as not purchased' : 'Mark as purchased'}
+                        disabled={isSubmitting}
                       />
                     </TableCell>
                     <TableCell className={`font-medium ${item.purchased ? 'line-through text-muted-foreground' : ''}`}>{item.name}</TableCell>
@@ -400,6 +425,7 @@ export default function ShoppingListPage() {
                     <TableCell className="text-xs">
                         {item.menuId && <div>Menu: {item.menuId.substring(0,6)}...</div>}
                         {item.eventId && <div>Event: {item.eventId.substring(0,6)}...</div>}
+                         {(!item.menuId && !item.eventId) && <span className="text-muted-foreground/70">N/A</span>}
                     </TableCell>
                     <TableCell className="text-right">
                       <Button variant="ghost" size="icon" onClick={() => openAddItemDialog(item)} className="mr-1" disabled={isSubmitting}>
@@ -434,7 +460,7 @@ export default function ShoppingListPage() {
       </Card>
       
       <div className="flex justify-end mt-6">
-        <Button onClick={handleExportToCSV} variant="outline" disabled={items.length === 0}>
+        <Button onClick={handleExportToCSV} variant="outline" disabled={items.length === 0 || isSubmitting}>
           <FileDown className="mr-2 h-5 w-5" /> Export to CSV
         </Button>
       </div>

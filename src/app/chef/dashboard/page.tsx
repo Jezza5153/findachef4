@@ -1,4 +1,3 @@
-
 'use client';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,8 +14,8 @@ import type { ChartConfig } from "@/components/ui/chart"
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, Timestamp, orderBy, limit, onSnapshot } from 'firebase/firestore';
-import type { ActivityItem, ChefProfile, Menu, CustomerRequest } from '@/types';
+import { collection, query, where, onSnapshot, Timestamp, orderBy, limit, getDocs } from 'firebase/firestore';
+import type { ActivityItem, ChefProfile, Menu, CustomerRequest, CalendarEvent } from '@/types';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { formatDistanceToNow } from 'date-fns';
@@ -29,7 +28,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
 
@@ -48,7 +46,7 @@ const chartConfig: ChartConfig = {
 export default function ChefDashboardPage() {
   const { user, userProfile } = useAuth();
   const [upcomingEventsCount, setUpcomingEventsCount] = useState<number | null>(null);
-  const [loadingEvents, setLoadingEvents] = useState(true);
+  const [loadingEventsCount, setLoadingEventsCount] = useState(true);
   const [recentActivityItems, setRecentActivityItems] = useState<ActivityItem[]>([]);
   const [loadingActivity, setLoadingActivity] = useState(true);
   const [bookingRequestsCount, setBookingRequestsCount] = useState<number | null>(null);
@@ -60,39 +58,36 @@ export default function ChefDashboardPage() {
   const chefProfile = userProfile as ChefProfile | null;
 
   useEffect(() => {
-    if (!user) {
-      setLoadingEvents(false);
+    if (!user || !chefProfile) {
+      setLoadingEventsCount(false);
       setLoadingActivity(false);
       setLoadingRequestsCount(false);
-      setLoadingMenuEngagement(false);
+      setLoadingMenuEngagement(false); // Also set this
+      // Reset counts if user logs out or profile isn't chef
+      setUpcomingEventsCount(0);
+      setBookingRequestsCount(0);
+      setRecentActivityItems([]);
+      setMenuEngagementData([]);
       return;
     }
 
     // Fetch Upcoming Events Count (Real-time)
-    setLoadingEvents(true);
-    const todayForEvents = new Date();
-    todayForEvents.setHours(0, 0, 0, 0); 
+    setLoadingEventsCount(true);
+    const todayForEvents = Timestamp.fromDate(new Date()); // Use Firestore Timestamp for comparison
 
     const eventsCollectionRef = collection(db, `users/${user.uid}/calendarEvents`);
     const qEvents = query(
       eventsCollectionRef,
-      where("status", "==", "Confirmed")
+      where("status", "==", "Confirmed"),
+      where("date", ">=", todayForEvents) // Query for dates greater than or equal to today
     );
     const unsubscribeEvents = onSnapshot(qEvents, (querySnapshot) => {
-      let count = 0;
-      querySnapshot.forEach(doc => {
-        const eventData = doc.data();
-        const eventDate = eventData.date instanceof Timestamp ? eventData.date.toDate() : new Date(eventData.date as any);
-        if (eventDate >= todayForEvents) {
-          count++;
-        }
-      });
-      setUpcomingEventsCount(count);
-      setLoadingEvents(false);
+      setUpcomingEventsCount(querySnapshot.size);
+      setLoadingEventsCount(false);
     }, (error) => {
       console.error("Error fetching upcoming events count:", error);
       setUpcomingEventsCount(0);
-      setLoadingEvents(false);
+      setLoadingEventsCount(false);
     });
 
     // Fetch Recent Activity (Real-time)
@@ -119,10 +114,10 @@ export default function ChefDashboardPage() {
     // Fetch Booking Requests Count (Real-time)
     setLoadingRequestsCount(true);
     const customerRequestsRef = collection(db, "customerRequests");
+    // Query for 'new' requests OR requests where the chef is involved and status is actionable
     const qRequests = query(
       customerRequestsRef,
-      where("status", "in", ["new", "awaiting_customer_response", "proposal_sent", "chef_accepted"]),
-      orderBy("createdAt", "desc")
+      where("status", "in", ["new", "awaiting_customer_response", "proposal_sent", "chef_accepted"])
     );
 
     const unsubscribeRequests = onSnapshot(qRequests, (querySnapshot) => {
@@ -130,7 +125,7 @@ export default function ChefDashboardPage() {
       querySnapshot.forEach((doc) => {
         const requestData = doc.data() as CustomerRequest;
         if (
-          requestData.status === 'new' || 
+          requestData.status === 'new' ||
           (requestData.respondingChefIds && requestData.respondingChefIds.includes(user.uid) && requestData.status === 'awaiting_customer_response') ||
           (requestData.activeProposal?.chefId === user.uid && (requestData.status === 'proposal_sent' || requestData.status === 'chef_accepted'))
         ) {
@@ -151,22 +146,23 @@ export default function ChefDashboardPage() {
     const menusCollectionRef = collection(db, "menus");
     const qMenus = query(menusCollectionRef, where("chefId", "==", user.uid), orderBy("createdAt", "desc"), limit(4));
     getDocs(qMenus).then(menusSnapshot => {
+      let dynamicMockData : { menu: string; views: number; requests: number }[] = [];
       if (menusSnapshot.empty) {
-        setMenuEngagementData([
-          { menu: "Example Menu 1", views: 100, requests: 10 },
-          { menu: "Example Menu 2", views: 130, requests: 18 },
-        ]);
+        dynamicMockData = [
+          { menu: "Example Menu 1", views: Math.floor(Math.random() * 150) + 20, requests: Math.floor(Math.random() * 20) + 1 },
+          { menu: "Example Menu 2", views: Math.floor(Math.random() * 150) + 20, requests: Math.floor(Math.random() * 20) + 1 },
+        ];
       } else {
-        const dynamicMockData = menusSnapshot.docs.map(doc => {
+        dynamicMockData = menusSnapshot.docs.map(doc => {
           const menu = doc.data() as Menu;
           return {
             menu: menu.title.length > 15 ? menu.title.substring(0, 12) + "..." : menu.title,
-            views: Math.floor(Math.random() * 150) + 20, 
-            requests: Math.floor(Math.random() * ((Math.floor(Math.random() * 150) + 20) / 5)), 
+            views: Math.floor(Math.random() * 150) + 20, // Placeholder
+            requests: Math.floor(Math.random() * ((Math.floor(Math.random() * 150) + 20) / 5)), // Placeholder
           };
         });
-        setMenuEngagementData(dynamicMockData);
       }
+      setMenuEngagementData(dynamicMockData);
       setLoadingMenuEngagement(false);
     }).catch(error => {
       console.error("Error fetching menus for engagement chart:", error);
@@ -180,7 +176,9 @@ export default function ChefDashboardPage() {
       unsubscribeActivity();
       unsubscribeRequests();
     };
-  }, [user]);
+  // chefProfile is included because stripeOnboardingComplete depends on it.
+  // eslint-disable-next-line react-hooks/exhaustive-deps 
+  }, [user, chefProfile]); 
 
 
   return (
@@ -208,13 +206,13 @@ export default function ChefDashboardPage() {
             <CalendarClock className="h-5 w-5 text-muted-foreground" data-ai-hint="calendar event" />
           </CardHeader>
           <CardContent>
-            {loadingEvents ? (
+            {loadingEventsCount ? (
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
             ) : (
               <div className="text-2xl font-bold">{upcomingEventsCount ?? 0}</div>
             )}
             <p className="text-xs text-muted-foreground">
-              {loadingEvents ? "Fetching data..." : `Events confirmed and upcoming.`}
+              {loadingEventsCount ? "Fetching data..." : `Events confirmed and upcoming.`}
             </p>
           </CardContent>
         </Card>
@@ -279,7 +277,7 @@ export default function ChefDashboardPage() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => {
-              toast({ title: "Stripe Onboarding (Placeholder)", description: "You would now be redirected to Stripe."});
+              alert("Simulated: Redirecting to Stripe for account connection. This would involve a backend call to create an Account Link.");
               // In a real app:
               // 1. Call backend to create a Stripe Account Link.
               // 2. Backend returns the URL for Stripe onboarding.
@@ -316,7 +314,7 @@ export default function ChefDashboardPage() {
                   </RechartsBarChart>
                 </ChartContainer>
             ) : (
-              <p className="text-sm text-muted-foreground text-center py-8">No menu data to display engagement for.</p>
+              <p className="text-sm text-muted-foreground text-center py-8">No menu data to display engagement for. Create some menus!</p>
             )}
              <p className="text-xs text-muted-foreground mt-2 text-center">(Example data shown - real tracking requires advanced setup)</p>
           </CardContent>
