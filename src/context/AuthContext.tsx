@@ -41,12 +41,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log("AuthContext: onAuthStateChanged triggered. UID:", currentUser?.uid || null);
       setUser(currentUser);
       
-      // Clean up previous profile listener if it exists
       if (profileUnsubscribe) {
         console.log("AuthContext: Cleaning up previous profile onSnapshot listener for UID:", user?.uid || 'N/A (old user)');
         profileUnsubscribe();
         profileUnsubscribe = undefined;
       }
+
+      // Reset all profile-dependent states when user changes
+      setUserProfile(null);
+      setIsAdmin(false);
+      setIsChef(false);
+      setIsCustomer(false);
+      setIsChefApproved(false);
+      setIsChefSubscribed(false);
 
       if (currentUser) {
         setProfileLoading(true); // Start profile loading when user is found
@@ -62,61 +69,75 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setIsAdmin(claimsAdmin);
         } catch (error) {
           console.error("AuthContext: Error fetching ID token result for custom claims for UID:", currentUser.uid, error);
-          setIsAdmin(false);
+          setIsAdmin(false); // Explicitly set to false on error
         }
 
-        const userDocRef = doc(db, "users", currentUser.uid);
-        profileUnsubscribe = onSnapshot(userDocRef, (docSnap) => {
-          if (docSnap.exists()) {
-            const profileData = { id: docSnap.id, ...docSnap.data() } as AppUserProfileContext;
-            setUserProfile(profileData);
-            const currentIsChef = profileData.role === 'chef';
-            const currentIsCustomer = profileData.role === 'customer';
-            
-            setIsChef(currentIsChef);
-            setIsCustomer(currentIsCustomer);
-            
-            if (profileData.role === 'admin' && !claimsAdmin && !isAdmin) { // Check !isAdmin to avoid repeated warnings if claims just haven't propagated yet
-                console.warn("AuthContext: User has 'admin' role in Firestore but not (yet) in custom claims. Claims take precedence for isAdmin flag once fetched.");
-            }
+        try {
+          const userDocRef = doc(db, "users", currentUser.uid);
+          profileUnsubscribe = onSnapshot(userDocRef, (docSnap) => {
+            if (docSnap.exists()) {
+              const profileData = { 
+                id: docSnap.id, 
+                ...docSnap.data(),
+                // Ensure timestamps are converted if they come from Firestore
+                createdAt: docSnap.data().createdAt instanceof Timestamp ? (docSnap.data().createdAt as Timestamp).toDate() : new Date(docSnap.data().createdAt as any),
+                updatedAt: docSnap.data().updatedAt instanceof Timestamp ? (docSnap.data().updatedAt as Timestamp).toDate() : new Date(docSnap.data().updatedAt as any),
+              } as AppUserProfileContext;
+              setUserProfile(profileData);
+              const currentIsChef = profileData.role === 'chef';
+              const currentIsCustomer = profileData.role === 'customer';
+              
+              setIsChef(currentIsChef);
+              setIsCustomer(currentIsCustomer);
+              
+              // Re-check admin based on Firestore role, but claims take precedence if set
+              if (profileData.role === 'admin' && !claimsAdmin) { 
+                  // This is mostly a logging scenario, as claims-based isAdmin is already set.
+                  console.warn("AuthContext: User has 'admin' role in Firestore, but this is overridden by custom claims check for isAdmin flag.");
+              }
 
-            if (currentIsChef && profileData.role === 'chef') {
-              const chefProfileData = profileData as ChefProfile;
-              setIsChefApproved(chefProfileData.isApproved || false);
-              setIsChefSubscribed(chefProfileData.isSubscribed || false);
+              if (currentIsChef && profileData.role === 'chef') {
+                const chefProfileData = profileData as ChefProfile;
+                setIsChefApproved(chefProfileData.isApproved || false);
+                setIsChefSubscribed(chefProfileData.isSubscribed || false);
+              } else {
+                setIsChefApproved(false);
+                setIsChefSubscribed(false);
+              }
+              console.log("AuthContext: Profile data loaded/updated via onSnapshot for UID:", currentUser.uid, profileData);
             } else {
+              console.warn("AuthContext: No such user profile document in Firestore for UID:", currentUser.uid);
+              setUserProfile(null); // Ensure profile is null if doc doesn't exist
+              // Reset dependent states
+              setIsChef(false);
+              setIsCustomer(false);
               setIsChefApproved(false);
               setIsChefSubscribed(false);
             }
-            console.log("AuthContext: Profile data loaded/updated via onSnapshot for UID:", currentUser.uid);
-          } else {
-            console.warn("AuthContext: No such user profile document in Firestore for UID:", currentUser.uid);
+            setProfileLoading(false); // Profile loading (Firestore part) is done
+          }, (error) => {
+            console.error("AuthContext: Error with profile snapshot listener for UID:", currentUser.uid, error);
             setUserProfile(null);
+            // Reset dependent states
             setIsChef(false);
             setIsCustomer(false);
-            // isAdmin from claims is preserved even if profile doc is missing
             setIsChefApproved(false);
             setIsChefSubscribed(false);
-          }
-          setProfileLoading(false); 
-        }, (error) => {
-          console.error("AuthContext: Error with profile snapshot listener for UID:", currentUser.uid, error);
+            setProfileLoading(false); // Ensure loading is set to false on error too
+          });
+        } catch (e) {
+          console.error("AuthContext: Outer error setting up profile snapshot for UID:", currentUser.uid, e);
           setUserProfile(null);
           setIsChef(false);
           setIsCustomer(false);
           setIsChefApproved(false);
           setIsChefSubscribed(false);
-          setProfileLoading(false); // Ensure loading is set to false on error too
-        });
+          setProfileLoading(false);
+        }
       } else { 
         console.log("AuthContext: No current user (logged out). Resetting states.");
-        setUserProfile(null);
-        setIsChef(false);
-        setIsCustomer(false);
-        setIsAdmin(false);
-        setIsChefApproved(false);
-        setIsChefSubscribed(false);
-        setProfileLoading(false); 
+        // States already reset at the beginning of this block
+        setProfileLoading(false); // No profile to load
       }
       setAuthLoading(false); // Firebase auth state itself is resolved
     });
@@ -125,12 +146,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log("AuthContext: Cleaning up onAuthStateChanged listener.");
       unsubscribeAuth();
       if (profileUnsubscribe) {
-        console.log("AuthContext: Cleaning up profile onSnapshot listener on AuthProvider unmount for UID:", user?.uid || 'N/A');
+        console.log("AuthContext: Cleaning up profile onSnapshot listener on AuthProvider unmount for UID (if any):", user?.uid || 'N/A');
         profileUnsubscribe();
       }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // user dependency removed to prevent re-running listeners excessively; auth state is the trigger
+  }, []); // Empty dependency array means this effect runs once on mount and cleans up on unmount
 
   return (
     <AuthContext.Provider value={{ 
@@ -156,4 +176,3 @@ export function useAuth() {
   }
   return context;
 }
-    
