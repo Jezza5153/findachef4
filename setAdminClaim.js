@@ -4,7 +4,7 @@ const admin = require('firebase-admin');
 // IMPORTANT: Make sure this path points to the service account key JSON file
 // for your NEW "findachef2" Firebase project.
 // This file should be in your .gitignore.
-const serviceAccount = require('./findachef2-service-account-key.json'); // Example filename
+const serviceAccount = require('./findachef2-firebase-adminsdk-fbsvc-93293aeb34.json'); // Updated filename
 
 try {
   admin.initializeApp({
