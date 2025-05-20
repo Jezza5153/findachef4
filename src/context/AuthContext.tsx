@@ -1,11 +1,10 @@
-
 'use client';
 
 import type { User } from 'firebase/auth';
 import { onAuthStateChanged } from 'firebase/auth';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { auth, db } from '@/lib/firebase';
-import { doc, onSnapshot, Unsubscribe } from 'firebase/firestore'; 
+import { doc, onSnapshot, Unsubscribe, Timestamp } from 'firebase/firestore'; 
 import type { AppUserProfileContext, ChefProfile, CustomerProfile, AdminProfile } from '@/types';
 
 interface AuthContextType {
@@ -38,63 +37,76 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let profileUnsubscribe: Unsubscribe | undefined = undefined;
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
-      console.log("AuthContext: onAuthStateChanged triggered. UID:", currentUser?.uid || null);
-      setUser(currentUser);
+      console.log("AuthContext: onAuthStateChanged triggered. CurrentUser UID:", currentUser?.uid || null);
       
-      if (profileUnsubscribe) {
-        console.log("AuthContext: Cleaning up previous profile onSnapshot listener for UID:", user?.uid || 'N/A (old user)');
-        profileUnsubscribe();
-        profileUnsubscribe = undefined;
-      }
-
-      // Reset all profile-dependent states when user changes
+      // Always reset profile-dependent states when currentUser changes
       setUserProfile(null);
       setIsAdmin(false);
       setIsChef(false);
       setIsCustomer(false);
       setIsChefApproved(false);
       setIsChefSubscribed(false);
+      
+      // Clean up previous profile listener if it exists and currentUser is changing
+      if (profileUnsubscribe) {
+        console.log("AuthContext: Cleaning up previous profile onSnapshot listener.");
+        profileUnsubscribe();
+        profileUnsubscribe = undefined;
+      }
+
+      setUser(currentUser); // Set Firebase user state
 
       if (currentUser) {
-        setProfileLoading(true); // Start profile loading when user is found
+        console.log("AuthContext: User found (UID:", currentUser.uid, "). Starting profile and claims loading.");
+        setProfileLoading(true); // Start profile loading for the new user
+
         let claimsAdmin = false;
         try {
           console.log("AuthContext: Attempting to fetch ID token result with force refresh for UID:", currentUser.uid);
           const idTokenResult = await currentUser.getIdTokenResult(true); // Force refresh
           console.log("AuthContext: ID Token Claims for user", currentUser.uid, ":", idTokenResult.claims);
           claimsAdmin = idTokenResult.claims.admin === true;
+          setIsAdmin(claimsAdmin);
           if (!claimsAdmin) {
             console.warn("AuthContext: 'admin' custom claim not found or not true for user:", currentUser.uid, "Claims found:", idTokenResult.claims);
+          } else {
+            console.log("AuthContext: 'admin' custom claim IS TRUE for user:", currentUser.uid);
           }
-          setIsAdmin(claimsAdmin);
         } catch (error) {
           console.error("AuthContext: Error fetching ID token result for custom claims for UID:", currentUser.uid, error);
-          setIsAdmin(false); // Explicitly set to false on error
+          setIsAdmin(false);
         }
 
         try {
+          console.log("AuthContext: Setting up Firestore profile listener for UID:", currentUser.uid);
           const userDocRef = doc(db, "users", currentUser.uid);
           profileUnsubscribe = onSnapshot(userDocRef, (docSnap) => {
             if (docSnap.exists()) {
+              const data = docSnap.data();
               const profileData = { 
                 id: docSnap.id, 
-                ...docSnap.data(),
-                // Ensure timestamps are converted if they come from Firestore
-                createdAt: docSnap.data().createdAt instanceof Timestamp ? (docSnap.data().createdAt as Timestamp).toDate() : new Date(docSnap.data().createdAt as any),
-                updatedAt: docSnap.data().updatedAt instanceof Timestamp ? (docSnap.data().updatedAt as Timestamp).toDate() : new Date(docSnap.data().updatedAt as any),
+                ...data,
+                createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+                updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
               } as AppUserProfileContext;
+              
+              console.log("AuthContext: Firestore profile data loaded/updated for UID:", currentUser.uid, profileData);
               setUserProfile(profileData);
+              
               const currentIsChef = profileData.role === 'chef';
               const currentIsCustomer = profileData.role === 'customer';
-              
+              const currentIsAdminRoleInFirestore = profileData.role === 'admin'; // Role from Firestore
+
               setIsChef(currentIsChef);
               setIsCustomer(currentIsCustomer);
               
-              // Re-check admin based on Firestore role, but claims take precedence if set
-              if (profileData.role === 'admin' && !claimsAdmin) { 
-                  // This is mostly a logging scenario, as claims-based isAdmin is already set.
-                  console.warn("AuthContext: User has 'admin' role in Firestore, but this is overridden by custom claims check for isAdmin flag.");
+              // Admin status from claims takes precedence. Log if Firestore role is admin but claim isn't.
+              if (currentIsAdminRoleInFirestore && !claimsAdmin) {
+                console.warn("AuthContext: User has 'admin' role in Firestore, but 'admin' custom claim is missing or false. Claims determine admin access.");
+              } else if (!currentIsAdminRoleInFirestore && claimsAdmin) {
+                 console.log("AuthContext: User has 'admin' custom claim, which grants admin access even if Firestore role isn't 'admin'.");
               }
+
 
               if (currentIsChef && profileData.role === 'chef') {
                 const chefProfileData = profileData as ChefProfile;
@@ -104,29 +116,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 setIsChefApproved(false);
                 setIsChefSubscribed(false);
               }
-              console.log("AuthContext: Profile data loaded/updated via onSnapshot for UID:", currentUser.uid, profileData);
             } else {
               console.warn("AuthContext: No such user profile document in Firestore for UID:", currentUser.uid);
-              setUserProfile(null); // Ensure profile is null if doc doesn't exist
-              // Reset dependent states
+              setUserProfile(null);
               setIsChef(false);
               setIsCustomer(false);
               setIsChefApproved(false);
               setIsChefSubscribed(false);
             }
-            setProfileLoading(false); // Profile loading (Firestore part) is done
+            setProfileLoading(false); // Profile & claims loading is done for this user
           }, (error) => {
-            console.error("AuthContext: Error with profile snapshot listener for UID:", currentUser.uid, error);
+            console.error("AuthContext: Error with Firestore profile snapshot listener for UID:", currentUser.uid, error);
             setUserProfile(null);
-            // Reset dependent states
             setIsChef(false);
             setIsCustomer(false);
             setIsChefApproved(false);
             setIsChefSubscribed(false);
-            setProfileLoading(false); // Ensure loading is set to false on error too
+            setProfileLoading(false); 
           });
         } catch (e) {
-          console.error("AuthContext: Outer error setting up profile snapshot for UID:", currentUser.uid, e);
+          console.error("AuthContext: Outer error setting up Firestore profile snapshot for UID:", currentUser.uid, e);
           setUserProfile(null);
           setIsChef(false);
           setIsCustomer(false);
@@ -135,8 +144,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setProfileLoading(false);
         }
       } else { 
-        console.log("AuthContext: No current user (logged out). Resetting states.");
-        // States already reset at the beginning of this block
+        console.log("AuthContext: No current user (logged out). Resetting profile states.");
+        setUserProfile(null); // Ensure profile is null if no user
+        setIsAdmin(false);
+        setIsChef(false);
+        setIsCustomer(false);
+        setIsChefApproved(false);
+        setIsChefSubscribed(false);
         setProfileLoading(false); // No profile to load
       }
       setAuthLoading(false); // Firebase auth state itself is resolved
@@ -146,11 +160,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.log("AuthContext: Cleaning up onAuthStateChanged listener.");
       unsubscribeAuth();
       if (profileUnsubscribe) {
-        console.log("AuthContext: Cleaning up profile onSnapshot listener on AuthProvider unmount for UID (if any):", user?.uid || 'N/A');
+        console.log("AuthContext: Cleaning up profile onSnapshot listener on AuthProvider unmount.");
         profileUnsubscribe();
       }
     };
-  }, []); // Empty dependency array means this effect runs once on mount and cleans up on unmount
+  }, []); // Empty dependency array: runs once on mount, cleans up on unmount
 
   return (
     <AuthContext.Provider value={{ 
