@@ -1,14 +1,12 @@
 // setAdminClaim.js
 const admin = require('firebase-admin');
 // IMPORTANT: Replace with the actual path to your service account key JSON file
-const serviceAccount = firebase.json; // Or whatever you named it
-
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+ credential: admin.credential.cert('./firebase.json')
 });
 
 // Replace with the UID of the user you want to make an admin
-const uid = '4EMh8gO1gudNu5BnaAvvfIVRd6T2'; 
+const uid = 'J39k6AGaAqZz4LERS4466985bPB2'; 
 
 admin.auth().setCustomUserClaims(uid, { admin: true })
   .then(() => {
