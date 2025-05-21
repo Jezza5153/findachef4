@@ -65,13 +65,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           console.log("AuthContext: Attempting to fetch ID token result with force refresh for UID:", currentUser.uid);
           const idTokenResult = await currentUser.getIdTokenResult(true); 
-          console.log("AuthContext: ID Token Claims for user", currentUser.uid, ":", idTokenResult.claims);
-          claimsAdmin = !!(idTokenResult.claims && idTokenResult.claims.admin === true);
+ console.log("AuthContext: ID Token Claims for user", currentUser.uid, ":", idTokenResult.claims);
+ claimsAdmin = !!(idTokenResult.claims && idTokenResult.claims.isAdmin === true); // Check for 'isAdmin'
           setIsAdmin(claimsAdmin);
           if (!claimsAdmin) {
-            console.warn("AuthContext: 'admin' custom claim not found or not true for user:", currentUser.uid, "Claims found:", idTokenResult.claims);
+ console.warn("AuthContext: 'isAdmin' custom claim not found or not true for user:", currentUser.uid, "Claims found:", idTokenResult.claims);
           } else {
-            console.log("AuthContext: 'admin' custom claim IS TRUE for user:", currentUser.uid);
+ console.log("AuthContext: 'isAdmin' custom claim IS TRUE for user:", currentUser.uid);
           }
         } catch (error) {
           console.error("AuthContext: Error fetching ID token result for custom claims for UID:", currentUser.uid, error);
@@ -106,7 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               if (currentIsAdminFromFirestore && !claimsAdmin) {
                 console.warn("AuthContext: User has 'admin' role in Firestore, but 'admin' custom claim is missing or false. Custom claims determine actual admin access.");
               } else if (!currentIsAdminFromFirestore && claimsAdmin) {
-                 console.log("AuthContext: User has 'admin' custom claim (isAdmin=true), granting admin access. Firestore role is:", profileData.role);
+ console.log("AuthContext: User has 'isAdmin' custom claim (isAdmin=true), granting admin access. Firestore role is:", profileData.role);
               }
 
               if (currentIsChef) {
