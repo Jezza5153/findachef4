@@ -5,6 +5,7 @@ import { getStorage } from "firebase/storage";
 import { getFirestore } from "firebase/firestore"; 
 
 // These are placeholders and should be overridden by your .env.local file
+// or Vercel environment variables.
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -15,26 +16,50 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
-// Log the project ID being used (for debugging .env.local setup)
-// This will only log on the client-side where process.env.NEXT_PUBLIC_... is available
-if (typeof window !== 'undefined') { 
-    console.log("Firebase Initializing with Project ID:", firebaseConfig.projectId);
-    if (!firebaseConfig.apiKey) {
-        console.error("Firebase API Key is missing! Check your .env.local file for NEXT_PUBLIC_FIREBASE_API_KEY.");
-    }
-}
-
-
 let app: FirebaseApp;
+let auth: ReturnType<typeof getAuth>;
+let storage: ReturnType<typeof getStorage>;
+let db: ReturnType<typeof getFirestore>;
 
-if (!getApps().length) {
-  app = initializeApp(firebaseConfig);
+if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
+  console.error("CRITICAL FIREBASE CONFIG ERROR: NEXT_PUBLIC_FIREBASE_API_KEY or NEXT_PUBLIC_FIREBASE_PROJECT_ID is missing or undefined.");
+  console.error("Using API Key (first 5 chars):", firebaseConfig.apiKey ? firebaseConfig.apiKey.substring(0,5) + "..." : "MISSING/UNDEFINED");
+  console.error("Using Project ID:", firebaseConfig.projectId || "MISSING/UNDEFINED");
+  // In a real build, this might still proceed but Firebase services will fail.
+  // Forcing an error here during build might be too disruptive if only some services are affected.
+  // However, this log should be very apparent in build outputs.
 } else {
-  app = getApps()[0];
+  if (!getApps().length) {
+    try {
+      console.log("Firebase Initializing with Project ID:", firebaseConfig.projectId);
+      console.log("Firebase Using API Key (first 5 chars):", firebaseConfig.apiKey ? firebaseConfig.apiKey.substring(0,5) + "..." : "API Key Not Found/Defined");
+      app = initializeApp(firebaseConfig);
+    } catch (e) {
+      console.error("Firebase initializeApp error:", e);
+      // Potentially rethrow or handle if app cannot be initialized
+      // For now, this will likely cause subsequent getAuth/getStorage/getFirestore to fail if app is undefined.
+    }
+  } else {
+    app = getApps()[0];
+    console.log("Firebase Re-using existing app instance for Project ID:", app.options.projectId);
+  }
+
+  // Initialize other Firebase services only if app was successfully initialized
+  // @ts-ignore
+  if (app) {
+    auth = getAuth(app);
+    storage = getStorage(app);
+    db = getFirestore(app);
+  } else {
+    console.error("Firebase app was not initialized. Other Firebase services (Auth, Storage, Firestore) will not be available.");
+    // @ts-ignore
+    auth = null; // or some dummy object to prevent further errors if imported elsewhere
+    // @ts-ignore
+    storage = null;
+    // @ts-ignore
+    db = null;
+  }
 }
 
-const auth = getAuth(app);
-const storage = getStorage(app);
-const db = getFirestore(app); // Initialize Firestore instance
-
+// @ts-ignore
 export { app, auth, storage, db };
