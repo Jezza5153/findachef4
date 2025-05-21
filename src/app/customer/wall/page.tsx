@@ -17,14 +17,17 @@ import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 
-const AlertDialog = dynamic(() => import('@/components/ui/alert-dialog').then(mod => mod.AlertDialog), { ssr: false });
-const AlertDialogAction = dynamic(() => import('@/components/ui/alert-dialog').then(mod => mod.AlertDialogAction), { ssr: false });
-const AlertDialogCancel = dynamic(() => import('@/components/ui/alert-dialog').then(mod => mod.AlertDialogCancel), { ssr: false });
-const AlertDialogContent = dynamic(() => import('@/components/ui/alert-dialog').then(mod => mod.AlertDialogContent), { ssr: false });
-const AlertDialogDescription = dynamic(() => import('@/components/ui/alert-dialog').then(mod => mod.AlertDialogDescription), { ssr: false });
-const AlertDialogFooter = dynamic(() => import('@/components/ui/alert-dialog').then(mod => mod.AlertDialogFooter), { ssr: false });
-const AlertDialogHeader = dynamic(() => import('@/components/ui/alert-dialog').then(mod => mod.AlertDialogHeader), { ssr: false });
-const AlertDialogTitle = dynamic(() => import('@/components/ui/alert-dialog').then(mod => mod.AlertDialogTitle), { ssr: false });
+const AlertDialogModule = dynamic(() => import('@/components/ui/alert-dialog'), { ssr: false });
+
+// Access components from the dynamically imported module
+const AlertDialog = AlertDialogModule.then(mod => mod.AlertDialog);
+const AlertDialogAction = AlertDialogModule.then(mod => mod.AlertDialogAction);
+const AlertDialogCancel = AlertDialogModule.then(mod => mod.AlertDialogCancel);
+const AlertDialogContent = AlertDialogModule.then(mod => mod.AlertDialogContent);
+const AlertDialogDescription = AlertDialogModule.then(mod => mod.AlertDialogDescription);
+const AlertDialogFooter = AlertDialogModule.then(mod => mod.AlertDialogFooter);
+const AlertDialogHeader = AlertDialogModule.then(mod => mod.AlertDialogHeader);
+const AlertDialogTitle = AlertDialogModule.then(mod => mod.AlertDialogTitle);
 
 export default function CustomerWallPage() {
   const { user, loading: authLoading } = useAuth();
@@ -336,3 +339,6 @@ export default function CustomerWallPage() {
     </div>
   );
 }
+}
+
+

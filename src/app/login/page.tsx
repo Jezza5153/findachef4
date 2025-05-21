@@ -66,7 +66,7 @@ export default function LoginPage() {
         description: 'Welcome back! Redirecting...',
       });
 
-      let roleForRedirect: AppUserProfileContext['role'] = 'customer'; 
+      let roleForRedirect: AppUserProfileContext['role'] = 'customer'; // Default role
 
       if (user) {
         const userDocRef = doc(db, "users", user.uid);
@@ -77,46 +77,35 @@ export default function LoginPage() {
           console.log("LoginPage: Firestore profile found for UID", user.uid, ":", userData);
           roleForRedirect = userData.role || 'customer'; 
         } else {
-          console.warn("LoginPage: No profile document found in Firestore for UID:", user.uid, ". Creating a basic customer profile if role cannot be inferred.");
-          // Fallback: Attempt to infer role from email for redirection or create basic profile
-          if (data.email.toLowerCase() === 'admin@example.com' || data.email.toLowerCase() === 'jezza5152@gmail.com') {
-            roleForRedirect = 'admin';
-            // Consider creating a basic admin profile if it doesn't exist
-            const adminProfile = {
-                id: user.uid, email: user.email!, name: user.displayName || data.email.split('@')[0],
-                role: 'admin', accountStatus: 'active', isApproved: true, isSubscribed: true, // Admins are pre-approved/subscribed
-                createdAt: serverTimestamp() as Timestamp, updatedAt: serverTimestamp() as Timestamp,
+          console.warn("LoginPage: No profile document found in Firestore for UID:", user.uid, ". Creating a basic customer profile.");
+          // This case should be rare if signup flows always create a profile.
+          // If user exists in Auth but not Firestore, default to customer and create basic profile.
+          roleForRedirect = 'customer';
+          const basicCustomerProfile: CustomerProfile = {
+              id: user.uid, email: user.email!, name: user.displayName || data.email.split('@')[0] || "New User",
+              role: 'customer', accountStatus: 'active',
+              createdAt: serverTimestamp() as Timestamp, updatedAt: serverTimestamp() as Timestamp,
+              profilePictureUrl: user.photoURL || '',
             };
-            await setDoc(userDocRef, adminProfile, { merge: true });
-            console.log("LoginPage: Created/merged basic admin profile in Firestore for UID:", user.uid);
-          } else if (data.email.includes('chef@')) { 
-            roleForRedirect = 'chef';
-            // Chefs should ideally be created via chef signup flow which creates a detailed profile.
-            // If a chef profile is missing, it indicates an issue in the signup flow.
-          } else {
-            roleForRedirect = 'customer';
-            const basicCustomerProfile: CustomerProfile = {
-                id: user.uid, email: user.email!, name: user.displayName || data.email.split('@')[0] || "New User",
-                role: 'customer', accountStatus: 'active',
-                createdAt: serverTimestamp() as Timestamp, updatedAt: serverTimestamp() as Timestamp,
-                profilePictureUrl: user.photoURL || '',
-              };
-            await setDoc(userDocRef, basicCustomerProfile, { merge: true });
-            console.log("LoginPage: Created/merged basic customer profile in Firestore for UID:", user.uid);
+          try {
+            await setDoc(userDocRef, basicCustomerProfile);
+            console.log("LoginPage: Created basic customer profile in Firestore for UID:", user.uid);
+          } catch (profileCreationError) {
+            console.error("LoginPage: Failed to create basic customer profile:", profileCreationError);
           }
         }
       }
       
       console.log("LoginPage: Determined role for initial redirect:", roleForRedirect, "for UID:", user?.uid);
-      const redirectPath = searchParams.get('redirect');
+      const redirectPathFromQuery = searchParams.get('redirect');
 
-      if (redirectPath) {
-        router.push(redirectPath);
+      if (redirectPathFromQuery) {
+        router.push(redirectPathFromQuery);
       } else if (roleForRedirect === 'admin') {
         router.push('/admin');
       } else if (roleForRedirect === 'chef') {
         router.push('/chef/dashboard');
-      } else {
+      } else { // Default to customer dashboard
         router.push('/customer/dashboard');
       }
 
@@ -128,7 +117,7 @@ export default function LoginPage() {
       } else if (error.code === 'auth/too-many-requests') {
         errorMessage = 'Too many login attempts. Please try again later.';
       } else if (error.code === 'auth/invalid-api-key') {
-        errorMessage = 'Configuration error: Invalid API Key. Please contact support.';
+        errorMessage = 'Configuration error: Invalid API Key. Please contact support or check environment variables.';
       } else if (error.code) {
         errorMessage = `Login error: ${error.message} (Code: ${error.code})`;
       }
@@ -252,5 +241,3 @@ export default function LoginPage() {
     </div>
   );
 }
-
-    

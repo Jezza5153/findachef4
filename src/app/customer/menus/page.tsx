@@ -30,33 +30,34 @@ export default function CustomerMenusPage() {
 
 
   useEffect(() => {
-    if (authLoading) {
-    const fetchPublicMenus = async () => {
-      setIsLoadingMenus(true);
-      try {
-        const menusCollectionRef = collection(db, "menus");
-        const q = query(menusCollectionRef, where("isPublic", "==", true), orderBy("createdAt", "desc"));
-        const querySnapshot = await getDocs(q);
-        const fetchedMenus = querySnapshot.docs.map(docSnap => {
-          const data = docSnap.data();
-          return {
-            id: docSnap.id,
-            ...data,
-            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
-            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
-          } as Menu;
-        });
-        setMenus(fetchedMenus);
-      } catch (error) {
-        console.error("Error fetching public menus:", error);
-        toast({
-          title: "Error Loading Menus",
-          description: "Could not fetch menus at this time. Please try again later.",
-          variant: "destructive"
-        });
-      } finally {
-        setIsLoadingMenus(false);
+    if (!authLoading) {
+      const fetchPublicMenus = async () => {
+        setIsLoadingMenus(true);
+        try {
+          const menusCollectionRef = collection(db, "menus");
+          const q = query(menusCollectionRef, where("isPublic", "==", true), orderBy("createdAt", "desc"));
+          const querySnapshot = await getDocs(q);
+          const fetchedMenus = querySnapshot.docs.map(docSnap => {
+            const data = docSnap.data();
+            return {
+              id: docSnap.id,
+              ...data,
+              createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+              updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
+            } as Menu;
+          });
+          setMenus(fetchedMenus);
+        } catch (error) {
+          console.error("Error fetching public menus:", error);
+          toast({
+            title: "Error Loading Menus",
+            description: "Could not fetch menus at this time. Please try again later.",
+            variant: "destructive"
+          });
+        } finally {
+          setIsLoadingMenus(false);
         }
+      };
     };
     fetchPublicMenus();
   }, [user, authLoading, router, toast]);
