@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react'; // Explicitly import React
+import React, { useState, useEffect, useMemo } from 'react';
 import { MenuCard } from '@/components/menu-card';
 import type { Menu, CustomerRequest } from '@/types';
 import { useToast } from '@/hooks/use-toast';
@@ -14,18 +14,30 @@ import { collection, query, where, getDocs, orderBy, Timestamp, addDoc, serverTi
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 export default function CustomerMenusPage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const router = useRouter();
+  const { toast } = useToast();
+
   const [menus, setMenus] = useState<Menu[]>([]);
   const [isLoadingMenus, setIsLoadingMenus] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [cuisineFilter, setCuisineFilter] = useState('all');
   const [dietaryFilter, setDietaryFilter] = useState('all');
-  const { toast } = useToast();
+  const [isRequestingMenu, setIsRequestingMenu] = useState<string | null>(null);
+
 
   useEffect(() => {
+    if (authLoading) {
+      return; // Wait for auth state to resolve
+    }
+    if (!user) {
+      router.push('/login?redirect=/customer/menus'); // Redirect if not logged in
+      return;
+    }
+
     const fetchPublicMenus = async () => {
       setIsLoadingMenus(true);
       try {
@@ -39,7 +51,7 @@ export default function CustomerMenusPage() {
             ...data,
             createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
             updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
-          } as Menu
+          } as Menu;
         });
         setMenus(fetchedMenus);
       } catch (error) {
@@ -54,29 +66,27 @@ export default function CustomerMenusPage() {
       }
     };
     fetchPublicMenus();
-  }, [toast]);
+  }, [user, authLoading, router, toast]);
 
   const handleRequestMenu = async (menu: Menu) => {
-    if (!user) {
+    if (!user) { // Double check, though page is protected
       toast({
         title: 'Login Required',
         description: 'Please log in or create an account to request this menu.',
         variant: 'destructive',
       });
-      router.push('/login');
+      router.push('/login?redirect=/customer/menus');
       return;
     }
 
-    setIsLoadingMenus(true); // Indicate loading for this action specifically
+    setIsRequestingMenu(menu.id);
     try {
       const requestsCollectionRef = collection(db, "customerRequests");
-      
-      // Ensure eventDate is a Firestore Timestamp. Placeholder: 7 days from now.
       const futureDate = new Date();
-      futureDate.setDate(futureDate.getDate() + 7);
+      futureDate.setDate(futureDate.getDate() + 7); // Placeholder: 7 days from now
       const eventDateForFirestore = Timestamp.fromDate(futureDate);
 
-      const newRequest: Omit<CustomerRequest, 'id' | 'createdAt' | 'updatedAt'> = {
+      const newRequestData: Omit<CustomerRequest, 'id' | 'createdAt' | 'updatedAt'> = {
         eventType: `Menu Request: ${menu.title}`,
         budget: menu.pricePerHead * (menu.pax || 1),
         cuisinePreference: menu.cuisine,
@@ -87,13 +97,13 @@ export default function CustomerMenusPage() {
         customerId: user.uid,
         requestedMenuId: menu.id,
         requestedMenuTitle: menu.title,
-        respondingChefIds: [menu.chefId], 
+        respondingChefIds: menu.chefId ? [menu.chefId] : [], // Directly assign to the menu's chef
         activeProposal: null,
         declinedChefIds: [],
       };
 
       const docRef = await addDoc(requestsCollectionRef, {
-        ...newRequest,
+        ...newRequestData,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
@@ -112,18 +122,18 @@ export default function CustomerMenusPage() {
         variant: "destructive",
       });
     } finally {
-      setIsLoadingMenus(false);
+      setIsRequestingMenu(null);
     }
   };
 
   const uniqueCuisines = useMemo(() => {
     if (menus.length === 0) return ['all'];
-    return ['all', ...new Set(menus.map(menu => menu.cuisine).filter(Boolean).sort())]
+    return ['all', ...new Set(menus.map(menu => menu.cuisine).filter(Boolean).sort())];
   }, [menus]);
   
   const uniqueDietaryOptions = useMemo(() => {
     if (menus.length === 0) return ['all'];
-    return ['all', ...new Set(menus.flatMap(menu => menu.dietaryInfo || []).filter(Boolean).sort())]
+    return ['all', ...new Set(menus.flatMap(menu => menu.dietaryInfo || []).filter(Boolean).sort())];
   }, [menus]);
 
   const filteredMenus = useMemo(() => {
@@ -141,13 +151,20 @@ export default function CustomerMenusPage() {
     });
   }, [menus, searchTerm, cuisineFilter, dietaryFilter]);
 
+  if (authLoading || (!user && !authLoading)) { // Show loader while auth is resolving or if redirecting
+    return (
+      <div className="flex justify-center items-center h-screen">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto py-12 px-4 sm:px-6 lg:px-8">
       <header className="mb-12 text-center">
         <h1 className="text-4xl font-bold tracking-tight text-foreground sm:text-5xl">Explore Our Chefs' Menus</h1>
         <p className="mt-4 max-w-2xl mx-auto text-lg text-foreground/70">
-          Discover a world of flavors. Browse menus anonymously. Chef details are revealed after a booking is confirmed.
+          Discover a world of flavors. Browse menus where chef details are revealed after a booking is confirmed.
         </p>
       </header>
 
@@ -209,6 +226,9 @@ export default function CustomerMenusPage() {
               menu={menu}
               showChefDetails={false} 
               onRequest={() => handleRequestMenu(menu)}
+              isChefOwner={false} // Explicitly false for customer view
+              // Add a disabled prop for the request button while one is processing
+              // This could be a new prop on MenuCard or handled by disabling the button here
             />
           ))}
         </div>

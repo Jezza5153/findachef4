@@ -1,13 +1,13 @@
 
-'use client'; // Keep as client component if we want any dynamic aspects later, for now, mainly for consistency with prior versions.
+'use client'; 
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Lock, MessagesSquare, ShieldCheck } from 'lucide-react';
+import { Lock, MessagesSquare, ShieldCheck, UserCircle as UserCircleIcon } from 'lucide-react'; // Renamed to avoid conflict
 import Image from 'next/image';
 import Link from 'next/link';
 import type { Testimonial } from '@/types';
-// import { useAuth } from '@/context/AuthContext'; // Not strictly needed if CTAs are static to signup
+import { useAuth } from '@/context/AuthContext'; 
 
 const benefits = [
   {
@@ -52,9 +52,7 @@ const testimonials: Testimonial[] = [
 ];
 
 export default function Home() {
-  // const { user, userProfile } = useAuth();
-  // const isCustomer = userProfile?.role === 'customer';
-  // const customerCtaLink = user && isCustomer ? '/customer/dashboard' : '/login';
+  const { user } = useAuth(); // Get user state for dynamic CTA
 
   return (
     <div className="flex flex-col">
@@ -62,7 +60,7 @@ export default function Home() {
       <section className="relative py-20 md:py-32 bg-gradient-to-br from-primary/10 via-secondary/10 to-accent/10">
         <div className="absolute inset-0">
             <Image
-              src="https://placehold.co/1920x1080.png"
+              src="https://placehold.co/1920x1080.png" 
               alt="Gourmet food platter"
               fill
               className="object-cover opacity-20"
@@ -146,7 +144,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Testimonials Section (Placeholder) */}
+      {/* Testimonials Section */}
       <section className="py-16 md:py-24 bg-background">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center">
@@ -187,7 +185,8 @@ export default function Home() {
           </p>
           <div className="mt-10 flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4">
             <Button asChild size="lg" className="text-lg px-8 py-4 bg-primary hover:bg-primary/90 text-primary-foreground">
-              <Link href="/customer/menus">Explore Menus</Link>
+              {/* Link dynamically: If logged in as customer -> menus, else -> login page */}
+              <Link href={user ? '/customer/menus' : '/login'}>Explore Menus</Link>
             </Button>
             <Button asChild size="lg" variant="outline" className="text-lg px-8 py-4 border-primary text-primary hover:bg-primary/10">
               <Link href="/chef/signup">Join as a Chef</Link>

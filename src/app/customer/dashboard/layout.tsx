@@ -3,10 +3,17 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { DashboardLayout, type NavItem } from '@/components/dashboard-layout';
-import { LayoutDashboard, UserCircle, Send, CalendarCheck2, MessageSquare, Utensils, CalendarSearch } from 'lucide-react';
+// import { DashboardLayout, type NavItem } from '@/components/dashboard-layout'; // Dynamic import
+import { LayoutDashboard, UserCircle, Send, CalendarCheck2, MessageSquare, Utensils, CalendarSearch, Loader2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import type { NavItem } from '@/components/dashboard-layout'; // Import type directly
+import dynamic from 'next/dynamic';
+
+const DashboardLayout = dynamic(() => 
+  import('@/components/dashboard-layout').then(mod => mod.DashboardLayout),
+  { ssr: false, loading: () => <div className="flex h-screen items-center justify-center"><Loader2 className="h-12 w-12 animate-spin text-primary"/> Loading Dashboard...</div> }
+);
 
 const customerNavItems: NavItem[] = [
   { href: '/customer/dashboard', label: 'Overview', icon: <LayoutDashboard />, matchExact: true },
@@ -24,17 +31,19 @@ export default function CustomerDashboardLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
-  const { user, userProfile, loading: authLoading, isCustomer } = useAuth();
+  const { user, loading: authLoading, isCustomer, profileLoading } = useAuth(); // Added profileLoading
   const { toast } = useToast();
-  const [statusChecked, setStatusChecked] = useState(false);
+  
+  const isLoading = authLoading || profileLoading;
 
   useEffect(() => {
-    if (authLoading) {
-      return; // Wait for Firebase auth state to resolve
+    if (isLoading) {
+      return; 
     }
 
     if (!user) {
-      router.push('/login');
+      console.log("CustomerDashboardLayout: No user, redirecting to login.");
+      router.push('/login?redirect=/customer/dashboard');
       return;
     }
 
@@ -44,19 +53,32 @@ export default function CustomerDashboardLayout({
         description: 'This dashboard is for customers.',
         variant: 'destructive',
       });
-      router.push('/login'); // Or perhaps to chef dashboard if role is chef
+      console.log("CustomerDashboardLayout: Not a customer, redirecting to login.");
+      router.push('/login');
       return;
     }
     
-    setStatusChecked(true);
+  }, [user, isLoading, isCustomer, router, toast]);
 
-  }, [user, authLoading, isCustomer, router, toast]);
+  if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" data-ai-hint="loading spinner" />
+        <p className="ml-3 text-lg">Loading Customer Dashboard...</p>
+      </div>
+    );
+  }
 
-  if (authLoading || !statusChecked) {
-    return <div className="flex h-screen items-center justify-center">Loading customer dashboard...</div>;
+  // This check handles the case after loading but before potential redirection effect runs
+  if (!user || !isCustomer) {
+     return (
+      <div className="flex h-screen items-center justify-center">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+        <p className="ml-3 text-lg">Verifying access...</p>
+      </div>
+    );
   }
   
-  // If we reach here, user is authenticated and is a customer
   return (
     <DashboardLayout 
       navItems={customerNavItems}

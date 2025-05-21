@@ -22,9 +22,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { format, addDays, startOfDay } from 'date-fns';
-import { CalendarIcon, FileText, Send, DollarSign, Users, Utensils, Info } from 'lucide-react';
+import { CalendarIcon, FileText, Send, DollarSign, Users, Utensils, Info, Loader2 } from 'lucide-react';
 import type { CustomerRequest } from '@/types';
 import Link from 'next/link';
+import { useAuth } from '@/context/AuthContext';
+import { useRouter } from 'next/navigation';
+import { db } from '@/lib/firebase';
+import { collection, addDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { useEffect, useState } from 'react'; // Added useState for isSubmitting
 
 const requestFormSchema = z.object({
   eventType: z.string().min(3, { message: 'Event type must be at least 3 characters.' }),
@@ -36,12 +41,17 @@ const requestFormSchema = z.object({
       message: 'Event date must be at least 48 hours from now.'
     }),
   notes: z.string().optional(),
+  location: z.string().optional(), // Added location
 });
 
 type RequestFormValues = z.infer<typeof requestFormSchema>;
 
 export default function NewRequestPage() {
+  const { user, loading: authLoading } = useAuth();
+  const router = useRouter();
   const { toast } = useToast();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const form = useForm<RequestFormValues>({
     resolver: zodResolver(requestFormSchema),
     defaultValues: {
@@ -51,23 +61,61 @@ export default function NewRequestPage() {
       pax: 1,
       eventDate: undefined,
       notes: '',
+      location: '',
     },
   });
 
-  const onSubmit = (data: RequestFormValues) => {
-    const newRequest: CustomerRequest = {
-      id: String(Date.now()), // Mock ID
-      ...data,
-      customerId: 'customer123', // Mock customer ID
-    };
-    console.log('New Customer Request:', newRequest);
-    // Simulate API call
-    toast({
-      title: 'Request Submitted Successfully!',
-      description: 'Chefs matching your criteria will be notified. You will receive proposals soon.',
-    });
-    form.reset();
+ useEffect(() => {
+    if (!authLoading && !user) {
+      router.push('/login?redirect=/customer/requests/new');
+    }
+  }, [user, authLoading, router]);
+
+
+  const onSubmit = async (data: RequestFormValues) => {
+    if (!user) {
+      toast({ title: "Authentication Error", description: "Please log in to submit a request.", variant: "destructive" });
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const newRequestData: Omit<CustomerRequest, 'id' | 'createdAt' | 'updatedAt' | 'activeProposal' | 'declinedChefIds' | 'respondingChefIds'> = {
+        ...data,
+        eventDate: Timestamp.fromDate(data.eventDate),
+        customerId: user.uid,
+        status: 'new',
+      };
+
+      const docRef = await addDoc(collection(db, "customerRequests"), {
+        ...newRequestData,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        activeProposal: null,
+        declinedChefIds: [],
+        respondingChefIds: [],
+      });
+
+      toast({
+        title: 'Request Submitted Successfully!',
+        description: 'Chefs matching your criteria will be notified. You can track responses in your messages.',
+      });
+      form.reset();
+      router.push(`/customer/dashboard/messages?requestId=${docRef.id}`);
+    } catch (error) {
+      console.error("Error submitting new request:", error);
+      toast({ title: "Submission Failed", description: "Could not submit your request. Please try again.", variant: "destructive" });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
+
+  if (authLoading || (!user && !authLoading)) {
+    return (
+      <div className="flex justify-center items-center h-screen">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return (
     <div className="container mx-auto max-w-2xl py-12 px-4 sm:px-6 lg:px-8">
@@ -140,6 +188,20 @@ export default function NewRequestPage() {
                   </FormItem>
                 )}
               />
+               <FormField
+                control={form.control}
+                name="location"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="flex items-center"><MapPin className="mr-2 h-4 w-4 text-muted-foreground"/>Event Location (Optional)</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g., My Home in Anytown, Event Venue Name" {...field} />
+                    </FormControl>
+                     <FormDescription>Provide an address or general area.</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
               <FormField
                 control={form.control}
@@ -203,8 +265,9 @@ export default function NewRequestPage() {
                   </FormItem>
                 )}
               />
-              <Button type="submit" className="w-full text-lg py-3" size="lg" disabled={form.formState.isSubmitting}>
-                <Send className="mr-2 h-5 w-5" /> Submit Request
+              <Button type="submit" className="w-full text-lg py-3" size="lg" disabled={isSubmitting}>
+                {isSubmitting ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Send className="mr-2 h-5 w-5" />}
+                 Submit Request
               </Button>
             </form>
           </Form>
@@ -213,5 +276,3 @@ export default function NewRequestPage() {
     </div>
   );
 }
-
-    

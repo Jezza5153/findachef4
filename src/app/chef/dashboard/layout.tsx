@@ -3,14 +3,23 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { DashboardLayout, type NavItem } from '@/components/dashboard-layout';
-import { LayoutDashboard, NotebookText, UserCircle, MessageSquare, CalendarDays, FileText, Users, ShoppingBag, LayoutGrid, ShieldAlert } from 'lucide-react';
+// import { DashboardLayout, type NavItem } from '@/components/dashboard-layout'; // Dynamic import
+import { LayoutDashboard, NotebookText, UserCircle, MessageSquare, CalendarDays, FileText, Users, ShoppingBag, LayoutGrid, ShieldAlert, LifeBuoy, Bell, LogOut, Users2, Combine } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { auth } from '@/lib/firebase';
 import { signOut } from 'firebase/auth';
+import { Loader2 } from 'lucide-react';
+import type { NavItem } from '@/components/dashboard-layout'; // Import type directly
+import dynamic from 'next/dynamic';
+
+const DashboardLayout = dynamic(() => 
+  import('@/components/dashboard-layout').then(mod => mod.DashboardLayout),
+  { ssr: false, loading: () => <div className="flex h-screen items-center justify-center"><Loader2 className="h-12 w-12 animate-spin text-primary"/> Loading Dashboard...</div> }
+);
+
 
 const chefNavItems: NavItem[] = [
   { href: '/chef/dashboard', label: 'Overview', icon: <LayoutDashboard />, matchExact: true },
@@ -20,7 +29,8 @@ const chefNavItems: NavItem[] = [
   { href: '/chef/dashboard/wall', label: 'The Chef\'s Wall', icon: <LayoutGrid /> },
   { href: '/chef/dashboard/menus', label: 'Menus', icon: <NotebookText /> },
   { href: '/chef/dashboard/shopping-list', label: 'Shopping List', icon: <ShoppingBag /> },
-  { href: '/chef/dashboard/chefs', label: 'Chef Directory', icon: <Users /> },
+  { href: '/chef/dashboard/chefs', label: 'Chef Directory', icon: <Users2 /> },
+  { href: '/chef/dashboard/collaborations', label: 'Collaborations', icon: <Combine /> },
   { href: '/chef/dashboard/receipts', label: 'Receipts & Costs', icon: <FileText /> },
 ];
 
@@ -31,17 +41,18 @@ export default function ChefDashboardLayout({
 }) {
   const router = useRouter();
   const { toast } = useToast();
-  const { user, userProfile, loading: authLoading, isChef, isChefApproved } = useAuth();
+  const { user, userProfile, loading: authLoading, isChef, isChefApproved, profileLoading } = useAuth();
   
-  const [statusChecked, setStatusChecked] = useState(false);
+  const isLoading = authLoading || profileLoading;
 
   useEffect(() => {
-    if (authLoading) {
-      return; // Wait for Firebase auth state to resolve
+    if (isLoading) {
+      return; 
     }
 
     if (!user) {
-      router.push('/login');
+      console.log("ChefDashboardLayout: No user, redirecting to login.");
+      router.push('/login?redirect=/chef/dashboard');
       return;
     }
 
@@ -51,26 +62,39 @@ export default function ChefDashboardLayout({
           description: 'You must be logged in as a chef to access this page.',
           variant: 'destructive',
       });
-      router.push('/login'); // Or perhaps to customer dashboard if role is customer
+      console.log("ChefDashboardLayout: Not a chef, redirecting to login.");
+      router.push('/login');
       return;
     }
     
-    // At this point, user is authenticated and is a chef
-    setStatusChecked(true);
+  }, [user, isLoading, isChef, router, toast]);
 
-  }, [user, authLoading, isChef, router, toast]);
-
-  if (authLoading || !statusChecked) {
-    return <div className="flex h-screen items-center justify-center">Loading chef dashboard...</div>;
+  if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" data-ai-hint="loading spinner" />
+        <p className="ml-3 text-lg">Loading Chef Dashboard...</p>
+      </div>
+    );
   }
   
-  if (!isChefApproved && isChef) { // Check if user is a chef but not approved
+  // This check handles the case after loading but before potential redirection effect runs
+  if (!user || !isChef) {
+     return (
+      <div className="flex h-screen items-center justify-center">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+        <p className="ml-3 text-lg">Verifying access...</p>
+      </div>
+    );
+  }
+
+  if (!isChefApproved) { // Check if user is a chef but not approved
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background p-4">
         <Card className="w-full max-w-md text-center shadow-lg">
           <CardHeader>
             <div className="mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-yellow-500/10 text-yellow-600">
-                <ShieldAlert className="h-8 w-8" />
+                <ShieldAlert className="h-8 w-8" data-ai-hint="security shield alert"/>
             </div>
             <CardTitle className="text-2xl">Account Pending Approval</CardTitle>
           </CardHeader>
@@ -83,8 +107,13 @@ export default function ChefDashboardLayout({
               If you have any questions, please contact support.
             </p>
              <Button onClick={async () => {
-                await signOut(auth);
-                // localStorage items for user role etc. will be cleared naturally as AuthContext updates on logout
+                try {
+                  await signOut(auth);
+                  toast({ title: "Logged Out", description: "You have been logged out." });
+                } catch (error) {
+                  console.error("Error signing out:", error);
+                  toast({ title: "Logout Error", description: "Could not log out.", variant: "destructive"});
+                }
                 router.push('/login'); 
              }}>
                 Back to Login
@@ -95,7 +124,6 @@ export default function ChefDashboardLayout({
     );
   }
 
-  // If we reach here, user is an authenticated, chef, and approved
   return (
     <DashboardLayout 
       navItems={chefNavItems}
