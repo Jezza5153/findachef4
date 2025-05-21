@@ -138,6 +138,8 @@ export default function ChefSignupPage() {
 
       // Step 2: Upload profile picture if one is staged
       if (profilePictureFile) {
+        console.log("ChefSignup: Before profile picture upload, checking auth state:");
+        console.log("ChefSignup: auth.currentUser:", auth.currentUser);
         try {
           console.log("ChefSignup: Step 2 - Attempting profile picture upload for UID:", user.uid);
           const fileExt = profilePictureFile.name.split('.').pop() || 'jpg';
@@ -159,6 +161,8 @@ export default function ChefSignupPage() {
 
       // Step 3: Upload resume file
       if (resumeFile) {
+        console.log("ChefSignup: Before resume file upload, checking auth state:");
+        console.log("ChefSignup: auth.currentUser:", auth.currentUser);
         try {
           console.log("ChefSignup: Step 3 - Attempting resume file upload for UID:", user.uid);
           const resumeFileExtension = resumeFile.name.split('.').pop()?.toLowerCase() || 'pdf';
