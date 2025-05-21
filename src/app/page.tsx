@@ -3,7 +3,7 @@
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Lock, MessagesSquare, ShieldCheck, UserCircle as UserCircleIcon } from 'lucide-react'; // Renamed to avoid conflict
+import { Lock, MessagesSquare, ShieldCheck, UserCircle as UserCircleIcon } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import type { Testimonial } from '@/types';
@@ -52,7 +52,9 @@ const testimonials: Testimonial[] = [
 ];
 
 export default function Home() {
-  const { user } = useAuth(); // Get user state for dynamic CTA
+  const { user } = useAuth();
+
+  const customerActionLink = user ? '/customer/dashboard' : '/login';
 
   return (
     <div className="flex flex-col">
@@ -84,7 +86,7 @@ export default function Home() {
               <Link href="/chef/signup">I’m a Chef</Link>
             </Button>
           </div>
-          <p className="mt-6 text-sm">
+          <p className="mt-6 text-sm text-foreground/70">
             Already have an account?{' '}
             <Link href="/login" className="font-semibold text-primary hover:underline">
               Log In
@@ -185,8 +187,7 @@ export default function Home() {
           </p>
           <div className="mt-10 flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4">
             <Button asChild size="lg" className="text-lg px-8 py-4 bg-primary hover:bg-primary/90 text-primary-foreground">
-              {/* Link dynamically: If logged in as customer -> menus, else -> login page */}
-              <Link href={user ? '/customer/menus' : '/login'}>Explore Menus</Link>
+              <Link href={customerActionLink}>Explore Menus</Link>
             </Button>
             <Button asChild size="lg" variant="outline" className="text-lg px-8 py-4 border-primary text-primary hover:bg-primary/10">
               <Link href="/chef/signup">Join as a Chef</Link>
@@ -197,3 +198,5 @@ export default function Home() {
     </div>
   );
 }
+
+    

@@ -202,9 +202,6 @@
       "dynamicIO": false,
       "inlineCss": false,
       "useCache": false,
-      "allowedDevOrigins": [
-        "https://9004-firebase-studio-1747403680894.cluster-ancjwrkgr5dvux4qug5rbzyc2y.cloudworkstations.dev"
-      ],
       "optimizePackageImports": [
         "lucide-react",
         "date-fns",
