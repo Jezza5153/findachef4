@@ -22,8 +22,7 @@ import { useState, useEffect } from 'react';
 import type { CustomerProfile as CustomerProfileType } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
-import { UserCircle, Save, UploadCloud, MapPin, ChefHat, CookingPot, Blender, Microwave, Grill, ShoppingBasket, Trash2, Loader2 } from 'lucide-react';
-import { Home, Thermometer, Coffee, Box } from 'lucide-react'; // Assuming Thermometer, Coffee, Box are suitable proxies
+import { UserCircle, Save, UploadCloud, MapPin, ChefHat, CookingPot, Mixer, Microwave, UtensilsCrossed, ShoppingBasket, Trash2, Loader2, Home, Thermometer, Coffee, Box, Utensils } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -44,9 +43,9 @@ import { updateProfile as updateAuthProfile } from 'firebase/auth';
 const kitchenEquipmentOptions = [
   { value: 'Oven', label: 'Oven', icon: <Home className="mr-2 h-5 w-5" /> },
   { value: 'Stovetop', label: 'Stovetop', icon: <CookingPot className="mr-2 h-5 w-5" /> },
-  { value: 'Microwave', label: 'Microwave', icon: <Microwave className="mr-2 h-5 w-5" /> },
-  { value: 'Mixer', label: 'Mixer/Blender', icon: <Blender className="mr-2 h-5 w-5" /> },
-  { value: 'BBQGrill', label: 'BBQ Grill', icon: <Grill className="mr-2 h-5 w-5" /> },
+  { value: 'Microwave', label: 'Microwave', icon: <Microwave className="mr-2 h-5 w-5" /> }, // Assuming Thermometer, Coffee, Box are suitable proxies
+  { value: 'Mixer', label: 'Mixer/Blender', icon: <Mixer className="mr-2 h-5 w-5" /> },
+  { value: 'BBQGrill', label: 'BBQ Grill', icon: <UtensilsCrossed className="mr-2 h-5 w-5" /> },
   { value: 'StandardPotsPans', label: 'Standard Pots & Pans', icon: <ShoppingBasket className="mr-2 h-5 w-5" /> },
   { value: 'Refrigerator', label: 'Refrigerator', icon: <Thermometer className="mr-2 h-5 w-5" /> },
   { value: 'Freezer', label: 'Freezer', icon: <Box className="mr-2 h-5 w-5" /> },

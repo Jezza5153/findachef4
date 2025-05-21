@@ -1,6 +1,6 @@
 
 'use client';
-
+import { Suspense } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import * as z from 'zod';
@@ -172,8 +172,10 @@ export default function LoginPage() {
   };
 
   return (
+    <Suspense fallback={<div>Loading...</div>}>
     <div className="container mx-auto flex min-h-[calc(100vh-8rem)] items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <Card className="w-full max-w-md shadow-xl">
+
         <CardHeader className="text-center">
           <div className="mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
             <LogIn className="h-8 w-8" />
@@ -239,5 +241,6 @@ export default function LoginPage() {
         </CardContent>
       </Card>
     </div>
+    </Suspense>
   );
 }
