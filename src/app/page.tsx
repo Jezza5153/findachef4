@@ -4,7 +4,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Lock, MessagesSquare, ShieldCheck, UserCircle as UserCircleIcon, ArrowRight } from 'lucide-react';
+import { Lock, MessagesSquare, ShieldCheck, UserCircle as UserCircleIcon, ArrowRight, Search } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import type { Testimonial } from '@/types';
@@ -53,17 +53,13 @@ const testimonials: Testimonial[] = [
 ];
 
 export default function Home() {
-  const { user, userProfile, loading: authLoading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
 
-  let customerExploreLink = "/login"; // Default to login
-  if (!authLoading && user && userProfile) {
-    if (userProfile.role === 'customer') {
-      customerExploreLink = '/customer/dashboard';
-    } else if (userProfile.role === 'chef') {
-      // Chefs might still want to browse customer-facing menus or the wall
-      // For simplicity, let's point them to their dashboard, or a general discovery page
-      customerExploreLink = '/customer/menus'; 
-    }
+  let customerExploreLink = "/login";
+  if (!authLoading && user) {
+    // Assuming userProfile.role would be available via useAuth() if fully loaded
+    // For simplicity, if user is logged in, direct to a common customer starting point
+    customerExploreLink = '/customer/menus'; // Or /customer/dashboard
   }
 
 
@@ -73,7 +69,7 @@ export default function Home() {
       <section className="relative py-20 md:py-32 bg-gradient-to-br from-primary/10 via-secondary/10 to-accent/10">
         <div className="absolute inset-0">
             <Image
-              src="https://placehold.co/1920x1080.png?text=%20" 
+              src="https://placehold.co/1920x1080.png" 
               alt="Gourmet food platter"
               fill
               className="object-cover opacity-20"
@@ -198,7 +194,10 @@ export default function Home() {
           </p>
           <div className="mt-10 flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4">
             <Button asChild size="lg" className="text-lg px-8 py-4 bg-primary hover:bg-primary/90 text-primary-foreground">
-              <Link href={authLoading ? "/login" : (user ? customerExploreLink : "/login")}>Explore Menus</Link>
+              {/* Updated Link Logic based on auth state */}
+              <Link href={!authLoading && user ? customerExploreLink : "/login"}>
+                <Search className="mr-2 h-5 w-5" /> Explore Menus
+              </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className="text-lg px-8 py-4 border-primary text-primary hover:bg-primary/10">
               <Link href="/chef/signup">Join as a Chef</Link>
