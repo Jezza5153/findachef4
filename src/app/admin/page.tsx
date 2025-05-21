@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -12,38 +12,30 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { ShieldAlert, ListChecks, UserCog, FileWarning, UserCheck, FileSearch2, BadgeCheck, MessageCircleWarning, Gavel, Award, MessageSquare, LockKeyhole, CalendarX2, UsersRound, Banknote, PauseCircle, Undo2, ClipboardCheck, FileCheck2, BotMessageSquare, ShieldBan, CreditCard, CalendarCheck2 as CalendarCheckIcon, Download, AlertTriangle, CalendarClock, Loader2, Utensils, CheckCircle, XCircle, Send, Eye } from 'lucide-react';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, orderBy, Timestamp, query, doc, updateDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, orderBy, Timestamp, query, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import type { Menu, CustomerRequest, RequestMessage, AppUserProfileContext, ChefProfile, CustomerProfile, UserProfileBase } from '@/types';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/context/AuthContext'; // Make sure useAuth is imported
+import { useAuth } from '@/context/AuthContext';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import Image from 'next/image';
 
 const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false });
-const DialogContent = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogContent), { ssr: false });
+const DialogContent = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogContent), { 
+  ssr: false, 
+  loading: () => <div className="p-4 text-center"><Loader2 className="h-6 w-6 animate-spin inline-block"/> Loading Dialog...</div> 
+});
 const DialogHeader = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogHeader), { ssr: false });
 const DialogTitle = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogTitle), { ssr: false });
 const DialogFooter = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogFooter), { ssr: false });
 const DialogClose = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogClose), { ssr: false });
 const ShadDialogDescription = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogDescription), { ssr: false });
 
-// For dynamic imports inside this component specifically for RequestDetails and MenuReview
-const RequestDetailsDialogContent = dynamic(() => 
-  import('@/components/ui/dialog').then(mod => mod.DialogContent), 
-  { ssr: false, loading: () => <div className="p-4 text-center"><Loader2 className="h-6 w-6 animate-spin inline-block"/> Loading details...</div> }
-);
-const MenuReviewDialogContent = dynamic(() => 
-  import('@/components/ui/dialog').then(mod => mod.DialogContent), 
-  { ssr: false, loading: () => <div className="p-4 text-center"><Loader2 className="h-6 w-6 animate-spin inline-block"/> Loading menu...</div> }
-);
-
-
-type UserView = AppUserProfileContext; 
+type UserView = AppUserProfileContext;
 
 export default function AdminPage() {
   const { toast } = useToast();
-  const { isAdmin } = useAuth(); // Use auth context to check if user is admin
+  const { isAdmin } = useAuth();
 
   const [allUsers, setAllUsers] = useState<UserView[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
@@ -52,7 +44,7 @@ export default function AdminPage() {
   const [allCustomerRequests, setAllCustomerRequests] = useState<CustomerRequest[]>([]);
   const [isLoadingCustomerRequests, setIsLoadingCustomerRequests] = useState(true);
   
-  const [isProcessingAction, setIsProcessingAction] = useState<string | null>(null); // Stores ID of item being processed
+  const [isProcessingAction, setIsProcessingAction] = useState<string | null>(null);
 
   const [isRequestDetailsDialogOpen, setIsRequestDetailsDialogOpen] = useState(false);
   const [selectedRequestForAdminView, setSelectedRequestForAdminView] = useState<CustomerRequest | null>(null);
@@ -61,11 +53,9 @@ export default function AdminPage() {
   const [adminNotesForRequest, setAdminNotesForRequest] = useState('');
   let messagesUnsubscribe: (() => void) | null = null;
 
-
   const [isMenuReviewDialogOpen, setIsMenuReviewDialogOpen] = useState(false);
   const [selectedMenuForReview, setSelectedMenuForReview] = useState<Menu | null>(null);
   const [adminNotesForMenu, setAdminNotesForMenu] = useState('');
-
 
   useEffect(() => {
     setIsLoadingUsers(true);
@@ -78,7 +68,7 @@ export default function AdminPage() {
           id: docSnap.id,
           ...data,
           createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
-          accountStatus: data.accountStatus || 'active', // Default to active if not set
+          accountStatus: data.accountStatus || 'active',
         } as UserView;
       });
       setAllUsers(fetchedUsers);
@@ -98,7 +88,7 @@ export default function AdminPage() {
         return {
           id: docSnap.id,
           ...data,
-          adminStatus: data.adminStatus || 'pending', // Default to pending
+          adminStatus: data.adminStatus || 'pending',
           createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
           updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
         } as Menu;
@@ -122,7 +112,7 @@ export default function AdminPage() {
           ...data,
           eventDate: data.eventDate instanceof Timestamp ? data.eventDate.toDate() : new Date(data.eventDate as any),
           createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
-          moderationStatus: data.moderationStatus || 'pending_review', // Default
+          moderationStatus: data.moderationStatus || 'pending_review',
         } as CustomerRequest;
       });
       setAllCustomerRequests(fetchedRequests);
@@ -143,11 +133,11 @@ export default function AdminPage() {
         }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toast]); // isAdmin is not a direct dependency for fetching initial data
+  }, [toast]);
 
   const handleApproveUser = async (userId: string) => {
     if (!isAdmin) { toast({ title: "Permission Denied", description: "You do not have permission to perform this action.", variant: "destructive" }); return; }
-    setIsProcessingAction(userId);
+    setIsProcessingAction(`user-approve-${userId}`);
     try {
       const userDocRef = doc(db, "users", userId);
       await updateDoc(userDocRef, { isApproved: true, accountStatus: 'active', updatedAt: serverTimestamp() });
@@ -162,10 +152,10 @@ export default function AdminPage() {
 
   const handleRejectUser = async (userId: string) => {
     if (!isAdmin) { toast({ title: "Permission Denied", description: "You do not have permission to perform this action.", variant: "destructive" }); return; }
-    setIsProcessingAction(userId);
+    setIsProcessingAction(`user-reject-${userId}`);
     try {
       const userDocRef = doc(db, "users", userId);
-      await updateDoc(userDocRef, { isApproved: false, accountStatus: 'active', updatedAt: serverTimestamp() }); // Keeping account active, just not approved as chef
+      await updateDoc(userDocRef, { isApproved: false, accountStatus: 'active', updatedAt: serverTimestamp() }); 
       toast({ title: "Chef Status Updated", description: `Chef status updated to not approved.` });
     } catch (error) {
       console.error("Error updating user approval status:", error);
@@ -181,7 +171,7 @@ export default function AdminPage() {
       toast({ title: "Error", description: "Menu context lost. Please reopen review.", variant: "destructive" });
       return;
     }
-    setIsProcessingAction(menuId);
+    setIsProcessingAction(`menu-approve-${menuId}`);
     try {
       const menuDocRef = doc(db, "menus", menuId);
       await updateDoc(menuDocRef, { adminStatus: 'approved', adminNotes: adminNotesForMenu || '', updatedAt: serverTimestamp() });
@@ -202,7 +192,7 @@ export default function AdminPage() {
       toast({ title: "Error", description: "Menu context lost. Please reopen review.", variant: "destructive" });
       return;
     }
-    setIsProcessingAction(menuId);
+    setIsProcessingAction(`menu-reject-${menuId}`);
     try {
       const menuDocRef = doc(db, "menus", menuId);
       await updateDoc(menuDocRef, { adminStatus: 'rejected', adminNotes: adminNotesForMenu || 'Rejected by admin.', updatedAt: serverTimestamp() });
@@ -221,10 +211,10 @@ export default function AdminPage() {
     setSelectedRequestForAdminView(request);
     setAdminNotesForRequest(request.adminNotes || '');
     setIsLoadingRequestMessages(true);
-    setRequestMessagesForAdminView([]); // Clear previous messages
+    setRequestMessagesForAdminView([]);
     
     if (messagesUnsubscribe) {
-      messagesUnsubscribe(); // Unsubscribe from previous listener if any
+      messagesUnsubscribe();
       messagesUnsubscribe = null;
     }
 
@@ -256,7 +246,7 @@ export default function AdminPage() {
         toast({ title: "Error", description: "Request context lost. Please reopen and try again.", variant: "destructive" });
         return;
     }
-    setIsProcessingAction(requestId);
+    setIsProcessingAction(`request-moderate-${requestId}`);
     try {
       const requestDocRef = doc(db, "customerRequests", requestId);
       await updateDoc(requestDocRef, { 
@@ -297,8 +287,8 @@ export default function AdminPage() {
   
   const getAccountStatusBadgeVariant = (status?: UserProfileBase['accountStatus']) => {
     switch (status) {
-      case 'active': return 'default'; // Using 'default' which is often green-ish or primary
-      case 'warned': return 'secondary'; // Using 'secondary' which is often yellow-ish or gray
+      case 'active': return 'default';
+      case 'warned': return 'secondary';
       case 'suspended': return 'destructive';
       default: return 'outline';
     }
@@ -327,14 +317,14 @@ export default function AdminPage() {
     { name: "Trust Score Override", description: "Monitor and, if necessary, manually override auto-generated chef trust scores based on platform activity, ratings, and warnings.", icon: <ShieldAlert className="mr-2 h-5 w-5 text-yellow-600" /> },
     { name: "View Flagged Resumes (Contact Info, Unsafe Content)", description: "Review resumes, especially those AI-flagged for containing direct contact information or inappropriate content.", icon: <FileSearch2 className="mr-2 h-5 w-5 text-destructive" /> },
   ];
-
+  
   const getChefSubscriptionBadge = (user: UserView) => {
     if (user.role !== 'chef') return <Badge variant="outline" className="text-xs">N/A</Badge>;
     const chefProfile = user as ChefProfile; 
     return chefProfile.isSubscribed ? 
       <Badge variant="default" className="bg-blue-500 hover:bg-blue-600 text-xs">Subscribed</Badge> : 
       <Badge variant="secondary" className="text-xs">Not Subscribed</Badge>;
-  }
+  };
 
   return (
     <div className="container mx-auto py-12 px-4 sm:px-6 lg:px-8">
@@ -441,10 +431,10 @@ export default function AdminPage() {
                                     variant="outline"
                                     size="sm"
                                     onClick={() => handleApproveUser(user.id!)}
-                                    disabled={!isAdmin || isProcessingAction === user.id}
+                                    disabled={!isAdmin || isProcessingAction === `user-approve-${user.id!}`}
                                     className="bg-green-500 hover:bg-green-600 text-white text-xs px-2 py-1"
                                   >
-                                    {isProcessingAction === user.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />}
+                                    {isProcessingAction === `user-approve-${user.id!}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle className="h-3 w-3" />}
                                     <span className="ml-1">Approve</span>
                                   </Button>
                                 </TooltipTrigger>
@@ -456,10 +446,10 @@ export default function AdminPage() {
                                     variant="outline"
                                     size="sm"
                                     onClick={() => handleRejectUser(user.id!)}
-                                    disabled={!isAdmin || isProcessingAction === user.id}
+                                    disabled={!isAdmin || isProcessingAction === `user-reject-${user.id!}`}
                                     className="bg-red-500 hover:bg-red-600 text-white text-xs px-2 py-1"
                                   >
-                                    {isProcessingAction === user.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <XCircle className="h-3 w-3" />}
+                                    {isProcessingAction === `user-reject-${user.id!}` ? <Loader2 className="h-3 w-3 animate-spin" /> : <XCircle className="h-3 w-3" />}
                                     <span className="ml-1">Reject</span>
                                   </Button>
                                 </TooltipTrigger>
@@ -538,8 +528,8 @@ export default function AdminPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                         <Button variant="outline" size="sm" onClick={() => handleOpenMenuReviewDialog(menu)} className="text-xs" disabled={!isAdmin || isProcessingAction === menu.id}>
-                           {isProcessingAction === menu.id && selectedMenuForReview?.id === menu.id ? <Loader2 className="h-3 w-3 animate-spin mr-1"/> : <Eye className="h-3 w-3 mr-1"/>} Review
+                         <Button variant="outline" size="sm" onClick={() => handleOpenMenuReviewDialog(menu)} className="text-xs" disabled={!isAdmin || isProcessingAction === `menu-review-${menu.id}`}>
+                           {isProcessingAction === `menu-review-${menu.id}` && selectedMenuForReview?.id === menu.id ? <Loader2 className="h-3 w-3 animate-spin mr-1"/> : <Eye className="h-3 w-3 mr-1"/>} Review
                          </Button>
                       </TableCell>
                     </TableRow>
@@ -607,8 +597,8 @@ export default function AdminPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <Button variant="outline" size="sm" onClick={() => handleViewRequestDetails(request)} className="text-xs" disabled={!isAdmin || isProcessingAction === request.id}>
-                           {isProcessingAction === request.id && selectedRequestForAdminView?.id === request.id ? <Loader2 className="h-3 w-3 animate-spin mr-1"/> : <Eye className="h-3 w-3 mr-1"/>} View/Moderate
+                        <Button variant="outline" size="sm" onClick={() => handleViewRequestDetails(request)} className="text-xs" disabled={!isAdmin || isProcessingAction === `request-view-${request.id}`}>
+                           {isProcessingAction === `request-view-${request.id}` && selectedRequestForAdminView?.id === request.id ? <Loader2 className="h-3 w-3 animate-spin mr-1"/> : <Eye className="h-3 w-3 mr-1"/>} View/Moderate
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -627,9 +617,9 @@ export default function AdminPage() {
                 messagesUnsubscribe = null;
             }
             setIsRequestDetailsDialogOpen(open);
-            if (!open) setSelectedRequestForAdminView(null); // Clear selected request when dialog closes
+            if (!open) setSelectedRequestForAdminView(null);
         }}>
-          <RequestDetailsDialogContent className="sm:max-w-2xl"> 
+          <DialogContent className="sm:max-w-2xl"> 
             <DialogHeader>
               <DialogTitle>View Customer Request Details - ID: {selectedRequestForAdminView.id.substring(0,8)}...</DialogTitle>
             </DialogHeader>
@@ -683,37 +673,37 @@ export default function AdminPage() {
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button onClick={() => handleModerateRequest(selectedRequestForAdminView.id, 'resolved')} variant="default" disabled={!isAdmin || !!isProcessingAction || selectedRequestForAdminView.moderationStatus === 'resolved'}>
-                      {isProcessingAction === selectedRequestForAdminView.id && selectedRequestForAdminView.moderationStatus === 'resolved' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Mark as Resolved
+                    <Button onClick={() => handleModerateRequest(selectedRequestForAdminView.id, 'resolved')} variant="default" disabled={!isAdmin || isProcessingAction === `request-moderate-${selectedRequestForAdminView.id}` || selectedRequestForAdminView.moderationStatus === 'resolved'}>
+                      {isProcessingAction === `request-moderate-${selectedRequestForAdminView.id}` && selectedRequestForAdminView.moderationStatus === 'resolved' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Mark as Resolved
                     </Button>
                   </TooltipTrigger>
                   {!isAdmin && <TooltipContent><p>Admin privileges required.</p></TooltipContent>}
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button onClick={() => handleModerateRequest(selectedRequestForAdminView.id, 'customer_warned', selectedRequestForAdminView.customerId)} variant="outline" disabled={!isAdmin || !!isProcessingAction || selectedRequestForAdminView.moderationStatus === 'customer_warned'}>
-                      {isProcessingAction === selectedRequestForAdminView.id && selectedRequestForAdminView.moderationStatus === 'customer_warned' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Warn Customer
+                    <Button onClick={() => handleModerateRequest(selectedRequestForAdminView.id, 'customer_warned', selectedRequestForAdminView.customerId)} variant="outline" disabled={!isAdmin || isProcessingAction === `request-moderate-${selectedRequestForAdminView.id}` || selectedRequestForAdminView.moderationStatus === 'customer_warned'}>
+                      {isProcessingAction === `request-moderate-${selectedRequestForAdminView.id}` && selectedRequestForAdminView.moderationStatus === 'customer_warned' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Warn Customer
                     </Button>
                   </TooltipTrigger>
                   {!isAdmin && <TooltipContent><p>Admin privileges required.</p></TooltipContent>}
                 </Tooltip>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button onClick={() => handleModerateRequest(selectedRequestForAdminView.id, 'customer_suspended', selectedRequestForAdminView.customerId)} variant="destructive" disabled={!isAdmin || !!isProcessingAction || selectedRequestForAdminView.moderationStatus === 'customer_suspended'}>
-                      {isProcessingAction === selectedRequestForAdminView.id && selectedRequestForAdminView.moderationStatus === 'customer_suspended' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Suspend Customer
+                    <Button onClick={() => handleModerateRequest(selectedRequestForAdminView.id, 'customer_suspended', selectedRequestForAdminView.customerId)} variant="destructive" disabled={!isAdmin || isProcessingAction === `request-moderate-${selectedRequestForAdminView.id}` || selectedRequestForAdminView.moderationStatus === 'customer_suspended'}>
+                      {isProcessingAction === `request-moderate-${selectedRequestForAdminView.id}` && selectedRequestForAdminView.moderationStatus === 'customer_suspended' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Suspend Customer
                     </Button>
                   </TooltipTrigger>
                   {!isAdmin && <TooltipContent><p>Admin privileges required.</p></TooltipContent>}
                 </Tooltip>
               </TooltipProvider>
             </DialogFooter>
-          </RequestDetailsDialogContent>
+          </DialogContent>
         </Dialog>
       )}
 
       {selectedMenuForReview && isMenuReviewDialogOpen && (
         <Dialog open={isMenuReviewDialogOpen} onOpenChange={setIsMenuReviewDialogOpen}>
-          <MenuReviewDialogContent className="sm:max-w-lg"> 
+          <DialogContent className="sm:max-w-lg"> 
             <DialogHeader>
               <DialogTitle>Review Menu: {selectedMenuForReview.title}</DialogTitle>
               {selectedMenuForReview.imageUrl && (
@@ -752,23 +742,23 @@ export default function AdminPage() {
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button onClick={() => handleApproveMenu(selectedMenuForReview.id)} variant="default" disabled={!isAdmin || !!isProcessingAction || selectedMenuForReview.adminStatus === 'approved'}>
-                      {isProcessingAction === selectedMenuForReview.id && selectedMenuForReview.adminStatus === 'approved' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Approve
+                    <Button onClick={() => handleApproveMenu(selectedMenuForReview.id)} variant="default" disabled={!isAdmin || isProcessingAction === `menu-approve-${selectedMenuForReview.id}` || selectedMenuForReview.adminStatus === 'approved'}>
+                      {isProcessingAction === `menu-approve-${selectedMenuForReview.id}` && selectedMenuForReview.adminStatus === 'approved' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Approve
                     </Button>
                   </TooltipTrigger>
                   {!isAdmin && <TooltipContent><p>Admin privileges required.</p></TooltipContent>}
                 </Tooltip>
                  <Tooltip>
                   <TooltipTrigger asChild>
-                    <Button onClick={() => handleRejectMenu(selectedMenuForReview.id)} variant="destructive" disabled={!isAdmin || !!isProcessingAction || selectedMenuForReview.adminStatus === 'rejected'}>
-                      {isProcessingAction === selectedMenuForReview.id && selectedMenuForReview.adminStatus === 'rejected' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Reject
+                    <Button onClick={() => handleRejectMenu(selectedMenuForReview.id)} variant="destructive" disabled={!isAdmin || isProcessingAction === `menu-reject-${selectedMenuForReview.id}` || selectedMenuForReview.adminStatus === 'rejected'}>
+                      {isProcessingAction === `menu-reject-${selectedMenuForReview.id}` && selectedMenuForReview.adminStatus === 'rejected' ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}Reject
                     </Button>
                   </TooltipTrigger>
                   {!isAdmin && <TooltipContent><p>Admin privileges required.</p></TooltipContent>}
                 </Tooltip>
               </TooltipProvider>
             </DialogFooter>
-          </MenuReviewDialogContent>
+          </DialogContent>
         </Dialog>
       )}
 
@@ -782,4 +772,3 @@ export default function AdminPage() {
     </div>
   );
 }
-    
