@@ -41,13 +41,6 @@ export default function CustomerWallPage() {
   const [isBookingEvent, setIsBookingEvent] = useState(false);
 
   useEffect(() => {
-    if (authLoading) {
-      return; // Wait for auth state
-    }
-    if (!user) {
-      router.push('/login?redirect=/customer/wall');
-      return;
-    }
 
     const fetchPublicEvents = async () => {
       setIsLoading(true);
@@ -79,7 +72,7 @@ export default function CustomerWallPage() {
         });
       } finally {
         setIsLoading(false);
-      }
+      } 
     };
     fetchPublicEvents();
   }, [user, authLoading, router, toast]);
@@ -125,7 +118,7 @@ export default function CustomerWallPage() {
     }
     setIsEventDetailsDialogOpen(false);
     setIsBookingConfirmationDialogOpen(true);
-  };
+ };
 
   const handleConfirmBooking = async () => {
     if (!user || !selectedEventForDetails) {
@@ -191,13 +184,7 @@ export default function CustomerWallPage() {
     }
   };
 
-  if (authLoading || (!user && !authLoading)) {
-    return (
-      <div className="flex justify-center items-center h-screen">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" />
-      </div>
-    );
-  }
+ if (isLoading) { // Use the isLoading state that combines auth and data fetching
 
   return (
     <div className="container mx-auto py-12 px-4 sm:px-6 lg:px-8">

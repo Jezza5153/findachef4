@@ -2,7 +2,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
 // import { DashboardLayout, type NavItem } from '@/components/dashboard-layout'; // Dynamic import
 import { LayoutDashboard, UserCircle, Send, CalendarCheck2, MessageSquare, Utensils, CalendarSearch, Loader2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
@@ -15,6 +14,7 @@ const DashboardLayout = dynamic(() =>
   { ssr: false, loading: () => <div className="flex h-screen items-center justify-center"><Loader2 className="h-12 w-12 animate-spin text-primary"/> Loading Dashboard...</div> }
 );
 
+// Reviewed customerNavItems - links to /customer/menus and /customer/wall are correct and these pages do not have the dashboard sidebar by design.
 const customerNavItems: NavItem[] = [
   { href: '/customer/dashboard', label: 'Overview', icon: <LayoutDashboard />, matchExact: true },
   { href: '/customer/dashboard/profile', label: 'My Profile', icon: <UserCircle /> },
@@ -30,7 +30,6 @@ export default function CustomerDashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const router = useRouter();
   const { user, loading: authLoading, isCustomer, profileLoading } = useAuth(); // Added profileLoading
   const { toast } = useToast();
   
@@ -43,7 +42,7 @@ export default function CustomerDashboardLayout({
 
     if (!user) {
       console.log("CustomerDashboardLayout: No user, redirecting to login.");
-      router.push('/login?redirect=/customer/dashboard');
+      window.location.href = '/login?redirect=/customer/dashboard'; // Use window.location for full page reload and correct redirection
       return;
     }
 
@@ -53,12 +52,12 @@ export default function CustomerDashboardLayout({
         description: 'This dashboard is for customers.',
         variant: 'destructive',
       });
-      console.log("CustomerDashboardLayout: Not a customer, redirecting to login.");
-      router.push('/login');
+      console.log("CustomerDashboardLayout: User exists but is not a customer, redirecting to login.");
+      window.location.href = '/login'; // Use window.location for full page reload
       return;
     }
     
-  }, [user, isLoading, isCustomer, router, toast]);
+  }, [user, isLoading, isCustomer, toast]);
 
   if (isLoading) {
     return (

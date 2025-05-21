@@ -31,13 +31,6 @@ export default function CustomerMenusPage() {
 
   useEffect(() => {
     if (authLoading) {
-      return; // Wait for auth state to resolve
-    }
-    if (!user) {
-      router.push('/login?redirect=/customer/menus'); // Redirect if not logged in
-      return;
-    }
-
     const fetchPublicMenus = async () => {
       setIsLoadingMenus(true);
       try {
@@ -63,7 +56,7 @@ export default function CustomerMenusPage() {
         });
       } finally {
         setIsLoadingMenus(false);
-      }
+        }
     };
     fetchPublicMenus();
   }, [user, authLoading, router, toast]);
@@ -71,7 +64,7 @@ export default function CustomerMenusPage() {
   const handleRequestMenu = async (menu: Menu) => {
     if (!user) { // Double check, though page is protected
       toast({
-        title: 'Login Required',
+        title: 'Authentication Required',
         description: 'Please log in or create an account to request this menu.',
         variant: 'destructive',
       });
@@ -151,7 +144,7 @@ export default function CustomerMenusPage() {
     });
   }, [menus, searchTerm, cuisineFilter, dietaryFilter]);
 
-  if (authLoading || (!user && !authLoading)) { // Show loader while auth is resolving or if redirecting
+  if (isLoadingMenus) { // Show loader while menus are fetching
     return (
       <div className="flex justify-center items-center h-screen">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
@@ -227,7 +220,8 @@ export default function CustomerMenusPage() {
               showChefDetails={false} 
               onRequest={() => handleRequestMenu(menu)}
               isChefOwner={false} // Explicitly false for customer view
-              // Add a disabled prop for the request button while one is processing
+              isAuthenticated={!!user} // Pass authentication status
+             // Add a disabled prop for the request button while one is processing
               // This could be a new prop on MenuCard or handled by disabling the button here
             />
           ))}

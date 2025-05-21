@@ -23,7 +23,7 @@ import Link from 'next/link';
 import { createUserWithEmailAndPassword, updateProfile as updateAuthProfile } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase';
 import { doc, setDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
-import { useRouter } from 'next/navigation';
+import { useRouter, redirect } from 'next/navigation';
 import { useState } from 'react';
 import type { CustomerProfile } from '@/types';
 
@@ -63,43 +63,55 @@ export default function CustomerSignupPage() {
     console.log("CustomerSignup: Starting signup process for email:", formData.email);
 
     try {
-      console.log("CustomerSignup: Attempting to create Firebase Auth user...");
-      const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
-      const user = userCredential.user;
-      console.log("CustomerSignup: Firebase Auth user created successfully. UID:", user.uid);
+      let user;
+      try {
+ console.log("CustomerSignup: Attempting to create Firebase Auth user...");
+ const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+        user = userCredential.user;
+ console.log("CustomerSignup: Firebase Auth user created successfully. UID:", user.uid);
+      } catch (authError: any) {
+ console.error("CustomerSignup: Error creating Firebase Auth user:", authError);
+        let authErrorMessage = 'Failed to create authentication account.';
+        if (authError.code === 'auth/email-already-in-use') {
+ authErrorMessage = 'This email address is already in use. Please log in or use a different email.';
+        } else if (authError.code === 'auth/weak-password') {
+ authErrorMessage = 'The password is too weak. Please choose a stronger password.';
+        } else if (authError.message) {
+ authErrorMessage = authError.message;
+        }
+ toast({ title: "Authentication Failed", description: authErrorMessage, variant: "destructive", duration: 7000 });
+        throw authError; // Re-throw the authentication error
+      }
 
       console.log("CustomerSignup: Updating Firebase Auth profile (displayName) for UID:", user.uid);
       try {
         await updateAuthProfile(user, { displayName: formData.name });
         console.log("CustomerSignup: Firebase Auth profile updated.");
       } catch (authProfileError) {
+ // Log a warning but don't necessarily fail the entire signup if displayName update fails
         console.warn("CustomerSignup: Error updating Firebase Auth profile (non-critical):", authProfileError);
       }
-      
+
       const userProfileData: CustomerProfile = {
         id: user.uid,
         email: user.email!,
         name: formData.name,
-        role: 'customer', // Explicitly set role
-        accountStatus: 'active', // Default account status
+ role: 'customer', // Explicitly set role to 'customer'
+ accountStatus: 'active', // Default account status
         createdAt: serverTimestamp() as Timestamp,
         updatedAt: serverTimestamp() as Timestamp,
-        profilePictureUrl: user.photoURL || '', 
-        phone: '',
-        kitchenEquipment: [],
-        addressDetails: '',
-        // Initialize other optional customer fields if needed
+ profilePictureUrl: user.photoURL || '',
       };
-      
-      console.log("CustomerSignup: Saving customer profile to Firestore with role:", userProfileData.role, "for UID:", user.uid);
+
+      console.log("CustomerSignup: Attempting to save customer profile to Firestore for UID:", user.uid);
       try {
         await setDoc(doc(db, "users", user.uid), userProfileData);
         console.log("CustomerSignup: Firestore document created successfully for user:", user.uid);
       } catch (firestoreError: any) {
         console.error("CustomerSignup: Error saving profile to Firestore:", firestoreError);
-        let firestoreErrorMessage = "Could not save profile data to database.";
+        let firestoreErrorMessage = "Failed to save profile data to database.";
         if (firestoreError.code === 'permission-denied') {
-            firestoreErrorMessage = "Database permission denied. Check Firestore security rules for creating user profiles.";
+ firestoreErrorMessage = "Database permission denied. Check Firestore security rules for creating user profiles.";
         }
         toast({ title: "Profile Save Failed", description: firestoreErrorMessage, variant: "destructive", duration: 7000 });
         throw firestoreError; // Re-throw
@@ -111,19 +123,12 @@ export default function CustomerSignupPage() {
         duration: 5000,
       });
       
-      router.push('/login'); 
+ router.push('/login');
     } catch (error: any) {
+ // This catch block will handle errors from createUserWithEmailAndPassword or setDoc
       console.error('CustomerSignup: Overall signup error for email', formData.email, ':', error);
       let errorMessage = 'Failed to create account. Please try again.';
-      if (error.code === 'auth/email-already-in-use') {
-        errorMessage = 'This email address is already in use. Please log in or use a different email.';
-      } else if (error.code === 'auth/weak-password') {
-        errorMessage = 'The password is too weak. Please choose a stronger password.';
-      } else if (error.message && (error.message.includes("permission denied") || error.code === 'permission-denied')) {
-        errorMessage = "Database operation failed due to permissions. Please check security rules.";
-      } else if (error.code && error.message) { 
-        errorMessage = `An error occurred: ${error.message} (Code: ${error.code})`;
-      } else if (error.message) {
+      if (error.message) { // Catch any specific error message from thrown errors
         errorMessage = error.message;
       }
       toast({
