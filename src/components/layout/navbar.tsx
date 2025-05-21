@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Logo } from '@/components/shared/logo';
-import { Menu, X, LogOut, UserCircle } from 'lucide-react';
+import { Menu, X, LogOut, UserCircle, LayoutDashboard } from 'lucide-react'; // Added LayoutDashboard
 import { useState, useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
@@ -11,6 +11,7 @@ import { signOut as firebaseSignOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { SidebarTrigger } from '@/components/ui/sidebar'; // Import SidebarTrigger for mobile
 
 const baseNavLinks = [
   { href: '/', label: 'Home' },
@@ -23,7 +24,7 @@ export function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
   const { toast } = useToast();
-  const { user, userProfile, loading: authLoading } = useAuth();
+  const { user, userProfile, loading: authLoading, isAdmin } = useAuth();
 
   useEffect(() => {
     setIsMobileMenuOpen(false);
@@ -36,7 +37,7 @@ export function Navbar() {
         title: 'Logged Out',
         description: 'You have been successfully logged out.',
       });
-      router.push('/login'); // Redirect to login after logout
+      router.push('/login');
     } catch (error) {
       console.error("Logout error:", error);
       toast({
@@ -47,20 +48,22 @@ export function Navbar() {
     }
   };
 
-  const dashboardLink = userProfile?.role === 'chef' ? '/chef/dashboard' 
-                      : userProfile?.role === 'customer' ? '/customer/dashboard'
-                      : userProfile?.role === 'admin' ? '/admin'
-                      : '/login'; // Fallback, should not happen if user is logged in with profile
+  const getDashboardLink = () => {
+    if (isAdmin) return '/admin';
+    if (userProfile?.role === 'chef') return '/chef/dashboard';
+    if (userProfile?.role === 'customer') return '/customer/dashboard';
+    return '/login'; // Fallback if role isn't determined yet or no profile
+  };
 
   const getNavLinks = () => {
-    if (authLoading) return []; // Or a skeleton UI for links
+    if (authLoading) return [];
+    
+    let links = [...baseNavLinks];
     if (user && userProfile) {
-      return [
-        ...baseNavLinks.filter(link => link.href !== '/chef/signup'), // Hide "Become a Chef" if logged in
-        { href: dashboardLink, label: 'My Dashboard' },
-      ];
+      links = links.filter(link => link.href !== '/chef/signup'); // Hide "Become a Chef"
+      links.push({ href: getDashboardLink(), label: 'My Dashboard' });
     }
-    return baseNavLinks;
+    return links;
   };
 
   const currentNavLinks = getNavLinks();
@@ -69,29 +72,44 @@ export function Navbar() {
     <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container mx-auto flex h-16 max-w-screen-2xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <Logo />
+        
         {/* Desktop Navigation */}
         <nav className="hidden md:flex items-center space-x-6 text-sm font-medium">
-          {currentNavLinks.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className={`transition-colors hover:text-primary ${
-                pathname === link.href ? 'text-primary font-semibold' : 'text-foreground/70'
-              }`}
-            >
-              {link.label}
-            </Link>
-          ))}
+          {currentNavLinks.map((link) => {
+            // Don't show "My Dashboard" as a separate link here if user is logged in,
+            // as it's handled by the avatar/logout section.
+            if (link.label === 'My Dashboard' && user) {
+              return null;
+            }
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={`transition-colors hover:text-primary ${
+                  pathname === link.href ? 'text-primary font-semibold' : 'text-foreground/70'
+                }`}
+              >
+                {link.label}
+              </Link>
+            );
+          })}
+        </nav>
+
+        {/* Desktop Auth Section */}
+        <div className="hidden md:flex items-center space-x-3">
           {authLoading ? (
-            <Button variant="ghost" disabled>Loading...</Button>
+            <Button variant="ghost" disabled size="sm">Loading...</Button>
           ) : user ? (
             <>
-              <Link href={dashboardLink}>
-                <Avatar className="h-8 w-8 cursor-pointer">
-                  <AvatarImage src={userProfile?.profilePictureUrl || user.photoURL || undefined} alt={userProfile?.name || user.displayName || 'User'} data-ai-hint="person avatar" />
-                  <AvatarFallback>{(userProfile?.name || user.displayName || 'U').charAt(0).toUpperCase()}</AvatarFallback>
-                </Avatar>
-              </Link>
+              <Button asChild variant="ghost" size="sm">
+                <Link href={getDashboardLink()}>
+                  <LayoutDashboard className="mr-2 h-4 w-4" /> My Dashboard
+                </Link>
+              </Button>
+              <Avatar className="h-8 w-8 cursor-pointer">
+                <AvatarImage src={userProfile?.profilePictureUrl || user.photoURL || undefined} alt={userProfile?.name || user.displayName || 'User'} data-ai-hint="person avatar" />
+                <AvatarFallback>{(userProfile?.name || user.displayName || 'U').charAt(0).toUpperCase()}</AvatarFallback>
+              </Avatar>
               <Button variant="outline" size="sm" onClick={handleLogout}>
                 <LogOut className="mr-2 h-4 w-4" /> Logout
               </Button>
@@ -101,7 +119,8 @@ export function Navbar() {
               <Link href="/login">Login</Link>
             </Button>
           )}
-        </nav>
+        </div>
+
         {/* Mobile Menu Trigger */}
         <div className="md:hidden">
           <Button
@@ -114,30 +133,36 @@ export function Navbar() {
           </Button>
         </div>
       </div>
+
       {/* Mobile Menu */}
       {isMobileMenuOpen && (
-        <div className="md:hidden border-t border-border/40 bg-background py-4">
+        <div className="md:hidden border-t border-border/40 bg-background py-4 absolute w-full shadow-lg">
           <nav className="container mx-auto flex flex-col space-y-2 px-4 sm:px-6 lg:px-8">
             {currentNavLinks.map((link) => (
               <Link
                 key={link.href}
                 href={link.href}
-                className={`block py-2 text-sm transition-colors hover:text-primary ${
+                className={`block py-2 text-base transition-colors hover:text-primary ${
                   pathname === link.href ? 'text-primary font-semibold' : 'text-foreground/70'
                 }`}
+                onClick={() => setIsMobileMenuOpen(false)} // Close menu on link click
               >
                 {link.label}
               </Link>
             ))}
+            <hr className="my-2 border-border/40" />
             {authLoading ? (
-              <Button variant="ghost" disabled className="w-full justify-start py-2 text-sm">Loading...</Button>
+              <Button variant="ghost" disabled className="w-full justify-start py-2 text-base">Loading...</Button>
             ) : user ? (
-              <Button variant="outline" onClick={handleLogout} className="w-full justify-start py-2 text-sm">
-                <LogOut className="mr-2 h-4 w-4" /> Logout
-              </Button>
+              <>
+                {/* "My Dashboard" is already in currentNavLinks if user is logged in */}
+                <Button variant="outline" onClick={() => { handleLogout(); setIsMobileMenuOpen(false); }} className="w-full justify-start py-2 text-base">
+                  <LogOut className="mr-2 h-4 w-4" /> Logout
+                </Button>
+              </>
             ) : (
-              <Button asChild variant="default" className="w-full">
-                <Link href="/login">Login</Link>
+              <Button asChild variant="default" className="w-full text-base">
+                <Link href="/login" onClick={() => setIsMobileMenuOpen(false)}>Login</Link>
               </Button>
             )}
           </nav>

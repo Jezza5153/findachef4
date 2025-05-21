@@ -11,17 +11,17 @@ import { useAuth } from '@/context/AuthContext';
 
 const benefits = [
   {
-    icon: <ShieldCheck className="h-10 w-10 text-primary" />,
+    icon: <ShieldCheck className="h-10 w-10 text-primary" data-ai-hint="security shield" />,
     title: 'Verified Chefs',
     description: 'Access a curated network of professional chefs with verified credentials and experience.',
   },
   {
-    icon: <MessagesSquare className="h-10 w-10 text-primary" />,
+    icon: <MessagesSquare className="h-10 w-10 text-primary" data-ai-hint="chat messages" />,
     title: 'In-Platform Messaging & Booking',
     description: 'Seamlessly communicate with chefs and book services directly through our secure platform.',
   },
   {
-    icon: <Lock className="h-10 w-10 text-primary" />,
+    icon: <Lock className="h-10 w-10 text-primary" data-ai-hint="secure lock" />,
     title: 'Protected Payments & Trust Score',
     description: 'Enjoy peace of mind with our secure payment system and transparent trust indicators.',
   },
@@ -52,9 +52,10 @@ const testimonials: Testimonial[] = [
 ];
 
 export default function Home() {
-  const { user } = useAuth();
+  const { user, userProfile } = useAuth();
 
-  const customerActionLink = user ? '/customer/dashboard' : '/login';
+  const customerExploreLink = user ? (userProfile?.role === 'customer' ? '/customer/dashboard/menus' : (userProfile?.role === 'chef' ? '/customer/menus' : '/login')) : '/login';
+
 
   return (
     <div className="flex flex-col">
@@ -108,7 +109,7 @@ export default function Home() {
             {benefits.map((benefit) => (
               <Card key={benefit.title} className="text-center shadow-lg hover:shadow-xl transition-shadow duration-300">
                 <CardHeader className="items-center">
-                  {benefit.icon}
+                  {React.cloneElement(benefit.icon, { 'data-ai-hint': benefit.title.toLowerCase().replace(/\s+/g, ' ') })}
                   <CardTitle className="mt-4 text-xl font-semibold">{benefit.title}</CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -128,17 +129,17 @@ export default function Home() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
             <div className="flex flex-col items-center text-center">
-              <div className="bg-primary text-primary-foreground rounded-full p-4 mb-4 text-2xl font-bold w-16 h-16 flex items-center justify-center">1</div>
+              <div className="bg-primary text-primary-foreground rounded-full p-4 mb-4 text-2xl font-bold w-16 h-16 flex items-center justify-center" data-ai-hint="number one">1</div>
               <h3 className="text-xl font-semibold mb-2">Discover & Connect</h3>
               <p className="text-foreground/70">Browse chef profiles and menus, or post your event request. Chefs can showcase their talents and find new clients.</p>
             </div>
             <div className="flex flex-col items-center text-center">
-              <div className="bg-primary text-primary-foreground rounded-full p-4 mb-4 text-2xl font-bold w-16 h-16 flex items-center justify-center">2</div>
+              <div className="bg-primary text-primary-foreground rounded-full p-4 mb-4 text-2xl font-bold w-16 h-16 flex items-center justify-center" data-ai-hint="number two">2</div>
               <h3 className="text-xl font-semibold mb-2">Collaborate & Plan</h3>
               <p className="text-foreground/70">Use our secure messaging to discuss details, customize menus, and finalize arrangements with ease.</p>
             </div>
             <div className="flex flex-col items-center text-center">
-              <div className="bg-primary text-primary-foreground rounded-full p-4 mb-4 text-2xl font-bold w-16 h-16 flex items-center justify-center">3</div>
+              <div className="bg-primary text-primary-foreground rounded-full p-4 mb-4 text-2xl font-bold w-16 h-16 flex items-center justify-center" data-ai-hint="number three">3</div>
               <h3 className="text-xl font-semibold mb-2">Book & Enjoy</h3>
               <p className="text-foreground/70">Confirm bookings through our secure platform. Relax and savor an unforgettable culinary experience.</p>
             </div>
@@ -187,7 +188,7 @@ export default function Home() {
           </p>
           <div className="mt-10 flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4">
             <Button asChild size="lg" className="text-lg px-8 py-4 bg-primary hover:bg-primary/90 text-primary-foreground">
-              <Link href={customerActionLink}>Explore Menus</Link>
+              <Link href={customerExploreLink}>Explore Menus</Link>
             </Button>
             <Button asChild size="lg" variant="outline" className="text-lg px-8 py-4 border-primary text-primary hover:bg-primary/10">
               <Link href="/chef/signup">Join as a Chef</Link>
@@ -198,5 +199,3 @@ export default function Home() {
     </div>
   );
 }
-
-    
