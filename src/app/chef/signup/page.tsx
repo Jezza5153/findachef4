@@ -18,7 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { ResumeUploadForm } from '@/components/resume';
+import { ResumeUploadForm } from '@/components/resume-upload-form';
 import { useState, type ChangeEvent } from 'react';
 import type { ParseResumeOutput, ChefProfile } from '@/types';
 import { useToast } from '@/hooks/use-toast';

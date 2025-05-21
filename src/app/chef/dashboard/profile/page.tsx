@@ -14,10 +14,10 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
-import { Input } from '@/components/ui/input';
+import { Input } from '@/components/ui/input'; // Changed Mixer to Blender
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
-import { ResumeUploadForm } from '@/components/resume';
+import { ResumeUploadForm } from '@/components/resume-upload-form';
 import { useState, useEffect } from 'react';
 import type { ParseResumeOutput, ChefProfile as ChefProfileType } from '@/types';
 import { useToast } from '@/hooks/use-toast';
