@@ -23,7 +23,7 @@ import type { CustomerProfile as CustomerProfileType } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
 import { UserCircle, Save, UploadCloud, MapPin, ChefHat, CookingPot, Blender, Microwave, UtensilsCrossed, ShoppingBasket, Trash2, Loader2, Home, Thermometer, Coffee, Box, Utensils } from 'lucide-react'; // Changed Mixer to Blender
-import {
+import { 
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
