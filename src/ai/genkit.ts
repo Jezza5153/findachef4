@@ -1,5 +1,6 @@
 
 import {genkit} from 'genkit';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import {googleAI} from '@genkit-ai/googleai';
 
 // This console.log will appear in your server terminal when Genkit initializes,
@@ -21,3 +22,23 @@ export const ai = genkit({
   // We've set the model in flows directly, but a default can be set here too.
   model: 'googleai/gemini-pro', // Example default model
 });
+
+// Temporary function to list available models for debugging
+async function listAvailableModels() {
+  if (!process.env.GOOGLE_API_KEY) {
+    console.warn("GOOGLE_API_KEY not set. Cannot list available models.");
+    return;
+  }
+  const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+  try {
+    const models = await genAI.listModels();
+    console.log('\nAvailable models and their supported methods:');
+    for (const model of models.models) {
+      console.log(`- Name: ${model.name}, Supported Methods: ${model.supportedGenerationMethods.join(', ')}`);
+    }
+  } catch (error) {
+    console.error('Error listing models:', error);
+  }
+}
+
+listAvailableModels();
