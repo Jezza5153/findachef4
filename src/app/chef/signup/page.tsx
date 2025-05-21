@@ -28,7 +28,7 @@ import Link from 'next/link';
 import { createUserWithEmailAndPassword, updateProfile as updateAuthProfile } from 'firebase/auth';
 import { auth, storage, db } from '@/lib/firebase';
 import { ref as storageRef, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 
 const chefSignupSchema = z.object({
@@ -78,8 +78,9 @@ export default function ChefSignupPage() {
   });
 
   const handleResumeParsed = (data: { parsedData: ParseResumeOutput; file: File }) => {
+    console.log("ChefSignup: Resume parsed, data received:", data.parsedData);
     setResumeParsedData(data.parsedData);
-    setResumeFile(data.file); 
+    setResumeFile(data.file);
     setIsResumeUploadedAndParsed(true);
     if (data.parsedData.experience && form.getValues('bio') === '') {
         form.setValue('bio', data.parsedData.experience.substring(0,500), { shouldValidate: true });
@@ -117,41 +118,64 @@ export default function ChefSignupPage() {
     }
     
     setIsLoading(true);
-    console.log("ChefSignup: Starting signup process for:", data.email);
+    console.log("ChefSignup: Starting signup process for email:", data.email);
+    let user; // Declare user here to access in finally if needed for cleanup on specific errors
+
     try {
       console.log("ChefSignup: Attempting to create Firebase Auth user...");
       const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password);
-      const user = userCredential.user;
+      user = userCredential.user;
       console.log("ChefSignup: Firebase Auth user created successfully. UID:", user.uid);
 
       let profilePictureUrlToSave = '';
       let resumeFileUrlToSave = '';
 
+      // Upload profile picture if provided
       if (profilePictureFile) {
-        console.log("ChefSignup: Uploading profile picture...");
+        console.log("ChefSignup: Uploading profile picture for UID:", user.uid);
         const fileExt = profilePictureFile.name.split('.').pop();
-        const profilePicRefPath = `users/${user.uid}/profilePicture.${fileExt}`;
-        const profilePicStorageRefInstance = storageRef(storage, profilePicRefPath);
+        const profilePicPath = `users/${user.uid}/profilePicture.${fileExt}`;
+        console.log("ChefSignup: Profile picture path:", profilePicPath);
+        const profilePicStorageRefInstance = storageRef(storage, profilePicPath);
         
-        const uploadTaskSnapshot = await uploadBytesResumable(profilePicStorageRefInstance, profilePictureFile);
-        profilePictureUrlToSave = await getDownloadURL(uploadTaskSnapshot.ref);
-        console.log("ChefSignup: Profile picture uploaded:", profilePictureUrlToSave);
+        try {
+            const uploadTaskSnapshot = await uploadBytesResumable(profilePicStorageRefInstance, profilePictureFile);
+            profilePictureUrlToSave = await getDownloadURL(uploadTaskSnapshot.ref);
+            console.log("ChefSignup: Profile picture uploaded successfully:", profilePictureUrlToSave);
+        } catch (storageError) {
+            console.error("ChefSignup: Profile picture upload error (storage/unauthorized possible):", storageError);
+            toast({ title: "Profile Picture Upload Failed", description: "Could not upload profile picture. Please check storage rules or try again.", variant: "destructive" });
+            // Decide if you want to proceed without profile pic or halt signup
+        }
       }
       
-      console.log("ChefSignup: Uploading resume file...");
+      // Upload resume file
+      console.log("ChefSignup: Uploading resume file for UID:", user.uid);
       const resumeFileExtension = resumeFile.name.split('.').pop() || 'pdf';
       const resumeStorageRefPath = `users/${user.uid}/resume.${resumeFileExtension}`;
+      console.log("ChefSignup: Resume path:", resumeStorageRefPath);
       const resumeStorageRefInstance = storageRef(storage, resumeStorageRefPath);
-      const resumeUploadTask = await uploadBytesResumable(resumeStorageRefInstance, resumeFile);
-      resumeFileUrlToSave = await getDownloadURL(resumeUploadTask.ref);
-      console.log("ChefSignup: Resume uploaded:", resumeFileUrlToSave);
+      try {
+        const resumeUploadTask = await uploadBytesResumable(resumeStorageRefInstance, resumeFile);
+        resumeFileUrlToSave = await getDownloadURL(resumeUploadTask.ref);
+        console.log("ChefSignup: Resume uploaded successfully:", resumeFileUrlToSave);
+      } catch (storageError) {
+        console.error("ChefSignup: Resume upload error:", storageError);
+        toast({ title: "Resume Upload Failed", description: "Could not upload resume file. Please check storage rules or try again.", variant: "destructive" });
+        // Decide if this is a critical failure
+      }
       
-      console.log("ChefSignup: Updating Firebase Auth profile (displayName, photoURL)...");
-      await updateAuthProfile(user, { 
-        displayName: data.name, 
-        photoURL: profilePictureUrlToSave || null 
-      });
-      console.log("ChefSignup: Firebase Auth profile updated.");
+      console.log("ChefSignup: Updating Firebase Auth profile (displayName, photoURL) for UID:", user.uid);
+      try {
+        await updateAuthProfile(user, { 
+          displayName: data.name, 
+          photoURL: profilePictureUrlToSave || null 
+        });
+        console.log("ChefSignup: Firebase Auth profile updated.");
+      } catch (authProfileError) {
+        console.error("ChefSignup: Error updating Firebase Auth profile:", authProfileError);
+        // Non-critical for signup completion, but log it.
+      }
 
       const userProfileData: ChefProfile = {
         id: user.uid,
@@ -165,7 +189,7 @@ export default function ChefSignupPage() {
         education: resumeParsedData.education || "",
         profilePictureUrl: profilePictureUrlToSave || '',
         resumeFileUrl: resumeFileUrlToSave || '',
-        role: 'chef',
+        role: 'chef', // Explicitly set role
         accountStatus: 'active',
         isApproved: false, 
         isSubscribed: false, 
@@ -177,17 +201,28 @@ export default function ChefSignupPage() {
         incomingCollaborationRequests: [],
         stripeAccountId: '', 
         stripeOnboardingComplete: false, 
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+        createdAt: serverTimestamp() as Timestamp,
+        updatedAt: serverTimestamp() as Timestamp,
       };
       
-      console.log("ChefSignup: Preparing to save chef profile to Firestore for UID:", user.uid, userProfileData);
-      await setDoc(doc(db, "users", user.uid), userProfileData);
-      console.log("ChefSignup: Firestore document created successfully for user:", user.uid);
+      console.log("ChefSignup: Saving chef profile to Firestore with role:", userProfileData.role, "for UID:", user.uid);
+      try {
+        await setDoc(doc(db, "users", user.uid), userProfileData);
+        console.log("ChefSignup: Firestore document created successfully for user:", user.uid);
+      } catch (firestoreError: any) {
+        console.error("ChefSignup: Error saving profile to Firestore:", firestoreError);
+        let firestoreErrorMessage = "Could not save profile data to database.";
+        if (firestoreError.code === 'permission-denied') {
+            firestoreErrorMessage = "Database permission denied. Please check Firestore security rules for creating user profiles.";
+        }
+        toast({ title: "Profile Save Failed", description: firestoreErrorMessage, variant: "destructive", duration: 7000 });
+        // Potentially delete the Auth user if Firestore save fails to avoid orphaned Auth account? This is complex.
+        throw firestoreError; // Re-throw to be caught by outer catch block
+      }
       
       toast({
         title: 'Signup Successful!',
-        description: 'Your chef account has been created. It requires admin approval before full access. You can now log in.',
+        description: 'Your chef account has been created. It requires admin approval before full access. You will be redirected to login.',
         duration: 8000,
       });
       
@@ -197,17 +232,21 @@ export default function ChefSignupPage() {
       setIsResumeUploadedAndParsed(false);
       setProfilePictureFile(null);
       setProfilePicturePreview(null);
-      // TODO: Consider if ResumeUploadForm needs an internal reset function or prop
       router.push('/login'); 
+
     } catch (error: any) {
-      console.error('ChefSignup: Signup error:', error);
-      let errorMessage = 'Failed to create account.';
+      console.error('ChefSignup: Overall signup error for email', data.email, ':', error);
+      let errorMessage = 'Failed to create account. Please try again.';
       if (error.code === 'auth/email-already-in-use') {
-        errorMessage = 'This email address is already in use.';
-      } else if (error.code === 'permission-denied' || error.message?.includes('permission-denied') || error.message?.includes('Missing or insufficient permissions')) {
-        errorMessage = 'Failed to save profile data due to permissions. Please check Firestore security rules for creating user profiles.';
-      } else if (error.code) {
-        errorMessage = `An error occurred: ${error.code} - ${error.message}`;
+        errorMessage = 'This email address is already in use. Please log in or use a different email.';
+      } else if (error.code === 'auth/weak-password') {
+        errorMessage = 'The password is too weak. Please choose a stronger password.';
+      } else if (error.message && error.message.includes("permission denied") || error.code === 'permission-denied') {
+        errorMessage = "Database operation failed due to permissions. Please check security rules.";
+      } else if (error.code) { // Catch other Firebase specific errors
+        errorMessage = `An error occurred: ${error.message} (Code: ${error.code})`;
+      } else if (error.message) { // Catch generic errors
+        errorMessage = error.message;
       }
       toast({
         title: 'Signup Failed',
@@ -415,4 +454,5 @@ export default function ChefSignupPage() {
     </div>
   );
 }
+
     

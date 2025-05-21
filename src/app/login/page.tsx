@@ -1,3 +1,4 @@
+
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -16,12 +17,12 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { LogIn, Loader2 } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation'; // Added useSearchParams
 import { useToast } from '@/hooks/use-toast';
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase';
 import { doc, getDoc, setDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
-import { useState } from 'react';
+import { useState, useEffect } from 'react'; // Added useEffect
 import type { AppUserProfileContext, CustomerProfile } from '@/types';
 
 const loginSchema = z.object({
@@ -33,6 +34,7 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams(); // Get search params
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
 
@@ -43,6 +45,14 @@ export default function LoginPage() {
       password: '',
     },
   });
+
+  // Pre-fill email if provided in query param
+  useEffect(() => {
+    const emailFromQuery = searchParams.get('email');
+    if (emailFromQuery) {
+      form.setValue('email', emailFromQuery);
+    }
+  }, [searchParams, form]);
 
   const handleLogin = async (data: LoginFormValues) => {
     setIsLoading(true);
@@ -57,7 +67,7 @@ export default function LoginPage() {
         description: 'Welcome back! Redirecting...',
       });
 
-      let roleForRedirect: AppUserProfileContext['role'] = 'customer'; // Default assumption
+      let roleForRedirect: AppUserProfileContext['role'] = 'customer'; 
 
       if (user) {
         const userDocRef = doc(db, "users", user.uid);
@@ -68,32 +78,39 @@ export default function LoginPage() {
           console.log("LoginPage: Firestore profile found for UID", user.uid, ":", userData);
           roleForRedirect = userData.role || 'customer'; 
         } else {
-          // This case should be rare if signup flows are creating profiles.
-          // Primarily for users authenticated directly in Firebase console without app signup.
-          console.warn("LoginPage: No profile document found in Firestore for UID:", user.uid, ". Creating a basic customer profile.");
-          const basicCustomerProfile: CustomerProfile = {
-            id: user.uid,
-            email: user.email!,
-            name: user.displayName || data.email.split('@')[0] || "New User",
-            role: 'customer',
-            accountStatus: 'active',
-            createdAt: serverTimestamp() as Timestamp, // Cast for type consistency
-            updatedAt: serverTimestamp() as Timestamp,
-            profilePictureUrl: user.photoURL || '',
-          };
-          try {
-            await setDoc(userDocRef, basicCustomerProfile);
+          console.warn("LoginPage: No profile document found in Firestore for UID:", user.uid, ". Creating a basic customer profile if applicable.");
+          // Fallback logic if no profile exists (e.g., user created directly in Firebase Auth console)
+          // For a robust system, users should ideally always have a profile created via app signup.
+          // This fallback assumes if no profile, and not an admin/chef email pattern, they are a customer.
+          if (data.email.toLowerCase() === 'admin@example.com' || data.email.toLowerCase() === 'jezza5152@gmail.com') { // Specific admin emails
+            roleForRedirect = 'admin';
+          } else if (data.email.includes('chef@')) { 
+            roleForRedirect = 'chef';
+          } else {
+            roleForRedirect = 'customer';
+             // Optionally create a basic customer profile if it doesn't exist
+            const basicCustomerProfile: CustomerProfile = {
+                id: user.uid,
+                email: user.email!,
+                name: user.displayName || data.email.split('@')[0] || "New User",
+                role: 'customer',
+                accountStatus: 'active',
+                createdAt: serverTimestamp() as Timestamp,
+                updatedAt: serverTimestamp() as Timestamp,
+                profilePictureUrl: user.photoURL || '',
+              };
+            await setDoc(userDocRef, basicCustomerProfile, { merge: true }); // Use merge to be safe
             console.log("LoginPage: Created basic customer profile in Firestore for UID:", user.uid);
-          } catch (profileError) {
-            console.error("LoginPage: Error creating basic customer profile in Firestore:", profileError);
           }
-          roleForRedirect = 'customer';
         }
       }
       
-      console.log("LoginPage: Determined role for initial redirect:", roleForRedirect, "for UID:", user.uid);
+      console.log("LoginPage: Determined role for initial redirect:", roleForRedirect, "for UID:", user?.uid);
+      const redirectPath = searchParams.get('redirect'); // Get redirect path from query
 
-      if (roleForRedirect === 'admin') {
+      if (redirectPath) {
+        router.push(redirectPath);
+      } else if (roleForRedirect === 'admin') {
         router.push('/admin');
       } else if (roleForRedirect === 'chef') {
         router.push('/chef/dashboard');
@@ -108,6 +125,8 @@ export default function LoginPage() {
         errorMessage = 'Invalid email or password.';
       } else if (error.code === 'auth/too-many-requests') {
         errorMessage = 'Too many login attempts. Please try again later.';
+      } else if (error.code === 'auth/invalid-api-key') {
+        errorMessage = 'Configuration error: Invalid API Key. Please contact support.';
       } else if (error.code) {
         errorMessage = `Login error: ${error.message} (Code: ${error.code})`;
       }
@@ -231,3 +250,5 @@ export default function LoginPage() {
     </div>
   );
 }
+
+    
