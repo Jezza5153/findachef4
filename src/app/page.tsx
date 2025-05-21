@@ -1,9 +1,10 @@
 
 'use client'; 
 
+import React from 'react'; // Added React import
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Lock, MessagesSquare, ShieldCheck, UserCircle as UserCircleIcon } from 'lucide-react';
+import { Lock, MessagesSquare, ShieldCheck, UserCircle as UserCircleIcon, ArrowRight } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import type { Testimonial } from '@/types';
@@ -11,17 +12,17 @@ import { useAuth } from '@/context/AuthContext';
 
 const benefits = [
   {
-    icon: <ShieldCheck className="h-10 w-10 text-primary" data-ai-hint="security shield" />,
+    icon: <ShieldCheck className="h-10 w-10 text-primary" />,
     title: 'Verified Chefs',
     description: 'Access a curated network of professional chefs with verified credentials and experience.',
   },
   {
-    icon: <MessagesSquare className="h-10 w-10 text-primary" data-ai-hint="chat messages" />,
+    icon: <MessagesSquare className="h-10 w-10 text-primary" />,
     title: 'In-Platform Messaging & Booking',
     description: 'Seamlessly communicate with chefs and book services directly through our secure platform.',
   },
   {
-    icon: <Lock className="h-10 w-10 text-primary" data-ai-hint="secure lock" />,
+    icon: <Lock className="h-10 w-10 text-primary" />,
     title: 'Protected Payments & Trust Score',
     description: 'Enjoy peace of mind with our secure payment system and transparent trust indicators.',
   },
@@ -52,9 +53,13 @@ const testimonials: Testimonial[] = [
 ];
 
 export default function Home() {
-  const { user, userProfile } = useAuth();
+  const { user, userProfile, loading: authLoading } = useAuth();
 
-  const customerExploreLink = user ? (userProfile?.role === 'customer' ? '/customer/dashboard/menus' : (userProfile?.role === 'chef' ? '/customer/menus' : '/login')) : '/login';
+  const customerExploreLink = !authLoading && user && userProfile?.role === 'customer' 
+    ? '/customer/dashboard' 
+    : (!authLoading && user && userProfile?.role === 'chef' 
+      ? '/customer/menus' // Chefs might still want to browse customer-facing menus
+      : '/login');
 
 
   return (
@@ -109,7 +114,7 @@ export default function Home() {
             {benefits.map((benefit) => (
               <Card key={benefit.title} className="text-center shadow-lg hover:shadow-xl transition-shadow duration-300">
                 <CardHeader className="items-center">
-                  {React.cloneElement(benefit.icon, { 'data-ai-hint': benefit.title.toLowerCase().replace(/\s+/g, ' ') })}
+                  {React.cloneElement(benefit.icon, { 'data-ai-hint': benefit.title.toLowerCase().replace(/\s+/g, '-') })}
                   <CardTitle className="mt-4 text-xl font-semibold">{benefit.title}</CardTitle>
                 </CardHeader>
                 <CardContent>
