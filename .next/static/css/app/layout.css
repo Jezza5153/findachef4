@@ -1793,9 +1793,6 @@ video {
 .bg-yellow-500\/10 {
   background-color: rgb(234 179 8 / 0.1);
 }
-.bg-gradient-to-br {
-  background-image: linear-gradient(to bottom right, var(--tw-gradient-stops));
-}
 .bg-gradient-to-r {
   background-image: linear-gradient(to right, var(--tw-gradient-stops));
 }
@@ -1803,10 +1800,6 @@ video {
   --tw-gradient-from: hsl(var(--primary) / 0.1) var(--tw-gradient-from-position);
   --tw-gradient-to: hsl(var(--primary) / 0) var(--tw-gradient-to-position);
   --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to);
-}
-.via-secondary\/10 {
-  --tw-gradient-to: hsl(var(--secondary) / 0)  var(--tw-gradient-to-position);
-  --tw-gradient-stops: var(--tw-gradient-from), hsl(var(--secondary) / 0.1) var(--tw-gradient-via-position), var(--tw-gradient-to);
 }
 .to-accent\/10 {
   --tw-gradient-to: hsl(var(--accent) / 0.1) var(--tw-gradient-to-position);
@@ -2256,8 +2249,8 @@ video {
 .opacity-0 {
   opacity: 0;
 }
-.opacity-20 {
-  opacity: 0.2;
+.opacity-30 {
+  opacity: 0.3;
 }
 .opacity-50 {
   opacity: 0.5;
@@ -2270,9 +2263,6 @@ video {
 }
 .opacity-90 {
   opacity: 0.9;
-}
-.opacity-30 {
-  opacity: 0.3;
 }
 .shadow {
   --tw-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
