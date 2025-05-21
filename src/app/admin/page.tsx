@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useEffect, useState } from 'react'; // Explicitly import React
+import React, { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -16,7 +16,7 @@ import { collection, getDocs, orderBy, Timestamp, query, doc, updateDoc, serverT
 import type { Menu, CustomerRequest, RequestMessage, AppUserProfileContext, ChefProfile, CustomerProfile, UserProfileBase } from '@/types';
 import { format } from 'date-fns';
 import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/context/AuthContext'; // Make sure useAuth is imported
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import Image from 'next/image';
 
@@ -43,7 +43,7 @@ type UserView = AppUserProfileContext;
 
 export default function AdminPage() {
   const { toast } = useToast();
-  const { isAdmin } = useAuth(); 
+  const { isAdmin } = useAuth(); // Use auth context to check if user is admin
 
   const [allUsers, setAllUsers] = useState<UserView[]>([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(true);
@@ -52,7 +52,7 @@ export default function AdminPage() {
   const [allCustomerRequests, setAllCustomerRequests] = useState<CustomerRequest[]>([]);
   const [isLoadingCustomerRequests, setIsLoadingCustomerRequests] = useState(true);
   
-  const [isProcessingAction, setIsProcessingAction] = useState<string | null>(null); 
+  const [isProcessingAction, setIsProcessingAction] = useState<string | null>(null); // Stores ID of item being processed
 
   const [isRequestDetailsDialogOpen, setIsRequestDetailsDialogOpen] = useState(false);
   const [selectedRequestForAdminView, setSelectedRequestForAdminView] = useState<CustomerRequest | null>(null);
@@ -78,7 +78,7 @@ export default function AdminPage() {
           id: docSnap.id,
           ...data,
           createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
-          accountStatus: data.accountStatus || 'active', 
+          accountStatus: data.accountStatus || 'active', // Default to active if not set
         } as UserView;
       });
       setAllUsers(fetchedUsers);
@@ -98,7 +98,7 @@ export default function AdminPage() {
         return {
           id: docSnap.id,
           ...data,
-          adminStatus: data.adminStatus || 'pending',
+          adminStatus: data.adminStatus || 'pending', // Default to pending
           createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
           updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
         } as Menu;
@@ -122,7 +122,7 @@ export default function AdminPage() {
           ...data,
           eventDate: data.eventDate instanceof Timestamp ? data.eventDate.toDate() : new Date(data.eventDate as any),
           createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
-          moderationStatus: data.moderationStatus || 'pending_review',
+          moderationStatus: data.moderationStatus || 'pending_review', // Default
         } as CustomerRequest;
       });
       setAllCustomerRequests(fetchedRequests);
@@ -143,7 +143,7 @@ export default function AdminPage() {
         }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toast]); 
+  }, [toast]); // isAdmin is not a direct dependency for fetching initial data
 
   const handleApproveUser = async (userId: string) => {
     if (!isAdmin) { toast({ title: "Permission Denied", description: "You do not have permission to perform this action.", variant: "destructive" }); return; }
@@ -165,7 +165,7 @@ export default function AdminPage() {
     setIsProcessingAction(userId);
     try {
       const userDocRef = doc(db, "users", userId);
-      await updateDoc(userDocRef, { isApproved: false, accountStatus: 'active', updatedAt: serverTimestamp() }); 
+      await updateDoc(userDocRef, { isApproved: false, accountStatus: 'active', updatedAt: serverTimestamp() }); // Keeping account active, just not approved as chef
       toast({ title: "Chef Status Updated", description: `Chef status updated to not approved.` });
     } catch (error) {
       console.error("Error updating user approval status:", error);
@@ -221,10 +221,10 @@ export default function AdminPage() {
     setSelectedRequestForAdminView(request);
     setAdminNotesForRequest(request.adminNotes || '');
     setIsLoadingRequestMessages(true);
-    setRequestMessagesForAdminView([]); 
+    setRequestMessagesForAdminView([]); // Clear previous messages
     
     if (messagesUnsubscribe) {
-      messagesUnsubscribe();
+      messagesUnsubscribe(); // Unsubscribe from previous listener if any
       messagesUnsubscribe = null;
     }
 
@@ -297,8 +297,8 @@ export default function AdminPage() {
   
   const getAccountStatusBadgeVariant = (status?: UserProfileBase['accountStatus']) => {
     switch (status) {
-      case 'active': return 'default'; 
-      case 'warned': return 'secondary'; 
+      case 'active': return 'default'; // Using 'default' which is often green-ish or primary
+      case 'warned': return 'secondary'; // Using 'secondary' which is often yellow-ish or gray
       case 'suspended': return 'destructive';
       default: return 'outline';
     }
@@ -627,7 +627,7 @@ export default function AdminPage() {
                 messagesUnsubscribe = null;
             }
             setIsRequestDetailsDialogOpen(open);
-            if (!open) setSelectedRequestForAdminView(null); 
+            if (!open) setSelectedRequestForAdminView(null); // Clear selected request when dialog closes
         }}>
           <RequestDetailsDialogContent className="sm:max-w-2xl"> 
             <DialogHeader>
