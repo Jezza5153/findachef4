@@ -58,39 +58,37 @@ export default function CustomerSignupPage() {
     },
   });
 
-  const onSubmit = async (data: CustomerSignupFormValues) => {
+  const onSubmit = async (formData: CustomerSignupFormValues) => {
     setIsLoading(true);
-    console.log("CustomerSignup: Starting signup process for email:", data.email);
-    let user; 
+    console.log("CustomerSignup: Starting signup process for email:", formData.email);
 
     try {
       console.log("CustomerSignup: Attempting to create Firebase Auth user...");
-      const userCredential = await createUserWithEmailAndPassword(auth, data.email, data.password);
-      user = userCredential.user;
+      const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+      const user = userCredential.user;
       console.log("CustomerSignup: Firebase Auth user created successfully. UID:", user.uid);
 
       console.log("CustomerSignup: Updating Firebase Auth profile (displayName) for UID:", user.uid);
       try {
-        await updateAuthProfile(user, { displayName: data.name });
+        await updateAuthProfile(user, { displayName: formData.name });
         console.log("CustomerSignup: Firebase Auth profile updated.");
       } catch (authProfileError) {
-        console.error("CustomerSignup: Error updating Firebase Auth profile:", authProfileError);
-        // Non-critical for signup completion, but log it.
+        console.warn("CustomerSignup: Error updating Firebase Auth profile (non-critical):", authProfileError);
       }
       
       const userProfileData: CustomerProfile = {
         id: user.uid,
         email: user.email!,
-        name: data.name,
+        name: formData.name,
         role: 'customer', // Explicitly set role
-        accountStatus: 'active',
+        accountStatus: 'active', // Default account status
         createdAt: serverTimestamp() as Timestamp,
         updatedAt: serverTimestamp() as Timestamp,
         profilePictureUrl: user.photoURL || '', 
-        // Initialize other optional customer fields if needed
         phone: '',
         kitchenEquipment: [],
         addressDetails: '',
+        // Initialize other optional customer fields if needed
       };
       
       console.log("CustomerSignup: Saving customer profile to Firestore with role:", userProfileData.role, "for UID:", user.uid);
@@ -101,7 +99,7 @@ export default function CustomerSignupPage() {
         console.error("CustomerSignup: Error saving profile to Firestore:", firestoreError);
         let firestoreErrorMessage = "Could not save profile data to database.";
         if (firestoreError.code === 'permission-denied') {
-            firestoreErrorMessage = "Database permission denied. Please check Firestore security rules for creating user profiles.";
+            firestoreErrorMessage = "Database permission denied. Check Firestore security rules for creating user profiles.";
         }
         toast({ title: "Profile Save Failed", description: firestoreErrorMessage, variant: "destructive", duration: 7000 });
         throw firestoreError; // Re-throw
@@ -115,15 +113,15 @@ export default function CustomerSignupPage() {
       
       router.push('/login'); 
     } catch (error: any) {
-      console.error('CustomerSignup: Overall signup error for email', data.email, ':', error);
+      console.error('CustomerSignup: Overall signup error for email', formData.email, ':', error);
       let errorMessage = 'Failed to create account. Please try again.';
       if (error.code === 'auth/email-already-in-use') {
         errorMessage = 'This email address is already in use. Please log in or use a different email.';
       } else if (error.code === 'auth/weak-password') {
         errorMessage = 'The password is too weak. Please choose a stronger password.';
-      } else if (error.message && error.message.includes("permission denied") || error.code === 'permission-denied') {
+      } else if (error.message && (error.message.includes("permission denied") || error.code === 'permission-denied')) {
         errorMessage = "Database operation failed due to permissions. Please check security rules.";
-      } else if (error.code) { 
+      } else if (error.code && error.message) { 
         errorMessage = `An error occurred: ${error.message} (Code: ${error.code})`;
       } else if (error.message) {
         errorMessage = error.message;
