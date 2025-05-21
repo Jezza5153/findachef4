@@ -56,38 +56,32 @@ export default function Home() {
   const { user, loading: authLoading } = useAuth();
 
   let customerExploreLink = "/login";
-  if (!authLoading && user) {
-    // Assuming userProfile.role would be available via useAuth() if fully loaded
-    // For simplicity, if user is logged in, direct to a common customer starting point
-    customerExploreLink = '/customer/menus'; // Or /customer/dashboard
-  }
-
 
   return (
-    <div className="flex flex-col">
-      {/* Hero Section */}
-      <section className="relative py-20 md:py-32 bg-gradient-to-br from-primary/10 via-secondary/10 to-accent/10">
-        <div className="absolute inset-0">
-            <Image
-              src="https://placehold.co/1920x1080.png" 
-              alt="Gourmet food platter"
-              fill
-              className="object-cover opacity-20"
-              data-ai-hint="gourmet food"
-              priority 
-            />
-        </div>
-        <div className="container mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
+ <div className="flex flex-col">
+ {/* Hero Section */ }
+ <section className="relative py-20 md:py-32 flex items-center justify-center">
+ <div className="absolute inset-0">
+ <Image
+ src="/images/hero-background.jpg" // Added new background image
+ alt="Culinary scene background"
+ fill
+ className="object-cover opacity-30" // Adjusted opacity
+ data-ai-hint="culinary background"
+ priority
+ />
+ </div>
+ <div className="container mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
           <h1 className="text-4xl font-extrabold tracking-tight text-foreground sm:text-5xl md:text-6xl">
             <span className="block">Book a chef, plan an event,</span>
             <span className="block text-primary">or host your own — all on one platform.</span>
           </h1>
-          <p className="mt-6 max-w-2xl mx-auto text-lg text-foreground/80 sm:text-xl md:text-2xl">
+          <p className="mt-6 max-w-2xl text-lg text-foreground/80 sm:text-xl md:text-2xl">
             Connect with talented independent chefs for any occasion. Book private chefs, explore unique menus, or join exclusive chef-hosted events.
           </p>
           <div className="mt-10 flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4">
             <Button asChild size="lg" className="text-lg px-8 py-4 bg-primary hover:bg-primary/90 text-primary-foreground">
-              <Link href="/customer/signup">I’m a Customer</Link>
+ <Link href={!authLoading && user ? "/customer/menus" : "/customer/signup"}>I’m a Customer</Link>
             </Button>
             <Button asChild size="lg" variant="outline" className="text-lg px-8 py-4 border-primary text-primary hover:bg-primary/10">
               <Link href="/chef/signup">I’m a Chef</Link>
@@ -195,7 +189,7 @@ export default function Home() {
           <div className="mt-10 flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4">
             <Button asChild size="lg" className="text-lg px-8 py-4 bg-primary hover:bg-primary/90 text-primary-foreground">
               {/* Updated Link Logic based on auth state */}
-              <Link href={!authLoading && user ? customerExploreLink : "/login"}>
+              <Link href={!authLoading && user ? "/customer/menus" : "/login"}>
                 <Search className="mr-2 h-5 w-5" /> Explore Menus
               </Link>
             </Button>
