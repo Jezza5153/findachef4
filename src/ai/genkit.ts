@@ -19,5 +19,5 @@ export const ai = genkit({
     }),
   ],
   // We've set the model in flows directly, but a default can be set here too.
-  // model: 'googleai/gemini-pro', // Example default model
+  model: 'googleai/gemini-pro', // Example default model
 });
