@@ -71,7 +71,7 @@ const chefSignupSchema = z.object({
   bio: z.string().min(20, {message: 'Bio must be at least 20 characters.'}).max(500, {message: "Bio cannot exceed 500 characters."}),
   specialties: z.string().min(1, { message: 'Please list at least one specialty.' }),
   profilePictureFile: z.instanceof(File).optional()
-    .refine(file => !file || file.size <= 2 * 1024 * 1024, `Max file size is 2MB.`)
+    .refine(file => !file || file.size <= 6 * 1024 * 1024, `Max file size is 6MB.`)
     .refine(file => !file || ['image/jpeg', 'image/png', 'image/webp'].includes(file.type), `Only JPG, PNG, WEBP files are allowed.`),
   agreedToTerms: z.boolean().refine(value => value === true, {
     message: 'You must agree to the terms and policies to continue.',
