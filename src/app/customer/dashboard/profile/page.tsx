@@ -2,7 +2,7 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useForm } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
 import * as z from 'zod';
 import { Button } from '@/components/ui/button';
 import {
@@ -18,11 +18,11 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ChangeEvent } from 'react';
 import type { CustomerProfile as CustomerProfileType } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
-import { UserCircle, Save, UploadCloud, MapPin, ChefHat, CookingPot, Mixer, Microwave, UtensilsCrossed, ShoppingBasket, Trash2, Loader2, Home, Thermometer, Coffee, Box, Utensils } from 'lucide-react';
+import { UserCircle, Save, UploadCloud, MapPin, ChefHat, CookingPot, Blender, Microwave, UtensilsCrossed, ShoppingBasket, Trash2, Loader2, Home, Thermometer, Coffee, Box, Utensils } from 'lucide-react'; // Changed Mixer to Blender
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,24 +36,23 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { updateProfile as updateAuthProfile } from 'firebase/auth';
 
 const kitchenEquipmentOptions = [
   { value: 'Oven', label: 'Oven', icon: <Home className="mr-2 h-5 w-5" /> },
   { value: 'Stovetop', label: 'Stovetop', icon: <CookingPot className="mr-2 h-5 w-5" /> },
-  { value: 'Microwave', label: 'Microwave', icon: <Microwave className="mr-2 h-5 w-5" /> }, // Assuming Thermometer, Coffee, Box are suitable proxies
-  { value: 'Mixer', label: 'Mixer/Blender', icon: <Mixer className="mr-2 h-5 w-5" /> },
+  { value: 'Microwave', label: 'Microwave', icon: <Microwave className="mr-2 h-5 w-5" /> },
+  { value: 'Blender', label: 'Blender/Mixer', icon: <Blender className="mr-2 h-5 w-5" /> }, // Changed Mixer to Blender
   { value: 'BBQGrill', label: 'BBQ Grill', icon: <UtensilsCrossed className="mr-2 h-5 w-5" /> },
-  { value: 'StandardPotsPans', label: 'Standard Pots & Pans', icon: <ShoppingBasket className="mr-2 h-5 w-5" /> },
-  { value: 'Refrigerator', label: 'Refrigerator', icon: <Thermometer className="mr-2 h-5 w-5" /> },
+  { value: 'StandardPotsPans', label: 'Standard Pots & Pans', icon: <Utensils className="mr-2 h-5 w-5" /> }, // Changed icon
+  { value: 'Refrigerator', label: 'Refrigerator', icon: <Thermometer className="mr-2 h-5 w-5" /> }, // Re-using Thermometer, consider specific fridge icon if available
   { value: 'Freezer', label: 'Freezer', icon: <Box className="mr-2 h-5 w-5" /> },
 ];
 
 const customerProfileSchema = z.object({
   name: z.string().min(2, { message: 'Name must be at least 2 characters.' }),
-  // Email is not in the form schema as it's read-only from auth
   phone: z.string().optional(),
   profilePictureFile: z.instanceof(File).optional()
     .refine(file => !file || file.size <= 2 * 1024 * 1024, `Max file size is 2MB.`)
@@ -62,7 +61,6 @@ const customerProfileSchema = z.object({
   addressDetails: z.string().optional(),
   defaultEventType: z.string().optional(),
   defaultPax: z.coerce.number().optional(),
-  defaultBudget: z.string().optional(), // This seems unused if budgetAmount is main
   defaultBudgetAmount: z.coerce.number().optional(),
   defaultFrequency: z.string().optional(),
   defaultTheme: z.string().optional(),
@@ -73,12 +71,13 @@ const customerProfileSchema = z.object({
 type CustomerProfileFormValues = z.infer<typeof customerProfileSchema>;
 
 export default function CustomerProfilePage() {
-  const { user, userProfile, loading: authLoading } = useAuth();
+  const { user, userProfile, loading: authLoading, profileLoading } = useAuth();
   const [profilePicturePreview, setProfilePicturePreview] = useState<string | null>(null);
   const [newProfilePictureFile, setNewProfilePictureFile] = useState<File | null>(null);
-  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
+
+  const isLoading = authLoading || profileLoading;
 
   const form = useForm<CustomerProfileFormValues>({
     resolver: zodResolver(customerProfileSchema),
@@ -98,7 +97,7 @@ export default function CustomerProfilePage() {
   });
 
   useEffect(() => {
-    if (!authLoading && user) {
+    if (!isLoading && user) {
       const currentProfile = userProfile as CustomerProfileType | null;
       if (currentProfile && currentProfile.role === 'customer') {
         form.reset({
@@ -115,16 +114,14 @@ export default function CustomerProfilePage() {
           defaultExtraComments: currentProfile.defaultExtraComments || '',
         });
         setProfilePicturePreview(currentProfile.profilePictureUrl || user.photoURL || null);
-        setIsLoadingProfile(false);
-      } else if (user) { // User authenticated but no customer profile yet in AuthContext
+      } else if (user) { 
         form.reset({ name: user.displayName || '', phone: user.phoneNumber || '' });
         setProfilePicturePreview(user.photoURL || null);
-        setIsLoadingProfile(false);
       }
-    } else if (!authLoading && !user) {
-      setIsLoadingProfile(false); // Not logged in
+    } else if (!isLoading && !user) {
+      // Handled by layout redirect
     }
-  }, [user, userProfile, authLoading, form]);
+  }, [user, userProfile, isLoading, form]);
 
   const handleProfilePictureChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -145,69 +142,91 @@ export default function CustomerProfilePage() {
 
   const onSubmit = async (formData: CustomerProfileFormValues) => {
     if (!user) {
-      toast({ title: "Error", description: "You must be logged in.", variant: "destructive" });
+      toast({ title: "Authentication Error", description: "You must be logged in to update your profile.", variant: "destructive" });
       return;
     }
     setIsSaving(true);
+    console.log("CustomerProfilePage: Saving profile for UID:", user.uid, "Data:", formData);
 
     let profilePicUrlToSave = userProfile?.profilePictureUrl || user.photoURL || '';
 
     try {
       if (newProfilePictureFile) {
-        if (profilePicUrlToSave && profilePicUrlToSave.startsWith('https://firebasestorage.googleapis.com')) {
+        const oldProfilePicUrl = userProfile?.profilePictureUrl;
+        if (oldProfilePicUrl && oldProfilePicUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
-            const oldImageRef = storageRef(storage, profilePicUrlToSave);
-            await deleteObject(oldImageRef).catch(e => console.warn("Old profile pic not found or cannot be deleted:", e));
-          } catch (e) { console.warn("Error deleting old profile picture", e); }
+            const oldImageRef = storageRef(storage, oldProfilePicUrl);
+            await deleteObject(oldImageRef);
+            console.log("CustomerProfilePage: Deleted old profile picture from Storage.");
+          } catch (e: any) {
+            if (e.code !== 'storage/object-not-found') {
+              console.warn("CustomerProfilePage: Error deleting old profile picture, continuing...", e);
+            }
+          }
         }
-        const fileExtension = newProfilePictureFile.name.split('.').pop();
+        const fileExtension = newProfilePictureFile.name.split('.').pop() || 'jpg';
         const profilePicPath = `users/${user.uid}/profilePicture.${fileExtension}`;
         const profilePicStorageRefInstance = storageRef(storage, profilePicPath);
         
         toast({ title: "Uploading Profile Picture...", description: "Please wait." });
         const uploadTask = uploadBytesResumable(profilePicStorageRefInstance, newProfilePictureFile);
+        
         await new Promise<void>((resolve, reject) => {
-          uploadTask.on('state_changed', null,
-            (error) => { console.error("Profile pic upload error", error); reject(error); },
+          uploadTask.on('state_changed', 
+            null,
+            (error) => { 
+              console.error("CustomerProfilePage: Profile picture upload error:", error); 
+              reject(error); 
+            },
             async () => {
-              profilePicUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
-              resolve();
+              try {
+                profilePicUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
+                console.log("CustomerProfilePage: Profile picture uploaded successfully:", profilePicUrlToSave);
+                resolve();
+              } catch (getUrlError) {
+                console.error("CustomerProfilePage: Error getting download URL for profile picture:", getUrlError);
+                reject(getUrlError);
+              }
             }
           );
         });
       }
 
       const updatedProfileData: Partial<CustomerProfileType> = {
+        id: user.uid, // Ensure ID is always set
         name: formData.name,
-        email: user.email!, // Email comes from auth user
-        phone: formData.phone,
+        email: user.email!,
+        phone: formData.phone || '',
         profilePictureUrl: profilePicUrlToSave,
-        kitchenEquipment: formData.kitchenEquipment,
-        addressDetails: formData.addressDetails,
-        defaultEventType: formData.defaultEventType,
-        defaultPax: formData.defaultPax,
-        defaultBudgetAmount: formData.defaultBudgetAmount,
-        defaultFrequency: formData.defaultFrequency,
-        defaultTheme: formData.defaultTheme,
-        defaultDietaryNotes: formData.defaultDietaryNotes,
-        defaultExtraComments: formData.defaultExtraComments,
+        kitchenEquipment: formData.kitchenEquipment || [],
+        addressDetails: formData.addressDetails || '',
+        defaultEventType: formData.defaultEventType || '',
+        defaultPax: formData.defaultPax || 1,
+        defaultBudgetAmount: formData.defaultBudgetAmount || 0,
+        defaultFrequency: formData.defaultFrequency || '',
+        defaultTheme: formData.defaultTheme || '',
+        defaultDietaryNotes: formData.defaultDietaryNotes || '',
+        defaultExtraComments: formData.defaultExtraComments || '',
         role: 'customer',
         updatedAt: serverTimestamp(),
       };
       
-      // Add createdAt only if it's a new profile (i.e., userProfile from context was null for this user)
-      if (!(userProfile && userProfile.id === user.uid)) {
+      const userDocRef = doc(db, "users", user.uid);
+      // Check if profile exists to determine if we need to set createdAt
+      const docSnap = await doc(db, "users", user.uid).get();
+      if (!docSnap.exists()) {
         updatedProfileData.createdAt = serverTimestamp();
       }
 
-      const userDocRef = doc(db, "users", user.uid);
       await setDoc(userDocRef, updatedProfileData, { merge: true });
+      console.log("CustomerProfilePage: Firestore profile saved/merged successfully.");
 
       if (user.displayName !== formData.name || (profilePicUrlToSave && user.photoURL !== profilePicUrlToSave)) {
         await updateAuthProfile(user, {
           displayName: formData.name,
           photoURL: profilePicUrlToSave,
         });
+        console.log("CustomerProfilePage: Firebase Auth profile (displayName/photoURL) updated.");
       }
       
       setNewProfilePictureFile(null);
@@ -217,10 +236,10 @@ export default function CustomerProfilePage() {
       });
 
     } catch (error) {
-      console.error('Error updating customer profile:', error);
+      console.error('CustomerProfilePage: Error updating profile:', error);
       toast({
         title: 'Update Failed',
-        description: 'Could not save your profile. Please try again.',
+        description: (error instanceof Error) ? error.message : 'Could not save your profile. Please try again.',
         variant: 'destructive',
       });
     } finally {
@@ -229,26 +248,26 @@ export default function CustomerProfilePage() {
   };
 
   const handleDeleteAccount = () => {
+    // Placeholder for actual account deletion logic
     toast({
-      title: 'Account Deletion Request Submitted',
-      description: 'Your request to delete your account has been received and will be processed according to our data retention policy.',
+      title: 'Account Deletion Request (Placeholder)',
+      description: 'This feature is not yet fully implemented. In a real app, this would start a secure account deletion process.',
       duration: 7000,
     });
   };
 
-  if (authLoading || isLoadingProfile) {
-    return <div className="flex h-screen items-center justify-center"><Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading Profile...</div>;
+  if (isLoading) {
+    return <div className="flex h-screen items-center justify-center"><Loader2 className="mr-2 h-8 w-8 animate-spin text-primary" data-ai-hint="loading spinner"/> Loading Profile...</div>;
   }
-  if (!user) { 
-     return <div className="flex h-screen items-center justify-center">Please log in to view your profile.</div>;
-  }
+  
+  // This component should be protected by its layout, which handles redirection if !user
 
   return (
     <div className="space-y-8">
       <Card className="shadow-lg">
         <CardHeader>
           <CardTitle className="text-2xl font-bold flex items-center">
-            <UserCircle className="mr-3 h-7 w-7 text-primary" data-ai-hint="user profile"/> My Customer Profile
+            <UserCircle className="mr-3 h-7 w-7 text-primary" data-ai-hint="user profile icon"/> My Customer Profile
           </CardTitle>
           <CardDescription>Manage your contact details, kitchen setup, and default event preferences.</CardDescription>
         </CardHeader>
@@ -261,17 +280,17 @@ export default function CustomerProfilePage() {
                   <div className="md:col-span-1 flex flex-col items-center">
                     <Image
                       src={profilePicturePreview || "https://placehold.co/150x150.png"}
-                      alt={form.getValues('name') || user.displayName || "Customer"}
+                      alt={form.getValues('name') || user?.displayName || "Customer"}
                       width={150}
                       height={150}
                       className="rounded-full object-cover shadow-md mb-4"
                       data-ai-hint="person avatar"
-                      key={profilePicturePreview}
+                      key={profilePicturePreview} // Re-render if preview changes
                     />
                     <FormField
                         control={form.control}
                         name="profilePictureFile"
-                        render={() => ( // field explicitly not used, onChange is manual
+                        render={() => ( 
                           <FormItem className="w-full">
                             <FormControl>
                               <>
@@ -309,8 +328,8 @@ export default function CustomerProfilePage() {
                     />
                     <FormItem>
                       <FormLabel>Email Address</FormLabel>
-                      <FormControl><Input type="email" value={user.email || ''} readOnly disabled /></FormControl>
-                      <FormDescription>Your email address cannot be changed.</FormDescription>
+                      <FormControl><Input type="email" value={user?.email || ''} readOnly disabled /></FormControl>
+                      <FormDescription>Your email address cannot be changed here.</FormDescription>
                     </FormItem>
                     <FormField
                       control={form.control}
@@ -339,7 +358,7 @@ export default function CustomerProfilePage() {
                       <div className="mb-4">
                         <FormLabel className="text-base">Available Kitchen Equipment</FormLabel>
                         <FormDescription>
-                          Let chefs know what equipment you have available.
+                          Select the equipment you have available in your kitchen. This helps chefs plan accordingly.
                         </FormDescription>
                       </div>
                       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -358,10 +377,11 @@ export default function CustomerProfilePage() {
                                     <Checkbox
                                       checked={field.value?.includes(item.value)}
                                       onCheckedChange={(checked) => {
+                                        const currentValues = field.value || [];
                                         return checked
-                                          ? field.onChange([...(field.value || []), item.value])
+                                          ? field.onChange([...currentValues, item.value])
                                           : field.onChange(
-                                              (field.value || []).filter(
+                                              currentValues.filter(
                                                 (value) => value !== item.value
                                               )
                                             );
@@ -387,7 +407,7 @@ export default function CustomerProfilePage() {
 
               <section>
                 <h3 className="text-xl font-semibold mb-4 border-b pb-2 flex items-center">
-                  <MapPin className="mr-2 h-6 w-6 text-primary" data-ai-hint="location pin"/> My Location
+                  <MapPin className="mr-2 h-6 w-6 text-primary" data-ai-hint="location pin icon"/> My Location
                 </h3>
                 <FormField
                   control={form.control}
@@ -396,7 +416,7 @@ export default function CustomerProfilePage() {
                     <FormItem>
                       <FormLabel>Primary Address / Event Location Details</FormLabel>
                       <FormControl><Textarea placeholder="e.g., 123 Main St, Anytown, USA. Include any important notes about access or parking." className="min-h-[100px]" {...field} disabled={isSaving} /></FormControl>
-                      <FormDescription>Provide details about where events typically take place or your primary address.</FormDescription>
+                      <FormDescription>Provide details about where events typically take place or your primary address for service.</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -405,7 +425,7 @@ export default function CustomerProfilePage() {
 
               <section>
                 <h3 className="text-xl font-semibold mb-4 border-b pb-2 flex items-center">
-                  <Utensils className="mr-2 h-6 w-6 text-primary" data-ai-hint="cutlery event"/> My Default Event Preferences
+                  <Utensils className="mr-2 h-6 w-6 text-primary" data-ai-hint="event preferences cutlery"/> My Default Event Preferences
                 </h3>
                 <FormDescription className="mb-4">
                   Set up your typical event preferences. You can always customize these when making a new request.
@@ -531,4 +551,3 @@ export default function CustomerProfilePage() {
     </div>
   );
 }
-    

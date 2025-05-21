@@ -32,7 +32,7 @@ const loginSchema = z.object({
 
 type LoginFormValues = z.infer<typeof loginSchema>;
 
-export default function LoginPage() {
+function LoginPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
@@ -77,21 +77,22 @@ export default function LoginPage() {
           console.log("LoginPage: Firestore profile found for UID", user.uid, ":", userData);
           roleForRedirect = userData.role || 'customer'; 
         } else {
-          console.warn("LoginPage: No profile document found in Firestore for UID:", user.uid, ". Creating a basic customer profile.");
-          // This case should be rare if signup flows always create a profile.
-          // If user exists in Auth but not Firestore, default to customer and create basic profile.
-          roleForRedirect = 'customer';
-          const basicCustomerProfile: CustomerProfile = {
+          console.warn("LoginPage: No profile document found in Firestore for UID:", user.uid, ". Creating a basic customer profile as fallback.");
+          // Fallback: This case ideally shouldn't happen if signups always create profiles.
+          // Create a basic customer profile if none exists after login.
+          const basicCustomerProfile: Partial<CustomerProfile> = {
               id: user.uid, email: user.email!, name: user.displayName || data.email.split('@')[0] || "New User",
               role: 'customer', accountStatus: 'active',
-              createdAt: serverTimestamp() as Timestamp, updatedAt: serverTimestamp() as Timestamp,
+              createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
               profilePictureUrl: user.photoURL || '',
             };
           try {
-            await setDoc(userDocRef, basicCustomerProfile);
-            console.log("LoginPage: Created basic customer profile in Firestore for UID:", user.uid);
+            await setDoc(userDocRef, basicCustomerProfile, { merge: true }); // Use merge if some fields might exist but not role
+            console.log("LoginPage: Created/Merged basic customer profile in Firestore for UID:", user.uid);
+            roleForRedirect = 'customer'; // Ensure role is set for redirect
           } catch (profileCreationError) {
-            console.error("LoginPage: Failed to create basic customer profile:", profileCreationError);
+            console.error("LoginPage: Failed to create/merge basic customer profile:", profileCreationError);
+            // Continue with customer redirect even if profile creation fails, auth succeeded.
           }
         }
       }
@@ -105,7 +106,7 @@ export default function LoginPage() {
         router.push('/admin');
       } else if (roleForRedirect === 'chef') {
         router.push('/chef/dashboard');
-      } else { // Default to customer dashboard
+      } else { 
         router.push('/customer/dashboard');
       }
 
@@ -117,7 +118,7 @@ export default function LoginPage() {
       } else if (error.code === 'auth/too-many-requests') {
         errorMessage = 'Too many login attempts. Please try again later.';
       } else if (error.code === 'auth/invalid-api-key') {
-        errorMessage = 'Configuration error: Invalid API Key. Please contact support or check environment variables.';
+        errorMessage = 'Configuration error with authentication service. Please contact support.';
       } else if (error.code) {
         errorMessage = `Login error: ${error.message} (Code: ${error.code})`;
       }
@@ -163,7 +164,7 @@ export default function LoginPage() {
       console.error('LoginPage: Password reset error:', error);
       toast({
         title: 'Password Reset Failed',
-        description: error.message || 'Could not send password reset email. Please try again.',
+        description: (error.message && error.code !== 'auth/user-not-found') ? error.message : 'Could not send password reset email. Please ensure the email is correct or try again.',
         variant: 'destructive',
       });
     } finally {
@@ -172,13 +173,11 @@ export default function LoginPage() {
   };
 
   return (
-    <Suspense fallback={<div>Loading...</div>}>
     <div className="container mx-auto flex min-h-[calc(100vh-8rem)] items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <Card className="w-full max-w-md shadow-xl">
-
         <CardHeader className="text-center">
           <div className="mx-auto mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
-            <LogIn className="h-8 w-8" />
+            <LogIn className="h-8 w-8" data-ai-hint="login key" />
           </div>
           <CardTitle className="text-3xl font-bold">Login to FindAChef</CardTitle>
           <CardDescription className="text-lg">
@@ -241,6 +240,14 @@ export default function LoginPage() {
         </CardContent>
       </Card>
     </div>
-    </Suspense>
   );
+}
+
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="flex h-screen items-center justify-center"><Loader2 className="h-12 w-12 animate-spin text-primary" /> Loading Login...</div>}>
+      <LoginPageContent />
+    </Suspense>
+  )
 }
