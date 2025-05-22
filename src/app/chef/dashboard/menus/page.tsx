@@ -27,10 +27,10 @@ import { PlusCircle, Edit, Trash2, NotebookText, Eye, EyeOff, ShoppingCart, Aler
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
-import { collection, addDoc, doc, updateDoc, deleteDoc, query, where, serverTimestamp, Timestamp, setDoc, onSnapshot, orderBy, Unsubscribe } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, deleteDoc, query, where, serverTimestamp, Timestamp, setDoc, onSnapshot, orderBy, Unsubscribe, writeBatch } from 'firebase/firestore';
 import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import Image from 'next/image';
-import { assistMenuItem } from '@/ai/flows/menu-item-assist-flow';
+import { assistMenuItem, type MenuItemAssistInput } from '@/ai/flows/menu-item-assist-flow';
 import { v4 as uuidv4 } from 'uuid';
 import dynamic from 'next/dynamic';
 
@@ -40,6 +40,7 @@ const DialogHeader = dynamic(() => import('@/components/ui/dialog').then(mod => 
 const DialogTitle = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogTitle), { ssr: false });
 const DialogFooter = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogFooter), { ssr: false });
 const DialogClose = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogClose), { ssr: false });
+const ShadDialogDescription = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogDescription), { ssr: false });
 
 
 const dietaryOptions: Option[] = [
@@ -140,23 +141,29 @@ export default function MenuManagementPage() {
       const menusCollectionRef = collection(db, "menus");
       const q = query(menusCollectionRef, where("chefId", "==", user.uid), orderBy("createdAt", "desc"));
       
-      unsubscribe = onSnapshot(q, (querySnapshot) => {
-        const fetchedMenus = querySnapshot.docs.map(docSnap => {
-          const data = docSnap.data();
-           return { 
-            id: docSnap.id, 
-            ...data,
-            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
-            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
-          } as Menu;
+      try {
+        unsubscribe = onSnapshot(q, (querySnapshot) => {
+          const fetchedMenus = querySnapshot.docs.map(docSnap => {
+            const data = docSnap.data();
+             return { 
+              id: docSnap.id, 
+              ...data,
+              createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+              updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
+            } as Menu;
+          });
+          setMenus(fetchedMenus);
+          setIsLoading(false);
+        }, (error) => {
+          console.error("Error fetching menus:", error);
+          toast({ title: "Error", description: "Could not fetch your menus.", variant: "destructive" });
+          setIsLoading(false);
         });
-        setMenus(fetchedMenus);
+      } catch (e) {
+        console.error("Error setting up menu listener:", e);
+        toast({title: "Setup Error", description: "Failed to initialize menu tracking.", variant: "destructive"});
         setIsLoading(false);
-      }, (error) => {
-        console.error("Error fetching menus:", error);
-        toast({ title: "Error", description: "Could not fetch your menus.", variant: "destructive" });
-        setIsLoading(false);
-      });
+      }
     } else {
       setIsLoading(false);
       setMenus([]);
@@ -164,7 +171,6 @@ export default function MenuManagementPage() {
     
     return () => {
       if (unsubscribe) {
-        console.log("MenuManagementPage: Unsubscribing from menus listener.");
         unsubscribe();
       }
     };
@@ -203,13 +209,14 @@ export default function MenuManagementPage() {
 
     try {
       if (menuImageFile) {
+        // Delete old image if editing and new image provided
         if (editingMenu?.imageUrl && editingMenu.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
             const oldImageRef = storageRef(storage, editingMenu.imageUrl);
             await deleteObject(oldImageRef);
           } catch (e: any) {
             if (e.code !== 'storage/object-not-found') {
-              console.warn("Could not delete old menu image:", e.message);
+              console.warn("MenuManagementPage: Could not delete old menu image during update:", e.message);
             }
           }
         }
@@ -250,7 +257,7 @@ export default function MenuManagementPage() {
       const paxForCalc = Math.max(1, Number(data.pax) || 1);
       const costPerHeadFromIngredients = totalIngredientCost / paxForCalc;
 
-      const menuDataToSave: Partial<Menu> & { chefId: string; chefName: string; updatedAt: any; } = {
+      const menuDataToSave: Partial<Omit<Menu, 'id' | 'createdAt' | 'updatedAt'>> & { chefId: string; chefName: string; updatedAt: any; } = {
         title: data.title,
         description: data.description,
         cuisine: data.cuisine,
@@ -262,8 +269,8 @@ export default function MenuManagementPage() {
         imageUrl: imageUrlToSave,
         dataAiHint: data.dataAiHint,
         chefId: user.uid,
-        chefName: userProfile.name || user.displayName || "Chef",
-        chefProfilePictureUrl: userProfile.profilePictureUrl || user.photoURL || undefined,
+        chefName: (userProfile as AppUserProfileContext).name || user.displayName || "Chef",
+        chefProfilePictureUrl: (userProfile as AppUserProfileContext).profilePictureUrl || user.photoURL || undefined,
         menuIngredients: finalMenuIngredients,
         calculatedTotalIngredientCost: totalIngredientCost,
         calculatedCostPricePerHead: costPerHeadFromIngredients,
@@ -333,13 +340,14 @@ export default function MenuManagementPage() {
     if (window.confirm(`Are you sure you want to delete the menu "${menuToDelete?.title}"?`)) {
       setIsSaving(true);
       try {
+        // Delete image from Storage if it exists
         if (menuToDelete.imageUrl && menuToDelete.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
             const imageRefToDelete = storageRef(storage, menuToDelete.imageUrl);
             await deleteObject(imageRefToDelete);
           } catch (e: any) {
             if (e.code !== 'storage/object-not-found') {
-               console.warn("Could not delete menu image from storage:", e.message);
+               console.warn("MenuManagementPage: Could not delete menu image from storage during menu deletion:", e.message);
             }
           }
         }
@@ -364,23 +372,27 @@ export default function MenuManagementPage() {
         return;
     }
     
-    setIsSaving(true);
+    setIsSaving(true); // Consider a more specific loading state if needed
     try {
-        const batch = []; // For potential batch write if adding multiple items per ingredient
-        for (const ing of menu.menuIngredients) {
-            const newItem: Omit<ShoppingListItem, 'id' | 'createdAt' | 'updatedAt'> = {
+        const batch = writeBatch(db);
+        const shoppingListCollectionRef = collection(db, `users/${user.uid}/shoppingListItems`);
+        
+        menu.menuIngredients.forEach(ing => {
+            const newItemRef = doc(shoppingListCollectionRef); // Auto-generate ID
+            const newItemData: Omit<ShoppingListItem, 'id' | 'createdAt' | 'updatedAt'> = {
                 chefId: user.uid,
                 name: ing.name,
                 quantity: ing.quantity, 
                 unit: ing.unit, 
-                estimatedCost: ing.costPerUnit, // Cost per unit
+                estimatedCost: ing.costPerUnit, // Storing cost per unit as estimatedCost
                 notes: `For menu: ${menu.title}. ${ing.notes || ''}`.trim(),
                 purchased: false,
                 menuId: menu.id,
             };
-            batch.push(addDoc(collection(db, `users/${user.uid}/shoppingListItems`), { ...newItem, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }));
-        }
-        await Promise.all(batch);
+            batch.set(newItemRef, { ...newItemData, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+        });
+        
+        await batch.commit();
         toast({
             title: 'Added to Shopping List',
             description: `Ingredients from "${menu.title}" added.`,
@@ -434,12 +446,15 @@ export default function MenuManagementPage() {
     toast({ title: "AI Menu Assist", description: "Generating suggestions..." });
     try {
       const keyIngredientsString = menuIngredients?.map(ing => ing.name).filter(Boolean).join(', ');
-      const result = await assistMenuItem({
+      const assistInput: MenuItemAssistInput = {
         menuTitle: title,
-        currentDescription: description,
         cuisine: cuisine,
-        keyIngredients: keyIngredientsString,
-      });
+      };
+      if (description) assistInput.currentDescription = description;
+      if (keyIngredientsString) assistInput.keyIngredients = keyIngredientsString;
+
+      const result = await assistMenuItem(assistInput);
+
       if (result && result.suggestedDescription) {
         form.setValue('description', result.suggestedDescription, { shouldValidate: true });
         toast({ title: "AI Suggestion Applied", description: "Description updated with AI suggestion." });
@@ -467,12 +482,12 @@ export default function MenuManagementPage() {
     <div className="space-y-8">
       <div className="flex flex-col sm:flex-row justify-between items-center gap-2">
         <h1 className="text-3xl font-bold flex items-center"><NotebookText className="mr-3 h-8 w-8 text-primary" data-ai-hint="notebook icon"/> Manage Your Menus</h1>
-        <Button onClick={openNewMenuDialog} disabled={isSaving}>
+        <Button onClick={openNewMenuDialog} disabled={isSaving || isAiAssisting}>
           <PlusCircle className="mr-2 h-5 w-5" /> Add New Menu
         </Button>
       </div>
 
-      {isDialogOpen && (
+      {isDialogOpen && Dialog && DialogContent && DialogHeader && DialogTitle && DialogFooter && DialogClose && (
         <Dialog open={isDialogOpen} onOpenChange={(isOpen) => {
             if ((isSaving || isAiAssisting) && isOpen) return; 
             setIsDialogOpen(isOpen);
@@ -557,7 +572,7 @@ export default function MenuManagementPage() {
                  <FormField
                   control={form.control}
                   name="menuImageFile"
-                  render={() => ( 
+                  render={({fieldState}) => ( 
                     <FormItem>
                       <FormLabel>Menu Image (Optional)</FormLabel>
                       <FormControl>
@@ -752,7 +767,7 @@ export default function MenuManagementPage() {
                                   }
                                   field.onChange(checked);
                                 }}
-                                disabled={isSaving || (field.value && !isChefSubscribed && !(userProfile as AppUserProfileContext)?.isAdmin)} 
+                                disabled={isSaving || isAiAssisting || (field.value && !isChefSubscribed && !(userProfile as AppUserProfileContext)?.isAdmin)} 
                               />
                             </FormControl>
                           </TooltipTrigger>
@@ -790,7 +805,7 @@ export default function MenuManagementPage() {
               onDelete={() => handleDelete(menu.id)}
               onAddToShoppingList={handleAddToShoppingList}
               isChefOwner={true}
-              showChefDetails={false}
+              showChefDetails={false} // Chef name is not shown on their own menu list cards, but available in dialog
             />
           ))}
         </div>

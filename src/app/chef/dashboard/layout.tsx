@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { LayoutDashboard, NotebookText, UserCircle, MessageSquare, CalendarDays, FileText, Users, ShoppingBag, LayoutGrid, ShieldAlert, LifeBuoy, Bell, LogOut, Users2, Combine, CombineIcon } from 'lucide-react';
+import { LayoutDashboard, NotebookText, UserCircle, MessageSquare, CalendarDays, FileText, Users, ShoppingBag, LayoutGrid, ShieldAlert, LifeBuoy, Bell, LogOut, Users2, CombineIcon as Combine } from 'lucide-react'; // Corrected Combine import
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -29,7 +29,7 @@ const chefNavItems: NavItem[] = [
   { href: '/chef/dashboard/menus', label: 'Menus', icon: <NotebookText /> },
   { href: '/chef/dashboard/shopping-list', label: 'Shopping List', icon: <ShoppingBag /> },
   { href: '/chef/dashboard/chefs', label: 'Chef Directory', icon: <Users2 /> },
-  { href: '/chef/dashboard/collaborations', label: 'Collaborations', icon: <CombineIcon /> },
+  { href: '/chef/dashboard/collaborations', label: 'Collaborations', icon: <Combine /> }, // Used Combine from lucide-react directly
   { href: '/chef/dashboard/receipts', label: 'Receipts & Costs', icon: <FileText /> },
 ];
 
@@ -45,14 +45,14 @@ export default function ChefDashboardLayout({
   const isLoading = authLoading || profileLoading; 
 
   useEffect(() => {
-    console.log("ChefDashboardLayout: isLoading:", isLoading, "user:", !!user, "isChef:", isChef, "isChefApproved:", isChefApproved);
     if (isLoading) {
       return; 
     }
 
     if (!user) {
       console.log("ChefDashboardLayout: No user, redirecting to login.");
-      window.location.href = ('/login?redirect=/chef/dashboard');
+      // window.location.href = ('/login?redirect=/chef/dashboard'); // Using router.push for SPA navigation
+      router.push('/login?redirect=/chef/dashboard');
       return;
     }
 
@@ -63,11 +63,12 @@ export default function ChefDashboardLayout({
           variant: 'destructive',
       });
       console.log("ChefDashboardLayout: Not a chef, redirecting to login.");
-      window.location.href = ('/login');
+      // window.location.href = ('/login');
+      router.push('/login');
       return;
     }
     
-  }, [user, isLoading, isChef, isChefApproved, router, toast]);
+  }, [user, isLoading, isChef, isChefApproved, router, toast]); // isChefApproved was in deps but not used for main redirect logic here
 
   if (isLoading) {
     return (
@@ -87,7 +88,9 @@ export default function ChefDashboardLayout({
     );
   }
 
-  if (!isChefApproved && !(userProfile?.isAdmin)) { // Allow admin to bypass approval for viewing
+  // Check for chef approval after confirming the user is a chef and not loading
+  // Allow admin to bypass approval for viewing their own chef dashboard if they also have chef role properties
+  if (!isChefApproved && !(userProfile && userProfile.role === 'admin')) { 
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background p-4">
         <Card className="w-full max-w-md text-center shadow-lg">

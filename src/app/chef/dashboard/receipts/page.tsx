@@ -3,7 +3,7 @@
 
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useForm, useForm as useTaxForm } from 'react-hook-form'; // Renamed one useForm import
+import { useForm, useForm as useTaxForm } from 'react-hook-form';
 import * as z from 'zod';
 import { Button } from '@/components/ui/button';
 import {
@@ -31,12 +31,12 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
-import type { Receipt, CostType, TaxAdviceInput, TaxAdviceOutput } from '@/types';
+import type { Receipt, CostType, TaxAdviceInput, TaxAdviceOutput, AppUserProfileContext } from '@/types';
 import { cn } from '@/lib/utils';
 import { format, startOfDay, endOfDay, parseISO, isValid } from 'date-fns';
 import { PlusCircle, Trash2, FileText, Edit3, UploadCloud, CalendarIcon, Download, DollarSign, Camera, Sparkles, InfoIcon, MessageCircleQuestion, Loader2, Filter, X } from 'lucide-react';
 import Image from 'next/image';
-import { receiptParserFlow } from '@/ai/flows/receipt-parser-flow'; 
+import { receiptParserFlow, type ReceiptParserInput, type ReceiptParserOutput } from '@/ai/flows/receipt-parser-flow'; 
 import { getTaxAdvice } from '@/ai/flows/tax-advice-flow';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
@@ -132,24 +132,30 @@ export default function ReceiptsPage() {
       const receiptsCollectionRef = collection(db, "users", user.uid, "receipts");
       const q = query(receiptsCollectionRef, orderBy("date", "desc"));
       
-      unsubscribe = onSnapshot(q, (querySnapshot) => {
-        const fetchedReceipts = querySnapshot.docs.map(docSnap => {
-          const data = docSnap.data();
-          return {
-            id: docSnap.id,
-            ...data,
-            date: data.date instanceof Timestamp ? data.date.toDate() : (data.date ? new Date(data.date as any) : new Date()), 
-            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
-            updatedAt: data.updatedAt.toDate(),
-          } as Receipt;
+      try {
+        unsubscribe = onSnapshot(q, (querySnapshot) => {
+          const fetchedReceipts = querySnapshot.docs.map(docSnap => {
+            const data = docSnap.data();
+            return {
+              id: docSnap.id,
+              ...data,
+              date: data.date instanceof Timestamp ? data.date.toDate() : (data.date ? new Date(data.date as any) : new Date()), 
+              createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+              updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any): undefined),
+            } as Receipt;
+          });
+          setAllReceipts(fetchedReceipts);
+          setIsLoading(false);
+        }, (error) => {
+          console.error("Error fetching receipts:", error);
+          toast({ title: "Error", description: "Could not fetch your receipts.", variant: "destructive" });
+          setIsLoading(false);
         });
-        setAllReceipts(fetchedReceipts);
+      } catch (e) {
+        console.error("Error setting up receipts listener:", e);
+        toast({title: "Setup Error", description: "Failed to initialize receipt tracking.", variant: "destructive"});
         setIsLoading(false);
-      }, (error) => {
-        console.error("Error fetching receipts:", error);
-        toast({ title: "Error", description: "Could not fetch your receipts.", variant: "destructive" });
-        setIsLoading(false);
-      });
+      }
     } else {
       setIsLoading(false);
       setAllReceipts([]);
@@ -157,7 +163,6 @@ export default function ReceiptsPage() {
     
     return () => {
       if (unsubscribe) {
-        console.log("ReceiptsPage: Unsubscribing from receipts listener.");
         unsubscribe();
       }
     };
@@ -166,7 +171,7 @@ export default function ReceiptsPage() {
   useEffect(() => {
     let stream: MediaStream | null = null;
     const getCameraPermission = async () => {
-      if (isCameraDialogOpen && videoRef.current && hasCameraPermission === null && !isPreviewCapture) { // Only try if not already previewing
+      if (isCameraDialogOpen && videoRef.current && hasCameraPermission === null && !isPreviewCapture) {
         try {
           stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
           setHasCameraPermission(true);
@@ -184,7 +189,7 @@ export default function ReceiptsPage() {
         }
       }
     };
-    if (isCameraDialogOpen && !isPreviewCapture) { // Condition moved here
+    if (isCameraDialogOpen && !isPreviewCapture) { 
       getCameraPermission();
     }
     
@@ -202,10 +207,10 @@ export default function ReceiptsPage() {
     return allReceipts.filter(receipt => {
       const matchesCostType = filterCostType === 'all' || receipt.costType === filterCostType;
       let receiptDate = receipt.date;
-      if (!(receiptDate instanceof Date)) {
+      if (!(receiptDate instanceof Date) && receiptDate) { // Ensure receiptDate is not undefined
           receiptDate = new Date(receiptDate as any);
       }
-      if (!isValid(receiptDate)) return false; // Skip invalid dates
+      if (!isValid(receiptDate)) return false; 
 
       const rDate = startOfDay(receiptDate);
       const matchesStartDate = !filterStartDate || rDate >= startOfDay(filterStartDate);
@@ -218,7 +223,7 @@ export default function ReceiptsPage() {
     setEditingReceipt(receiptToEdit);
     setCapturedImageDataUri(receiptToEdit?.imageUrl || null);
     setFileNameForForm(receiptToEdit?.fileName || null);
-    setIsPreviewCapture(false); // Reset preview state
+    setIsPreviewCapture(false); 
     if (receiptToEdit) {
       let dateToSet = new Date();
       if (receiptToEdit.date) {
@@ -260,22 +265,20 @@ export default function ReceiptsPage() {
         const dataUri = canvas.toDataURL('image/jpeg');
         setCapturedImageDataUri(dataUri);
         setFileNameForForm(`cam_capture_${Date.now()}.jpg`);
-        setIsPreviewCapture(true); // Show preview, hide video
-        // Stop camera stream after capture
+        setIsPreviewCapture(true); 
         if (videoRef.current?.srcObject) {
             const stream = videoRef.current.srcObject as MediaStream;
             stream.getTracks().forEach(track => track.stop());
             videoRef.current.srcObject = null;
         }
-        setHasCameraPermission(null); // Allow re-requesting permission if dialog is reopened
+        setHasCameraPermission(null); 
       }
     }
   };
 
   const handleUseCapturedImage = () => {
-    setIsCameraDialogOpen(false); // Close camera dialog
-    setIsPreviewCapture(false); // Reset preview state for next time
-    // No need to stop stream here, already stopped in handleCapturePhoto or on dialog close effect
+    setIsCameraDialogOpen(false); 
+    setIsPreviewCapture(false); 
   };
 
   const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -301,14 +304,15 @@ export default function ReceiptsPage() {
     setIsParsingReceipt(true);
     toast({ title: "AI Processing", description: "Analyzing receipt image..." });
     try {
-      const result = await receiptParserFlow({ receiptImageUri: capturedImageDataUri });
+      const inputForAI: ReceiptParserInput = { receiptImageUri: capturedImageDataUri };
+      const result: ReceiptParserOutput = await receiptParserFlow(inputForAI);
       if (result) {
         if (result.vendor) form.setValue('vendor', result.vendor);
         if (result.date) {
            try {
-            let parsedDate = parseISO(result.date);
-            if (!isValid(parsedDate)) {
-                parsedDate = new Date(result.date.replace(/-/g, '/'));
+            let parsedDate = parseISO(result.date); // Expects YYYY-MM-DD
+            if (!isValid(parsedDate)) { // Fallback for other common formats if parseISO fails
+                parsedDate = new Date(result.date.replace(/-/g, '/')); 
             }
             if (isValid(parsedDate)) {
                  form.setValue('date', parsedDate);
@@ -370,16 +374,17 @@ export default function ReceiptsPage() {
     const originalFileName = fileNameForForm || (editingReceipt?.fileName) || `receipt_${Date.now()}.jpg`;
 
     try {
-      const receiptIdForPath = editingReceipt?.id || doc(collection(db, 'temp')).id; // Generate ID upfront
+      const receiptIdForPath = editingReceipt?.id || doc(collection(db, 'temp')).id; 
 
       if (capturedImageDataUri && (!editingReceipt || capturedImageDataUri !== editingReceipt.imageUrl)) {
+        // Delete old image if editing and new image provided
         if (editingReceipt?.imageUrl && editingReceipt.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
             const oldImageRef = storageRef(storage, editingReceipt.imageUrl);
             await deleteObject(oldImageRef);
           } catch (e: any) { 
             if (e.code !== 'storage/object-not-found') {
-                console.warn("Could not delete old receipt image:", e.message);
+                console.warn("ReceiptsPage: Could not delete old receipt image during update:", e.message);
             }
           }
         }
@@ -411,7 +416,7 @@ export default function ReceiptsPage() {
         });
       }
 
-      const receiptDataToSave: Omit<Receipt, 'id' | 'createdAt' | 'updatedAt'> & { updatedAt: any, createdAt?: any } = {
+      const receiptDataToSave: Partial<Omit<Receipt, 'id' | 'createdAt' | 'updatedAt'>> & { chefId: string; updatedAt: any } = {
         ...data,
         chefId: user.uid,
         date: Timestamp.fromDate(data.date),
@@ -426,8 +431,7 @@ export default function ReceiptsPage() {
         await updateDoc(receiptDocRef, receiptDataToSave);
         toast({ title: 'Receipt Updated', description: `Receipt from "${data.vendor}" has been updated.` });
       } else {
-        receiptDataToSave.createdAt = serverTimestamp();
-        await setDoc(receiptDocRef, { ...receiptDataToSave, id: receiptDocRef.id });
+        await setDoc(receiptDocRef, { ...receiptDataToSave, id: receiptDocRef.id, createdAt: serverTimestamp() });
         toast({ title: 'Receipt Added', description: `Receipt from "${data.vendor}" has been added.` });
       }
       
@@ -460,18 +464,19 @@ export default function ReceiptsPage() {
     if (window.confirm(`Are you sure you want to delete the receipt from "${receiptToDelete?.vendor}"?`)) {
       setIsSaving(true);
       try {
+        // Delete image from Storage if it exists
         if (receiptToDelete.imageUrl && receiptToDelete.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
             const imageRefToDelete = storageRef(storage, receiptToDelete.imageUrl);
             await deleteObject(imageRefToDelete);
           } catch (e: any) {
             if (e.code !== 'storage/object-not-found') {
-                console.warn("Could not delete receipt image from storage:", e.message);
+                console.warn("ReceiptsPage: Could not delete receipt image from storage during receipt deletion:", e.message);
             }
           }
         }
         await deleteDoc(doc(db, "users", user.uid, "receipts", receiptId));
-        toast({ title: 'Receipt Deleted', description: `Receipt from "${receiptToDelete?.vendor}" removed.`, variant: "destructive" });
+        toast({ title: 'Receipt Deleted', description: `Receipt from "${receiptToDelete?.vendor}" removed.`, variant: 'destructive' });
       } catch (error: any) {
         console.error("Error deleting receipt:", error);
         toast({ title: "Delete Error", description: `Could not delete receipt. ${error.message}`, variant: "destructive" });
@@ -489,7 +494,9 @@ export default function ReceiptsPage() {
     const summary: { [key in CostType]?: number } = {};
     costTypes.forEach(type => summary[type] = 0); 
     filteredReceipts.forEach(receipt => {
-      summary[receipt.costType] = (summary[receipt.costType] || 0) + receipt.totalAmount;
+      if (costTypes.includes(receipt.costType)) { // Ensure costType is valid
+         summary[receipt.costType] = (summary[receipt.costType] || 0) + receipt.totalAmount;
+      }
     });
     return summary;
   }, [filteredReceipts]);
@@ -584,7 +591,7 @@ export default function ReceiptsPage() {
             <Button onClick={() => openUploadDialog()} disabled={isSaving || isParsingReceipt}>
                 <PlusCircle className="mr-2 h-5 w-5" /> Add New Receipt
             </Button>
-            {(
+            {Dialog && ( // Conditionally render tax advice button
               <Button variant="outline" onClick={() => { taxForm.reset(); setTaxAdviceResponse(null); setIsTaxAdviceDialogOpen(true);}}>
                   <MessageCircleQuestion className="mr-2 h-5 w-5" /> Get Tax Advice
               </Button>
@@ -641,7 +648,7 @@ export default function ReceiptsPage() {
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0">
-                <Calendar mode="single" selected={filterEndDate} onSelect={setFilterEndDate} initialFocus disabled={(date) => filterStartDate && date < filterStartDate} />
+                <Calendar mode="single" selected={filterEndDate} onSelect={setFilterEndDate} initialFocus disabled={(date) => filterStartDate ? date < filterStartDate : false} />
               </PopoverContent>
             </Popover>
           </FormItem>
@@ -651,7 +658,7 @@ export default function ReceiptsPage() {
         </CardContent>
       </Card>
 
-      { (
+      {isUploadDialogOpen && Dialog && DialogContent && DialogHeader && DialogTitle && DialogFooter && DialogClose && (
         <Dialog open={isUploadDialogOpen} onOpenChange={(isOpen) => {
             if ((isSaving || isParsingReceipt) && isOpen) return;
             setIsUploadDialogOpen(isOpen);
@@ -672,7 +679,7 @@ export default function ReceiptsPage() {
                 <FormItem>
                   <FormLabel>Receipt Image</FormLabel>
                   <div className="flex flex-col sm:flex-row items-center gap-2">
-                      {(
+                      {CameraDialog && (
                         <Button type="button" variant="outline" onClick={() => { setHasCameraPermission(null); setIsPreviewCapture(false); setIsCameraDialogOpen(true);}} className="w-full sm:w-auto">
                             <Camera className="mr-2 h-4 w-4"/> Capture with Camera
                         </Button>
@@ -828,7 +835,7 @@ export default function ReceiptsPage() {
         </Dialog>
       )}
 
-      { (
+      {isCameraDialogOpen && CameraDialog && DialogContent && DialogHeader && DialogTitle && DialogFooter && DialogClose && (
         <CameraDialog open={isCameraDialogOpen} onOpenChange={(open) => {
             if (!open && videoRef.current?.srcObject) {
               const stream = videoRef.current.srcObject as MediaStream;
@@ -837,7 +844,7 @@ export default function ReceiptsPage() {
               setHasCameraPermission(null); 
             }
             setIsCameraDialogOpen(open);
-            if (!open) setIsPreviewCapture(false); // Reset preview if dialog closed
+            if (!open) setIsPreviewCapture(false); 
         }}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
@@ -865,7 +872,7 @@ export default function ReceiptsPage() {
                 </>
               ) : (
                 <>
-                  <Button type="button" variant="outline" onClick={() => {setIsPreviewCapture(false); setCapturedImageDataUri(null); setFileNameForForm(null); setHasCameraPermission(null); /* Trigger re-request */}}>Retake</Button>
+                  <Button type="button" variant="outline" onClick={() => {setIsPreviewCapture(false); setCapturedImageDataUri(null); setFileNameForForm(null); setHasCameraPermission(null); }}>Retake</Button>
                   <Button type="button" onClick={handleUseCapturedImage}>Use This Image</Button>
                 </>
               )}
@@ -874,7 +881,7 @@ export default function ReceiptsPage() {
         </CameraDialog>
       )}
 
-      { (
+      {isTaxAdviceDialogOpen && Dialog && DialogContent && DialogHeader && DialogTitle && DialogFooter && DialogClose && (
         <Dialog open={isTaxAdviceDialogOpen} onOpenChange={setIsTaxAdviceDialogOpen}>
           <DialogContent className="sm:max-w-lg">
               <DialogHeader>
@@ -997,7 +1004,7 @@ export default function ReceiptsPage() {
                 {filteredReceipts.map((receipt) => (
                   <TableRow key={receipt.id}>
                     <TableCell className="font-medium">{receipt.vendor}</TableCell>
-                    <TableCell>{receipt.date ? (isValid(new Date(receipt.date as any)) ? format(new Date(receipt.date as any), 'PP') : 'N/A'}</TableCell>
+                    <TableCell>{receipt.date ? (isValid(new Date(receipt.date as any)) ? format(new Date(receipt.date as any), 'PP') : 'N/A') : 'N/A'}</TableCell>
                     <TableCell className="text-right">${receipt.totalAmount.toFixed(2)}</TableCell>
                     <TableCell>{receipt.costType}</TableCell>
                     <TableCell className="text-xs">
@@ -1064,7 +1071,7 @@ export default function ReceiptsPage() {
                 <ul className="list-['-_'] list-inside ml-4">
                     <li>If a customer cancels more than 20 days before the event, a 50% refund is typically processed.</li>
                     <li>If a customer cancels less than 20 days before the event, a 20% refund is processed. In this case, 15% of the total event cost may go to the chef and 15% to FindAChef (subject to terms).</li>
-                    <li>Refer to the full <a href="/terms#cancellation" className="underline hover:text-primary">Terms of Service</a> for complete cancellation policy details.</li>
+                    <li>Refer to the full <Link href="/terms#cancellation" className="underline hover:text-primary">Terms of Service</Link> for complete cancellation policy details.</li>
                 </ul>
             </li>
             <li>Always ensure all receipts for an event are uploaded promptly for accurate cost tracking and potential tax purposes.</li>

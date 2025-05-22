@@ -1,11 +1,10 @@
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
 import type { ChefProfile } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
@@ -22,9 +21,7 @@ export default function ChefCollaborationsPage() {
   const [outgoingRequests, setOutgoingRequests] = useState<ChefProfile[]>([]);
   const [collaborators, setCollaborators] = useState<ChefProfile[]>([]);
   
-  const [isLoadingIncoming, setIsLoadingIncoming] = useState(true);
-  const [isLoadingOutgoing, setIsLoadingOutgoing] = useState(true);
-  const [isLoadingCollaborators, setIsLoadingCollaborators] = useState(true);
+  const [isLoadingData, setIsLoadingData] = useState(true);
   const [isProcessing, setIsProcessing] = useState<string | null>(null);
 
   const currentChefProfile = userProfile as ChefProfile | null;
@@ -44,72 +41,66 @@ export default function ChefCollaborationsPage() {
         }
       } catch (error) {
         console.error(`Collaboration: Error fetching profile for ID ${id}:`, error);
+        toast({ title: "Error", description: `Could not fetch profile for ID ${id}.`, variant: "destructive" });
       }
     }
     return profiles;
-  }, [user?.uid]);
+  }, [user?.uid, toast]);
 
   useEffect(() => {
     if (!user || !currentChefProfile) {
-      setIsLoadingIncoming(false);
-      setIsLoadingOutgoing(false);
-      setIsLoadingCollaborators(false);
+      setIsLoadingData(false);
       setIncomingRequests([]);
       setOutgoingRequests([]);
       setCollaborators([]);
       return;
     }
 
+    setIsLoadingData(true);
     let unsubscribeProfile: Unsubscribe | undefined;
 
-    const setupListeners = () => {
-      if (!user) return; // Should be caught by outer if, but defensive
+    try {
       const userDocRef = doc(db, "users", user.uid);
-
       unsubscribeProfile = onSnapshot(userDocRef, async (docSnap) => {
         if (docSnap.exists()) {
           const updatedProfile = docSnap.data() as ChefProfile;
           
-          setIsLoadingIncoming(true);
-          fetchProfileByIds(updatedProfile.incomingCollaborationRequests || []).then(data => {
-            setIncomingRequests(data);
-            setIsLoadingIncoming(false);
-          }).catch(() => setIsLoadingIncoming(false));
-
-          setIsLoadingOutgoing(true);
-          fetchProfileByIds(updatedProfile.outgoingCollaborationRequests || []).then(data => {
-            setOutgoingRequests(data);
-            setIsLoadingOutgoing(false);
-          }).catch(() => setIsLoadingOutgoing(false));
-
-          setIsLoadingCollaborators(true);
-          fetchProfileByIds(updatedProfile.collaboratorIds || []).then(data => {
-            setCollaborators(data);
-            setIsLoadingCollaborators(false);
-          }).catch(() => setIsLoadingCollaborators(false));
+          try {
+            const [inc, out, coll] = await Promise.all([
+              fetchProfileByIds(updatedProfile.incomingCollaborationRequests || []),
+              fetchProfileByIds(updatedProfile.outgoingCollaborationRequests || []),
+              fetchProfileByIds(updatedProfile.collaboratorIds || [])
+            ]);
+            setIncomingRequests(inc);
+            setOutgoingRequests(out);
+            setCollaborators(coll);
+          } catch (error) {
+            console.error("Error fetching related profiles:", error);
+            toast({ title: "Data Load Error", description: "Could not load all collaboration details.", variant: "destructive" });
+          } finally {
+            setIsLoadingData(false);
+          }
         } else {
-          setIsLoadingIncoming(false);
-          setIsLoadingOutgoing(false);
-          setIsLoadingCollaborators(false);
+          console.warn("CollaborationsPage: Current user profile not found in Firestore.");
+          setIsLoadingData(false);
         }
       }, (error) => {
         console.error("Error listening to user profile for collaborations:", error);
-        toast({title: "Error", description: "Could not load collaboration data.", variant: "destructive"});
-        setIsLoadingIncoming(false);
-        setIsLoadingOutgoing(false);
-        setIsLoadingCollaborators(false);
+        toast({title: "Error", description: "Could not load real-time collaboration data.", variant: "destructive"});
+        setIsLoadingData(false);
       });
-    };
-
-    setupListeners();
+    } catch (e) {
+      console.error("Error setting up collaborations listener:", e);
+      toast({title: "Setup Error", description: "Failed to initialize collaboration tracking.", variant: "destructive"});
+      setIsLoadingData(false);
+    }
 
     return () => {
       if (unsubscribeProfile) {
-        console.log("CollaborationsPage: Unsubscribing from profile listener.");
         unsubscribeProfile();
       }
     };
-  }, [user, currentChefProfile?.id, fetchProfileByIds, toast]); // Added currentChefProfile.id to deps if profile structure itself might change
+  }, [user, currentChefProfile?.id, fetchProfileByIds, toast]);
 
 
   const handleRespondToRequest = async (targetChefId: string, action: 'accept' | 'decline') => {
@@ -123,19 +114,17 @@ export default function ChefCollaborationsPage() {
     const targetUserDocRef = doc(db, "users", targetChefId);
 
     try {
-      // Update current user's document
+      // This should ideally be a Cloud Function for atomicity and permissions.
+      // Simulating client-side updates for now.
       await updateDoc(currentUserDocRef, {
         incomingCollaborationRequests: arrayRemove(targetChefId),
-        collaboratorIds: action === 'accept' ? arrayUnion(targetChefId) : arrayRemove(targetChefId), // Only add if accepting
+        collaboratorIds: action === 'accept' ? arrayUnion(targetChefId) : arrayRemove(targetChefId),
         updatedAt: serverTimestamp()
       });
 
-      // Conceptually update target user's document (ideally a Cloud Function)
-      // This client-side write to another user's doc will likely fail due to security rules.
-      // It's here to represent the full intended logic.
       await updateDoc(targetUserDocRef, {
         outgoingCollaborationRequests: arrayRemove(user.uid),
-        collaboratorIds: action === 'accept' ? arrayUnion(user.uid) : arrayRemove(targetChefId), // Only add if accepting
+        collaboratorIds: action === 'accept' ? arrayUnion(user.uid) : arrayRemove(targetChefId),
         updatedAt: serverTimestamp()
       }).catch(e => console.warn("Client-side attempt to update target chef's collaboration list failed (expected if no direct write permission or CF not used):", e.message));
 
@@ -166,11 +155,10 @@ export default function ChefCollaborationsPage() {
         outgoingCollaborationRequests: arrayRemove(targetChefId),
         updatedAt: serverTimestamp()
       });
-      // Conceptually update target user's document (ideally a Cloud Function)
       await updateDoc(targetUserDocRef, {
         incomingCollaborationRequests: arrayRemove(user.uid),
         updatedAt: serverTimestamp()
-      }).catch(e => console.warn("Client-side attempt to update target chef's incoming requests failed (expected if no direct write permission or CF not used):", e.message));
+      }).catch(e => console.warn("Client-side attempt to update target chef's incoming requests failed:", e.message));
       
       toast({ title: "Request Cancelled", description: "Your collaboration request has been cancelled." });
     } catch (error: any) {
@@ -197,11 +185,10 @@ export default function ChefCollaborationsPage() {
         collaboratorIds: arrayRemove(targetChefId),
         updatedAt: serverTimestamp()
       });
-       // Conceptually update target user's document (ideally a Cloud Function)
       await updateDoc(targetUserDocRef, {
         collaboratorIds: arrayRemove(user.uid),
         updatedAt: serverTimestamp()
-      }).catch(e => console.warn("Client-side attempt to update target chef's collaborator list failed (expected if no direct write permission or CF not used):", e.message));
+      }).catch(e => console.warn("Client-side attempt to update target chef's collaborator list failed:", e.message));
 
       toast({ title: "Collaborator Removed", description: "The chef has been removed from your collaborators." });
     } catch (error: any) {
@@ -227,21 +214,21 @@ export default function ChefCollaborationsPage() {
       <CardFooter className="flex justify-end space-x-2 p-4 border-t">
         {type === 'incoming' && (
           <>
-            <Button size="sm" variant="outline" onClick={() => handleRespondToRequest(chef.id, 'decline')} disabled={isProcessing === chef.id}>
+            <Button size="sm" variant="outline" onClick={() => handleRespondToRequest(chef.id, 'decline')} disabled={isProcessing === chef.id || !userProfile?.isAdmin}>
               {isProcessing === chef.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4 mr-1" />} Decline
             </Button>
-            <Button size="sm" onClick={() => handleRespondToRequest(chef.id, 'accept')} disabled={isProcessing === chef.id}>
+            <Button size="sm" onClick={() => handleRespondToRequest(chef.id, 'accept')} disabled={isProcessing === chef.id || !userProfile?.isAdmin}>
               {isProcessing === chef.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4 mr-1" />} Accept
             </Button>
           </>
         )}
         {type === 'outgoing' && (
-          <Button size="sm" variant="outline" onClick={() => handleCancelOutgoingRequest(chef.id)} disabled={isProcessing === chef.id}>
+          <Button size="sm" variant="outline" onClick={() => handleCancelOutgoingRequest(chef.id)} disabled={isProcessing === chef.id || !userProfile?.isAdmin}>
             {isProcessing === chef.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4 mr-1" />} Cancel Request
           </Button>
         )}
         {type === 'collaborator' && (
-          <Button size="sm" variant="destructive" onClick={() => handleRemoveCollaborator(chef.id)} disabled={isProcessing === chef.id}>
+          <Button size="sm" variant="destructive" onClick={() => handleRemoveCollaborator(chef.id)} disabled={isProcessing === chef.id || !userProfile?.isAdmin}>
             {isProcessing === chef.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserMinus className="h-4 w-4 mr-1" />} Remove
           </Button>
         )}
@@ -249,7 +236,7 @@ export default function ChefCollaborationsPage() {
     </Card>
   );
 
-  if (!currentChefProfile?.hasCompletedFirstCoOp && !currentChefProfile?.isAdmin) { // Allow admins to see this page
+  if (!currentChefProfile?.hasCompletedFirstCoOp && !currentChefProfile?.isAdmin) {
     return (
       <div className="text-center py-10">
         <CombineIcon className="mx-auto h-12 w-12 text-muted-foreground" data-ai-hint="collaboration icon"/>
@@ -265,7 +252,9 @@ export default function ChefCollaborationsPage() {
     );
   }
 
-  const isLoadingAny = isLoadingIncoming || isLoadingOutgoing || isLoadingCollaborators;
+  if (isLoadingData && (!incomingRequests.length && !outgoingRequests.length && !collaborators.length)) {
+    return <div className="flex justify-center items-center h-64"><Loader2 className="h-8 w-8 animate-spin text-primary"/> Loading collaboration data...</div>;
+  }
 
   return (
     <div className="space-y-8">
@@ -282,7 +271,7 @@ export default function ChefCollaborationsPage() {
           <CardDescription>Review requests from chefs who want to collaborate with you.</CardDescription>
         </CardHeader>
         <CardContent>
-          {isLoadingIncoming ? <div className="text-center p-4"><Loader2 className="h-6 w-6 animate-spin text-primary"/> Loading requests...</div> :
+          {isLoadingData && incomingRequests.length === 0 ? <div className="text-center p-4"><Loader2 className="h-6 w-6 animate-spin text-primary"/> Loading requests...</div> :
            incomingRequests.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {incomingRequests.map(chef => renderChefCard(chef, 'incoming'))}
@@ -299,7 +288,7 @@ export default function ChefCollaborationsPage() {
           <CardDescription>Requests you've sent to other chefs.</CardDescription>
         </CardHeader>
         <CardContent>
-          {isLoadingOutgoing ? <div className="text-center p-4"><Loader2 className="h-6 w-6 animate-spin text-primary"/> Loading requests...</div> :
+          {isLoadingData && outgoingRequests.length === 0 ? <div className="text-center p-4"><Loader2 className="h-6 w-6 animate-spin text-primary"/> Loading requests...</div> :
            outgoingRequests.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {outgoingRequests.map(chef => renderChefCard(chef, 'outgoing'))}
@@ -316,7 +305,7 @@ export default function ChefCollaborationsPage() {
           <CardDescription>Chefs you are currently collaborating with.</CardDescription>
         </CardHeader>
         <CardContent>
-          {isLoadingCollaborators ? <div className="text-center p-4"><Loader2 className="h-6 w-6 animate-spin text-primary"/> Loading collaborators...</div> :
+          {isLoadingData && collaborators.length === 0 ? <div className="text-center p-4"><Loader2 className="h-6 w-6 animate-spin text-primary"/> Loading collaborators...</div> :
            collaborators.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {collaborators.map(chef => renderChefCard(chef, 'collaborator'))}
