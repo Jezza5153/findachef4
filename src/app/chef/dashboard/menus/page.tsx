@@ -28,7 +28,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
 import { collection, addDoc, doc, updateDoc, deleteDoc, query, where, serverTimestamp, Timestamp, setDoc, onSnapshot, orderBy, Unsubscribe, writeBatch } from 'firebase/firestore';
-import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
+import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject, StorageReference } from 'firebase/storage';
 import Image from 'next/image';
 import { assistMenuItem, type MenuItemAssistInput } from '@/ai/flows/menu-item-assist-flow';
 import { v4 as uuidv4 } from 'uuid';
@@ -208,48 +208,49 @@ export default function MenuManagementPage() {
     const menuIdForPath = editingMenu?.id || doc(collection(db, 'menus')).id; 
 
     try {
- if (menuImageFile) {
- // Delete old image if editing and new image provided
- if (editingMenu?.imageUrl && editingMenu.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
- try {
- const oldImageRef = storageRef(storage, editingMenu.imageUrl);
- await deleteObject(oldImageRef);
- } catch (e: any) {
- if (e.code !== 'storage/object-not-found') {
- console.warn("MenuManagementPage: Could not delete old menu image during update:", e.message);
- toast({ title: "Image Update Warning", description: "Failed to delete old image, proceeding with new upload.", variant: "warning" });
- }
- }
+      if (menuImageFile) {
+        if (editingMenu?.imageUrl && editingMenu.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
+          try {
+            const oldImageRef: StorageReference = storageRef(storage, editingMenu.imageUrl);
+            await deleteObject(oldImageRef);
+            console.log("MenuManagement: Deleted old menu image.");
+          } catch (e: any) {
+            if (e.code !== 'storage/object-not-found') {
+              console.warn("MenuManagement: Could not delete old menu image during update:", e.message);
+            }
+          }
         }
 
- const fileExtension = menuImageFile.name.split('.').pop() || 'jpg';
- const imagePath = `users/${user.uid}/menus/${menuIdForPath}/image.${fileExtension}`;
- const imageStorageRefInstance = storageRef(storage, imagePath);
+        const fileExtension = menuImageFile.name.split('.').pop() || 'jpg';
+        const imagePath = `users/${user.uid}/menus/${menuIdForPath}/image.${fileExtension}`;
+        const imageStorageRefInstance = storageRef(storage, imagePath);
 
- toast({ title: "Uploading image...", description: "Please wait." });
- const uploadTask = uploadBytesResumable(imageStorageRefInstance, menuImageFile);
+        toast({ title: "Uploading image...", description: "Please wait." });
+        const uploadTask = uploadBytesResumable(imageStorageRefInstance, menuImageFile);
 
- await new Promise<void>((resolve, reject) => {
- uploadTask.on('state_changed',
- null,
- (error) => {
- console.error("Menu image upload error:", error);
- toast({ title: "Upload Failed", description: `Image upload failed: ${error.message}`, variant: "destructive" });
- reject(error);
- },
- async () => {
- try {
- imageUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
- resolve();
- } catch (getUrlError: any) {
- console.error("Error getting download URL for menu image:", getUrlError);
- toast({ title: "Upload Failed", description: `Failed to get image URL: ${getUrlError.message}`, variant: "destructive" });
- reject(getUrlError);
-          }
- }
- );
- });
- }
+        await new Promise<void>((resolve, reject) => {
+          uploadTask.on('state_changed',
+            null,
+            (error) => {
+              console.error("Menu image upload error:", error);
+              toast({ title: "Upload Failed", description: `Image upload failed: ${error.message}`, variant: "destructive" });
+              reject(error);
+            },
+            async () => {
+              try {
+                imageUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
+                console.log("MenuManagement: New image uploaded, URL:", imageUrlToSave);
+                resolve();
+              } catch (getUrlError: any) {
+                console.error("Error getting download URL for menu image:", getUrlError);
+                toast({ title: "Upload Failed", description: `Failed to get image URL: ${getUrlError.message}`, variant: "destructive" });
+                reject(getUrlError);
+              }
+            }
+          );
+        });
+      } // End of image upload block
+
       const finalMenuIngredients = data.menuIngredients?.map(ing => ({
         ...ing,
         totalCost: (Number(ing.quantity) || 0) * (Number(ing.costPerUnit) || 0)
@@ -259,7 +260,7 @@ export default function MenuManagementPage() {
       const paxForCalc = Math.max(1, Number(data.pax) || 1);
       const costPerHeadFromIngredients = totalIngredientCost / paxForCalc;
 
-      const menuDataToSave: Partial<Omit<Menu, 'id' | 'createdAt' | 'updatedAt'>> & { chefId: string; chefName: string; updatedAt: any; } = {
+      const menuDataToSave: Omit<Menu, 'id' | 'createdAt' | 'updatedAt'> & { chefId: string; chefName: string; updatedAt: any; createdAt?: any; id?: string; } = {
         title: data.title,
         description: data.description,
         cuisine: data.cuisine,
@@ -282,23 +283,14 @@ export default function MenuManagementPage() {
 
       if (editingMenu) {
         const menuDocRef = doc(db, "menus", editingMenu.id);
- try {
         await updateDoc(menuDocRef, menuDataToSave);
- toast({ title: 'Menu Updated', description: `"${data.title}" has been successfully updated.` });
- } catch (updateError: any) {
- console.error("Error updating menu document:", updateError);
- toast({ title: 'Update Failed', description: `Failed to update menu document: ${updateError.message}`, variant: 'destructive' });
- throw updateError; // Rethrow to hit the outer catch
- }
+        toast({ title: 'Menu Updated', description: `"${data.title}" has been successfully updated.` });
       } else {
- const newMenuDocRef = doc(db, "menus", menuIdForPath);
- try {
-        await setDoc(newMenuDocRef, { ...menuDataToSave, id: newMenuDocRef.id, createdAt: serverTimestamp() });
+        menuDataToSave.id = menuIdForPath;
+        menuDataToSave.createdAt = serverTimestamp();
+        const newMenuDocRef = doc(db, "menus", menuIdForPath);
+        await setDoc(newMenuDocRef, menuDataToSave);
         toast({ title: 'Menu Created', description: `"${data.title}" has been successfully created.` });
- } catch (createError: any) {
- console.error("Error creating menu document:", createError);
- toast({ title: 'Create Failed', description: `Failed to create menu document: ${createError.message}`, variant: 'destructive' });
- throw createError; // Rethrow to hit the outer catch
       }
       
       form.reset();
@@ -309,17 +301,13 @@ export default function MenuManagementPage() {
       replaceIngredients([]);
 
     } catch (error: any) {
- console.error('Menu save operation failed:', error);
- // If a specific error toast wasn't shown by sub-catches (like upload), show a generic one
- if (!toast.isActive) { // Assuming toast library has a way to check if a toast is currently active
- toast({ title: 'Save Failed', description: `Could not save menu due to an unexpected error. ${error.message}`, variant: 'destructive' });
- }
- // Reset image state if save fails after upload
- setMenuImageFile(null);
+      console.error('Menu save operation failed:', error);
+      toast({ title: 'Save Failed', description: `Could not save menu: ${error.message}`, variant: 'destructive' });
+      // Do not reset dialog on critical save failure, allow user to retry or copy data
     } finally {
       setIsSaving(false);
     }
-  };
+  }; // End of onSubmit function
 
   const handleEdit = (menuId: string) => {
     const menuToEdit = menus.find(menu => menu.id === menuId);
@@ -358,27 +346,22 @@ export default function MenuManagementPage() {
     if (window.confirm(`Are you sure you want to delete the menu "${menuToDelete?.title}"?`)) {
       setIsSaving(true);
       try {
-        // Delete image from Storage if it exists
         if (menuToDelete.imageUrl && menuToDelete.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
- try {
-            const imageRefToDelete = storageRef(storage, menuToDelete.imageUrl);
+          try {
+            const imageRefToDelete: StorageReference = storageRef(storage, menuToDelete.imageUrl);
             await deleteObject(imageRefToDelete);
- } catch (e: any) {
- if (e.code !== 'storage/object-not-found') {
-               console.warn("MenuManagementPage: Could not delete menu image from storage during menu deletion:", e.message);
- toast({ title: "Image Deletion Warning", description: "Failed to delete menu image from storage.", variant: "warning" });
- }
- }
+            console.log("MenuManagement: Deleted menu image from storage.");
+          } catch (e: any) {
+            if (e.code !== 'storage/object-not-found') {
+               console.warn("MenuManagement: Could not delete menu image from storage during menu deletion:", e.message);
+            }
+          }
         }
 
- try {
- await deleteDoc(doc(db, "menus", menuId));
+        await deleteDoc(doc(db, "menus", menuId));
         toast({ title: 'Menu Deleted', description: `"${menuToDelete?.title}" has been deleted.`, variant: 'destructive' });
- } catch (firestoreError: any) {
- console.error("Error deleting menu document:", firestoreError);
- toast({ title: "Delete Error", description: `Failed to delete menu document: ${firestoreError.message}`, variant: "destructive" });
- }      } catch (error: any) { // Catch any other errors during the process (like potential image delete)
- console.error("Menu deletion process error:", error);
+      } catch (error: any) { 
+        console.error("Error deleting menu:", error);
         toast({ title: "Delete Error", description: `Could not delete menu. ${error.message}`, variant: "destructive" });
       } finally {
         setIsSaving(false);
@@ -396,19 +379,19 @@ export default function MenuManagementPage() {
         return;
     }
     
-    setIsSaving(true); // Consider a more specific loading state if needed
+    setIsSaving(true); 
     try {
         const batch = writeBatch(db);
         const shoppingListCollectionRef = collection(db, `users/${user.uid}/shoppingListItems`);
         
         menu.menuIngredients.forEach(ing => {
-            const newItemRef = doc(shoppingListCollectionRef); // Auto-generate ID
+            const newItemRef = doc(shoppingListCollectionRef); 
             const newItemData: Omit<ShoppingListItem, 'id' | 'createdAt' | 'updatedAt'> = {
                 chefId: user.uid,
                 name: ing.name,
                 quantity: ing.quantity, 
                 unit: ing.unit, 
-                estimatedCost: ing.costPerUnit, // Storing cost per unit as estimatedCost
+                estimatedCost: ing.costPerUnit, 
                 notes: `For menu: ${menu.title}. ${ing.notes || ''}`.trim(),
                 purchased: false,
                 menuId: menu.id,
@@ -416,15 +399,11 @@ export default function MenuManagementPage() {
             batch.set(newItemRef, { ...newItemData, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
         });
         
- try {
- await batch.commit();
- toast({
+        await batch.commit();
+        toast({
             title: 'Added to Shopping List',
             description: `Ingredients from "${menu.title}" added.`,
         });
- } catch (batchError: any) {
- throw batchError; // Rethrow to outer catch
- }
     } catch (error: any) {
         console.error("Error adding to shopping list:", error);
         toast({
@@ -617,7 +596,7 @@ export default function MenuManagementPage() {
                         </div>
                       )}
                       <FormDescription>A captivating image for your menu (max 2MB, JPG/PNG/WEBP).</FormDescription>
-                      <FormMessage />
+                      {fieldState.error && <FormMessage>{fieldState.error.message}</FormMessage>}
                     </FormItem>
                   )}
                 />
@@ -719,7 +698,7 @@ export default function MenuManagementPage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Final Determined Cost Price per Head ($)</FormLabel>
-                        <FormControl><Input type="number" step="0.01" placeholder="30.00" {...field} /></FormControl>
+                        <FormControl><Input type="number" step="0.01" placeholder="30.00" {...field} value={field.value || 0} /></FormControl>
                         <FormDescription>Your internal cost per serving. You can use the calculated value above or enter your own.</FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -795,7 +774,7 @@ export default function MenuManagementPage() {
                                   }
                                   field.onChange(checked);
                                 }}
-                                disabled={isSaving || isAiAssisting || (field.value && !isChefSubscribed && !(userProfile as AppUserProfileContext)?.isAdmin)} 
+                                disabled={isSaving || isAiAssisting || (field.value && !isChefSubscribed && !(userProfile as AppUserProfileContext)?.isAdmin && !field.value) } // Corrected disabled logic
                               />
                             </FormControl>
                           </TooltipTrigger>
@@ -833,7 +812,7 @@ export default function MenuManagementPage() {
               onDelete={() => handleDelete(menu.id)}
               onAddToShoppingList={handleAddToShoppingList}
               isChefOwner={true}
-              showChefDetails={false} // Chef name is not shown on their own menu list cards, but available in dialog
+              showChefDetails={false} 
             />
           ))}
         </div>
@@ -855,5 +834,8 @@ export default function MenuManagementPage() {
       )}
     </div>
   );
+
 }
+
+
     

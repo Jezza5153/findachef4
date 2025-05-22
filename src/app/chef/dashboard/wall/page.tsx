@@ -178,7 +178,6 @@ export default function ChefWallPage() {
     // This also ensures editingEvent.eventDateTime is only accessed if editingEvent exists.
     let eventDate: Date;
 
-    let eventDate: Date;
     try {
       eventDate = new Date(data.eventDateTime); // HTML datetime-local input provides ISO string
       if (!isValid(eventDate)) throw new Error("Invalid date format from input.");
