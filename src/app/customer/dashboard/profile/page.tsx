@@ -21,7 +21,7 @@ import { useState, useEffect, type ChangeEvent } from 'react';
 import type { CustomerProfile as CustomerProfileType } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
-import { UserCircle, Save, UploadCloud, MapPin, ChefHat, CookingPot, MixerHorizontal, Microwave, UtensilsCrossed, Trash2, Loader2, Home, Thermometer, Box, Utensils } from 'lucide-react'; 
+import { UserCircle, Save, UploadCloud, MapPin, ChefHat, CookingPot, Microwave, UtensilsCrossed, Trash2, Loader2, Home, Thermometer, Box, Utensils, LucideCookingPot } from 'lucide-react'; 
 import {
   AlertDialog,
   AlertDialogAction,
@@ -43,7 +43,7 @@ const kitchenEquipmentOptions = [
   { value: 'Oven', label: 'Oven', icon: <Home className="mr-2 h-5 w-5" /> },
   { value: 'Stovetop', label: 'Stovetop', icon: <CookingPot className="mr-2 h-5 w-5" /> },
   { value: 'Microwave', label: 'Microwave', icon: <Microwave className="mr-2 h-5 w-5" /> },
-  { value: 'Blender', label: 'Blender/Mixer', icon: <MixerHorizontal className="mr-2 h-5 w-5" /> },
+  { value: 'Blender', label: 'Blender/Mixer', icon: <LucideCookingPot className="mr-2 h-5 w-5" /> },
   { value: 'BBQGrill', label: 'BBQ Grill', icon: <UtensilsCrossed className="mr-2 h-5 w-5" /> },
   { value: 'StandardPotsPans', label: 'Standard Pots & Pans', icon: <Utensils className="mr-2 h-5 w-5" /> },
   { value: 'Refrigerator', label: 'Refrigerator', icon: <Thermometer className="mr-2 h-5 w-5" /> },
