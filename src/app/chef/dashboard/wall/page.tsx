@@ -58,8 +58,8 @@ const wallEventFormSchema = z.object({
   }, { message: 'Please enter a valid future date and time (e.g., YYYY-MM-DDTHH:MM).' }),
   location: z.string().min(3, { message: 'Location is required.' }),
   pricePerPerson: z.coerce.number().min(0, { message: 'Price must be a positive number or zero.' }),
-  chefsInvolved:z.string().max(N).optional(), 
-  tags:z.string().max(N).optional(), 
+  chefsInvolved:z.string().max().optional(), 
+  tags:z.string().max().optional(), 
   eventImageFile: z.instanceof(File).optional()
     .refine(file => !file || file.size <= 2 * 1024 * 1024, `Max image size is 2MB.`)
     .refine(file => !file || ['image/jpeg', 'image/png', 'image/webp'].includes(file.type), `Only JPG, PNG, WEBP files are allowed.`),

@@ -58,24 +58,25 @@ const menuIngredientSchema = z.object({
   unit: z.string().min(1, { message: "Unit is required." }),
   costPerUnit: z.coerce.number().min(0, { message: "Cost per unit must be non-negative." }),
   totalCost: z.coerce.number().optional(),
-  notes: z.string().max(N).optional()
+  notes: z.string().max().optional()
 }).strip();
 
-const menuFormSchema = z.object({
-  title: z.string().min(3, { message: 'Title must be at least 3 characters.' }),
-  description: z.string().min(10, { message: 'Description must be at least 10 characters.' }),
-  cuisine: z.string().min(2, { message: 'Cuisine type is required.' }),
-  pricePerHead: z.coerce.number().min(0, { message: 'Sale price must be a positive number.' }),
-  pax: z.coerce.number().min(1, { message: 'PAX must be at least 1.' }).optional(),
-  costPrice: z.coerce.number().min(0, { message: 'Cost price must be positive.'}).optional(),
-  dietaryInfo: z.array(z.string()).optional(),
-  isPublic: z.boolean().default(false),
+const menuSchema = z.object({
+  // ...other fields...
   menuImageFile: z.instanceof(File).optional()
     .refine(file => !file || file.size <= 2 * 1024 * 1024, `Max image size is 2MB.`)
     .refine(file => !file || ['image/jpeg', 'image/png', 'image/webp'].includes(file.type), `Only JPG, PNG, WEBP files are allowed.`),
-  dataAiHint:z.string().max(N).optional(), "Hint should be brief, max 2 words."),
+  dataAiHint: z.string().max(40, "Hint should be brief, max 2 words.").optional(),
   menuIngredients: z.array(menuIngredientSchema).default([]),
-}).refine(data => { if (data.isPublic && (!data.menuIngredients || data.menuIngredients.length === 0)) return false; return true; }, { message: "Public menus must have at least one ingredient listed.", path: ['isPublic'] });
+})
+.refine(data => {
+  if (data.isPublic && (!data.menuIngredients || data.menuIngredients.length === 0))
+    return false;
+  return true;
+}, {
+  message: "Public menus must have at least one ingredient listed.",
+  path: ['isPublic'],
+});
 
 type MenuFormValues = z.infer<typeof menuFormSchema>;
 

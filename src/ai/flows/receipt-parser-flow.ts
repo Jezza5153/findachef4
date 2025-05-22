@@ -26,8 +26,8 @@ const ReceiptParserInputSchema = z.object({
 export type ReceiptParserInput = z.infer<typeof ReceiptParserInputSchema>;
 
 const ReceiptParserOutputSchema = z.object({
-  vendor: z.string().max(N).optional().describe('The vendor name extracted from the receipt.'),
-  date: z.string().max(N).optional().describe('The transaction date (YYYY-MM-DD) from the receipt.'),
+  vendor: z.string().max().optional().describe('The vendor name extracted from the receipt.'),
+  date: z.string().max().optional().describe('The transaction date (YYYY-MM-DD) from the receipt.'),
   totalAmount: z.number().optional().describe('The total amount from the receipt.'),
   suggestedCostType: z.enum(validCostTypes).optional().describe(`The suggested cost category for this receipt (e.g., ${validCostTypes.join(', ')}).`),
 });

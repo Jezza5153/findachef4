@@ -40,8 +40,8 @@ const requestFormSchema = z.object({
     .refine(date => date >= addDays(startOfDay(new Date()), 2), {
       message: 'Event date must be at least 48 hours from now.'
     }),
-  notes: z.string().max(N).optional(),
-  location: z.string().max(N).optional(),
+  notes: z.string().max().optional(),
+  location: z.string().max().optional(),
 });
 
 type RequestFormValues = z.infer<typeof requestFormSchema>;

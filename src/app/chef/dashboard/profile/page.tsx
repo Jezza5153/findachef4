@@ -49,14 +49,14 @@ const chefProfileSchema = z.object({
   profilePictureFile: z.instanceof(File).optional()
     .refine(file => !file || file.size <= 2 * 1024 * 1024, `Max file size is 2MB.`)
     .refine(file => !file || ['image/jpeg', 'image/png', 'image/webp'].includes(file.type), `Only JPG, PNG, WEBP files are allowed.`),
-  experienceSummary: z.string().max(N).optional(), // Added optional()
+  experienceSummary: z.string().max().optional(), // Added optional()
   education: z.string().max(2000, "Education summary cannot exceed 2000 characters.").optional(),
-  skills:z.string().max(N).optional(), // Added optional()
+  skills:z.string().max().optional(), // Added optional()
   portfolioItem1Url: z.string().url({ message: "Invalid URL for portfolio item 1." }).optional().or(z.literal('')),
   portfolioItem1Caption: z.string().max(150, "Caption for item 1 cannot exceed 150 characters.").optional(), // Swapped order
   portfolioItem2Url: z.string().url({ message: "Invalid URL for portfolio item 2." }).optional().or(z.literal('')),
   portfolioItem2Caption: z.string().max(150, "Caption for item 2 cannot exceed 150 characters.").optional(), // Swapped order
-  teamName: z.string().max(N).optional(), 
+  teamName: z.string().max().optional(), 
 });
 
 type ChefProfileFormValues = z.infer<typeof chefProfileSchema>;

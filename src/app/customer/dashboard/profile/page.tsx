@@ -52,19 +52,19 @@ const kitchenEquipmentOptions = [
 
 const customerProfileSchema = z.object({
   name: z.string().min(2, { message: 'Name must be at least 2 characters.' }),
-  phone:z.string().max(N).optional(), 
+  phone:z.string().max().optional(), 
   profilePictureFile: z.instanceof(File)
     .refine(file => !file || file.size <= 2 * 1024 * 1024, `Max file size is 2MB.`)
     .refine(file => !file || ['image/jpeg', 'image/png', 'image/webp'].includes(file.type), `Only JPG, PNG, WEBP files are allowed.`).optional(),
   kitchenEquipment: z.array(z.string()).optional(),
-  addressDetails:z.string().max(N).optional(),
-  defaultEventType: z.string().max(N).optional(),
+  addressDetails:z.string().max().optional(),
+  defaultEventType: z.string().max().optional(),
   defaultPax: z.coerce.number().default(1).optional(),   // <-- .default(1) for consistency
   defaultBudgetAmount: z.coerce.number().default(50).optional(), // <-- .default(50)
-  defaultFrequency: z.string().max(N).optional(),
-  defaultTheme: z.string().max(N).optional(),
-  defaultDietaryNotes:z.string().max(N).optional(),
-  defaultExtraComments: z.string().max(N).optional(),
+  defaultFrequency: z.string().max().optional(),
+  defaultTheme: z.string().max().optional(),
+  defaultDietaryNotes:z.string().max().optional(),
+  defaultExtraComments: z.string().max().optional(),
 });
 
 type CustomerProfileFormValues = z.infer<typeof customerProfileSchema>;

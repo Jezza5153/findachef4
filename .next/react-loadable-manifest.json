@@ -1,1 +1,98 @@
-{}
+{
+  "app/admin/layout.tsx -> @/components/dashboard-layout": {
+    "id": 86862,
+    "files": [
+      "static/chunks/1345-bf5f40a98d9e774c.js",
+      "static/chunks/6874-3def4ebb17f2994e.js",
+      "static/chunks/7649-d07e5656bf99e3a3.js",
+      "static/chunks/5152-b1b71aa3be2729d8.js",
+      "static/chunks/9613-43b2c07b816ef785.js",
+      "static/chunks/6862.ce87e3ebe9232d36.js"
+    ]
+  },
+  "app/admin/page.tsx -> @/components/ui/dialog": {
+    "id": 54165,
+    "files": [
+      "static/chunks/1345-bf5f40a98d9e774c.js",
+      "static/chunks/1308.b0dcd0f533b0fd4d.js"
+    ]
+  },
+  "app/chef/dashboard/layout.tsx -> @/components/dashboard-layout": {
+    "id": 86862,
+    "files": [
+      "static/chunks/1345-bf5f40a98d9e774c.js",
+      "static/chunks/6874-3def4ebb17f2994e.js",
+      "static/chunks/7649-d07e5656bf99e3a3.js",
+      "static/chunks/5152-b1b71aa3be2729d8.js",
+      "static/chunks/9613-43b2c07b816ef785.js",
+      "static/chunks/6862.ce87e3ebe9232d36.js"
+    ]
+  },
+  "app/chef/dashboard/menus/page.tsx -> @/components/ui/dialog": {
+    "id": 54165,
+    "files": [
+      "static/chunks/1345-bf5f40a98d9e774c.js",
+      "static/chunks/4165.d97cc2d45f3269bd.js"
+    ]
+  },
+  "app/chef/dashboard/receipts/page.tsx -> @/components/ui/dialog": {
+    "id": 54165,
+    "files": [
+      "static/chunks/8927.58c27ae090a315dd.js"
+    ]
+  },
+  "app/chef/dashboard/shopping-list/page.tsx -> @/components/ui/dialog": {
+    "id": 54165,
+    "files": [
+      "static/chunks/1345-bf5f40a98d9e774c.js",
+      "static/chunks/6546.fa0989fcd44136aa.js"
+    ]
+  },
+  "app/chef/dashboard/wall/page.tsx -> @/components/ui/dialog": {
+    "id": 54165,
+    "files": [
+      "static/chunks/1345-bf5f40a98d9e774c.js",
+      "static/chunks/1308.b0dcd0f533b0fd4d.js"
+    ]
+  },
+  "app/customer/dashboard/events/page.tsx -> @/components/booking-invoice-dialog": {
+    "id": 65620,
+    "files": [
+      "static/chunks/1345-bf5f40a98d9e774c.js",
+      "static/chunks/5620.5b617041c17a286d.js"
+    ]
+  },
+  "app/customer/dashboard/events/page.tsx -> @/components/ui/alert-dialog": {
+    "id": 90010,
+    "files": [
+      "static/chunks/1345-bf5f40a98d9e774c.js",
+      "static/chunks/7649-d07e5656bf99e3a3.js",
+      "static/chunks/816.c4fcee15a65aeeaa.js"
+    ]
+  },
+  "app/customer/dashboard/layout.tsx -> @/components/dashboard-layout": {
+    "id": 86862,
+    "files": [
+      "static/chunks/9352-c5ce2d19c56f338c.js",
+      "static/chunks/1345-bf5f40a98d9e774c.js",
+      "static/chunks/6874-3def4ebb17f2994e.js",
+      "static/chunks/7649-d07e5656bf99e3a3.js",
+      "static/chunks/5152-b1b71aa3be2729d8.js",
+      "static/chunks/9613-43b2c07b816ef785.js",
+      "static/chunks/6862.ce87e3ebe9232d36.js",
+      "static/chunks/8447.ebda2610a85a9b3b.js"
+    ]
+  },
+  "app/customer/dashboard/messages/page.tsx -> @/components/stripe-payment-form": {
+    "id": 1101,
+    "files": [
+      "static/chunks/1101.a4d69a8abfc4228a.js"
+    ]
+  },
+  "app/customer/dashboard/messages/page.tsx -> @stripe/react-stripe-js": {
+    "id": 55855,
+    "files": [
+      "static/chunks/5855.02ce6c404fc91ca0.js"
+    ]
+  }
+}

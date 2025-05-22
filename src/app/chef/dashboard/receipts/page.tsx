@@ -70,10 +70,10 @@ const receiptFormSchema = z.object({
   vendor: z.string().min(1, { message: 'Vendor name is required.' }),
   date: z.date({ required_error: 'Receipt date is required.' }),
   totalAmount: z.coerce.number().min(0.01, { message: 'Total amount must be greater than 0.' }),
-  assignedToEventId: z.string().max().optional(),
-  assignedToMenuId: z.string().max().optional(),
- costType: z.enum(costTypesForZod, { required_error: 'Cost type is required.' }),
-  notes: z.string().max(N).optional(),
+  assignedToEventId: z.string().max(60).optional(),
+  assignedToMenuId: z.string().max(60).optional(),
+  costType: z.enum(costTypesForZod, { required_error: 'Cost type is required.' }),
+  notes: z.string().max(300, "Notes must be 300 characters or less.").optional(),
 });
 
 type ReceiptFormValues = z.infer<typeof receiptFormSchema>;

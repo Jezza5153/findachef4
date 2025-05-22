@@ -45,7 +45,7 @@ const chefSignupSchema = z.object({
   agreedToTerms: z.boolean().refine(value => value === true, {
     message: 'You must agree to the terms and policies to continue.',
   }),
-  education: z.string().max(N).optional(),
+  education: z.string().max().optional(),
 }).refine(data => data.password === data.confirmPassword, {
   message: "Passwords don't match",
   path: ['confirmPassword'],

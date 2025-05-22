@@ -222,30 +222,6 @@
         "x-next-revalidate-tag-token"
       ]
     },
-    "/chef/dashboard/calendar": {
-      "experimentalBypassFor": [
-        {
-          "type": "header",
-          "key": "Next-Action"
-        },
-        {
-          "type": "header",
-          "key": "content-type",
-          "value": "multipart/form-data;.*"
-        }
-      ],
-      "initialRevalidateSeconds": false,
-      "srcRoute": "/chef/dashboard/calendar",
-      "dataRoute": "/chef/dashboard/calendar.rsc",
-      "allowHeader": [
-        "host",
-        "x-matched-path",
-        "x-prerender-revalidate",
-        "x-prerender-revalidate-if-generated",
-        "x-next-revalidated-tags",
-        "x-next-revalidate-tag-token"
-      ]
-    },
     "/admin": {
       "experimentalBypassFor": [
         {
@@ -270,6 +246,30 @@
         "x-next-revalidate-tag-token"
       ]
     },
+    "/chef/dashboard/calendar": {
+      "experimentalBypassFor": [
+        {
+          "type": "header",
+          "key": "Next-Action"
+        },
+        {
+          "type": "header",
+          "key": "content-type",
+          "value": "multipart/form-data;.*"
+        }
+      ],
+      "initialRevalidateSeconds": false,
+      "srcRoute": "/chef/dashboard/calendar",
+      "dataRoute": "/chef/dashboard/calendar.rsc",
+      "allowHeader": [
+        "host",
+        "x-matched-path",
+        "x-prerender-revalidate",
+        "x-prerender-revalidate-if-generated",
+        "x-next-revalidated-tags",
+        "x-next-revalidate-tag-token"
+      ]
+    },
     "/chef/dashboard/chefs": {
       "experimentalBypassFor": [
         {
@@ -285,6 +285,30 @@
       "initialRevalidateSeconds": false,
       "srcRoute": "/chef/dashboard/chefs",
       "dataRoute": "/chef/dashboard/chefs.rsc",
+      "allowHeader": [
+        "host",
+        "x-matched-path",
+        "x-prerender-revalidate",
+        "x-prerender-revalidate-if-generated",
+        "x-next-revalidated-tags",
+        "x-next-revalidate-tag-token"
+      ]
+    },
+    "/chef/dashboard/collaborations": {
+      "experimentalBypassFor": [
+        {
+          "type": "header",
+          "key": "Next-Action"
+        },
+        {
+          "type": "header",
+          "key": "content-type",
+          "value": "multipart/form-data;.*"
+        }
+      ],
+      "initialRevalidateSeconds": false,
+      "srcRoute": "/chef/dashboard/collaborations",
+      "dataRoute": "/chef/dashboard/collaborations.rsc",
       "allowHeader": [
         "host",
         "x-matched-path",
@@ -333,30 +357,6 @@
       "initialRevalidateSeconds": false,
       "srcRoute": "/chef/dashboard",
       "dataRoute": "/chef/dashboard.rsc",
-      "allowHeader": [
-        "host",
-        "x-matched-path",
-        "x-prerender-revalidate",
-        "x-prerender-revalidate-if-generated",
-        "x-next-revalidated-tags",
-        "x-next-revalidate-tag-token"
-      ]
-    },
-    "/chef/dashboard/collaborations": {
-      "experimentalBypassFor": [
-        {
-          "type": "header",
-          "key": "Next-Action"
-        },
-        {
-          "type": "header",
-          "key": "content-type",
-          "value": "multipart/form-data;.*"
-        }
-      ],
-      "initialRevalidateSeconds": false,
-      "srcRoute": "/chef/dashboard/collaborations",
-      "dataRoute": "/chef/dashboard/collaborations.rsc",
       "allowHeader": [
         "host",
         "x-matched-path",
@@ -586,8 +586,8 @@
   "dynamicRoutes": {},
   "notFoundRoutes": [],
   "preview": {
-    "previewModeId": "f3ba0bb13f7202b927e9768d45f52bbb",
-    "previewModeSigningKey": "5fe25a798ab049974da544d1f1b9905a7a460fa115ba2039e3f4485026681350",
-    "previewModeEncryptionKey": "4f60e91bd55e92c79a06d5d466e7391566eb535938eb649c742c496c49c270c4"
+    "previewModeId": "101b139a420f1f3eec9dfa18420f5df4",
+    "previewModeSigningKey": "a55da1817b2465fa2f765cf35c3d0ce4645e4d0331a7657e2eb9e03338ffc07d",
+    "previewModeEncryptionKey": "a12503063bcf6b64efec7aa728f5b280b43f5f3383467b0982dc01c6ba436213"
   }
 }
