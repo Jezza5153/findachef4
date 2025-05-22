@@ -1,4 +1,3 @@
-
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -22,7 +21,7 @@ import { useState, useEffect, type ChangeEvent } from 'react';
 import type { CustomerProfile as CustomerProfileType } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
-import { UserCircle, Save, UploadCloud, MapPin, ChefHat, CookingPot, MixerHorizontal, Microwave, UtensilsCrossed, ShoppingBasket, Trash2, Loader2, Home, Thermometer, Coffee, Box, Utensils } from 'lucide-react'; // Changed Blender to MixerHorizontal
+import { UserCircle, Save, UploadCloud, MapPin, ChefHat, CookingPot, MixerHorizontal, Microwave, UtensilsCrossed, Trash2, Loader2, Home, Thermometer, Box, Utensils } from 'lucide-react'; 
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,7 +35,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
-import { doc, setDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, Timestamp, getDoc } from 'firebase/firestore'; // <-- FIXED: add getDoc here
 import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { updateProfile as updateAuthProfile } from 'firebase/auth';
 
@@ -44,10 +43,10 @@ const kitchenEquipmentOptions = [
   { value: 'Oven', label: 'Oven', icon: <Home className="mr-2 h-5 w-5" /> },
   { value: 'Stovetop', label: 'Stovetop', icon: <CookingPot className="mr-2 h-5 w-5" /> },
   { value: 'Microwave', label: 'Microwave', icon: <Microwave className="mr-2 h-5 w-5" /> },
-  { value: 'Blender', label: 'Blender/Mixer', icon: <MixerHorizontal className="mr-2 h-5 w-5" /> }, // Changed Blender to MixerHorizontal
+  { value: 'Blender', label: 'Blender/Mixer', icon: <MixerHorizontal className="mr-2 h-5 w-5" /> },
   { value: 'BBQGrill', label: 'BBQ Grill', icon: <UtensilsCrossed className="mr-2 h-5 w-5" /> },
-  { value: 'StandardPotsPans', label: 'Standard Pots & Pans', icon: <Utensils className="mr-2 h-5 w-5" /> }, // Changed icon
-  { value: 'Refrigerator', label: 'Refrigerator', icon: <Thermometer className="mr-2 h-5 w-5" /> }, // Re-using Thermometer, consider specific fridge icon if available
+  { value: 'StandardPotsPans', label: 'Standard Pots & Pans', icon: <Utensils className="mr-2 h-5 w-5" /> },
+  { value: 'Refrigerator', label: 'Refrigerator', icon: <Thermometer className="mr-2 h-5 w-5" /> },
   { value: 'Freezer', label: 'Freezer', icon: <Box className="mr-2 h-5 w-5" /> },
 ];
 
@@ -60,8 +59,8 @@ const customerProfileSchema = z.object({
   kitchenEquipment: z.array(z.string()).optional(),
   addressDetails: z.string().optional(),
   defaultEventType: z.string().optional(),
-  defaultPax: z.coerce.number().optional(),
-  defaultBudgetAmount: z.coerce.number().optional(),
+  defaultPax: z.coerce.number().default(1).optional(),   // <-- .default(1) for consistency
+  defaultBudgetAmount: z.coerce.number().default(50).optional(), // <-- .default(50)
   defaultFrequency: z.string().optional(),
   defaultTheme: z.string().optional(),
   defaultDietaryNotes: z.string().optional(),
@@ -99,7 +98,7 @@ export default function CustomerProfilePage() {
   useEffect(() => {
     if (!isLoading && user) {
       const currentProfile = userProfile as CustomerProfileType | null;
-      if (currentProfile && currentProfile.role === 'customer') {
+      if (currentProfile && currentProfile.role === 'customer' && !('isAdmin' in currentProfile && currentProfile.isAdmin)) {
         form.reset({
           name: currentProfile.name || user.displayName || '',
           phone: currentProfile.phone || '',
@@ -146,7 +145,6 @@ export default function CustomerProfilePage() {
       return;
     }
     setIsSaving(true);
-    console.log("CustomerProfilePage: Saving profile for UID:", user.uid, "Data:", formData);
 
     let profilePicUrlToSave = userProfile?.profilePictureUrl || user.photoURL || '';
 
@@ -157,10 +155,9 @@ export default function CustomerProfilePage() {
           try {
             const oldImageRef = storageRef(storage, oldProfilePicUrl);
             await deleteObject(oldImageRef);
-            console.log("CustomerProfilePage: Deleted old profile picture from Storage.");
           } catch (e: any) {
             if (e.code !== 'storage/object-not-found') {
-              console.warn("CustomerProfilePage: Error deleting old profile picture, continuing...", e);
+              console.warn("Error deleting old profile picture, continuing...", e);
             }
           }
         }
@@ -175,16 +172,14 @@ export default function CustomerProfilePage() {
           uploadTask.on('state_changed', 
             null,
             (error) => { 
-              console.error("CustomerProfilePage: Profile picture upload error:", error); 
+              console.error("Profile picture upload error:", error); 
               reject(error); 
             },
             async () => {
               try {
                 profilePicUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
-                console.log("CustomerProfilePage: Profile picture uploaded successfully:", profilePicUrlToSave);
                 resolve();
               } catch (getUrlError) {
-                console.error("CustomerProfilePage: Error getting download URL for profile picture:", getUrlError);
                 reject(getUrlError);
               }
             }
@@ -193,7 +188,7 @@ export default function CustomerProfilePage() {
       }
 
       const updatedProfileData: Partial<CustomerProfileType> = {
-        id: user.uid, // Ensure ID is always set
+        id: user.uid,
         name: formData.name,
         email: user.email!,
         phone: formData.phone || '',
@@ -212,21 +207,19 @@ export default function CustomerProfilePage() {
       };
       
       const userDocRef = doc(db, "users", user.uid);
-      // Check if profile exists to determine if we need to set createdAt
-      const docSnap = await doc(db, "users", user.uid).get();
+      // FIXED: Use getDoc
+      const docSnap = await getDoc(userDocRef);
       if (!docSnap.exists()) {
         updatedProfileData.createdAt = serverTimestamp();
       }
 
       await setDoc(userDocRef, updatedProfileData, { merge: true });
-      console.log("CustomerProfilePage: Firestore profile saved/merged successfully.");
 
       if (user.displayName !== formData.name || (profilePicUrlToSave && user.photoURL !== profilePicUrlToSave)) {
         await updateAuthProfile(user, {
           displayName: formData.name,
           photoURL: profilePicUrlToSave,
         });
-        console.log("CustomerProfilePage: Firebase Auth profile (displayName/photoURL) updated.");
       }
       
       setNewProfilePictureFile(null);
@@ -236,7 +229,6 @@ export default function CustomerProfilePage() {
       });
 
     } catch (error) {
-      console.error('CustomerProfilePage: Error updating profile:', error);
       toast({
         title: 'Update Failed',
         description: (error instanceof Error) ? error.message : 'Could not save your profile. Please try again.',
@@ -248,7 +240,6 @@ export default function CustomerProfilePage() {
   };
 
   const handleDeleteAccount = () => {
-    // Placeholder for actual account deletion logic
     toast({
       title: 'Account Deletion Request (Placeholder)',
       description: 'This feature is not yet fully implemented. In a real app, this would start a secure account deletion process.',
@@ -260,8 +251,6 @@ export default function CustomerProfilePage() {
     return <div className="flex h-screen items-center justify-center"><Loader2 className="mr-2 h-8 w-8 animate-spin text-primary" data-ai-hint="loading spinner"/> Loading Profile...</div>;
   }
   
-  // This component should be protected by its layout, which handles redirection if !user
-
   return (
     <div className="space-y-8">
       <Card className="shadow-lg">
@@ -285,7 +274,7 @@ export default function CustomerProfilePage() {
                       height={150}
                       className="rounded-full object-cover shadow-md mb-4"
                       data-ai-hint="person avatar"
-                      key={profilePicturePreview} // Re-render if preview changes
+                      key={profilePicturePreview} 
                     />
                     <FormField
                         control={form.control}

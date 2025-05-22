@@ -36,12 +36,13 @@ import { cn } from '@/lib/utils';
 import { format, startOfDay, endOfDay, parseISO, isValid, fromUnixTime } from 'date-fns';
 import { PlusCircle, Trash2, FileText, Edit3, UploadCloud, CalendarIcon, Download, DollarSign, Camera, Sparkles, InfoIcon, MessageCircleQuestion, Loader2, Filter, X } from 'lucide-react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { receiptParserFlow, type ReceiptParserInput, type ReceiptParserOutput } from '@/ai/flows/receipt-parser-flow'; 
 import { getTaxAdvice } from '@/ai/flows/tax-advice-flow';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
 import { collection, addDoc, doc, updateDoc, deleteDoc, query, serverTimestamp, Timestamp, onSnapshot, orderBy, setDoc, writeBatch, Unsubscribe } from 'firebase/firestore';
-import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject, StorageReference } from 'firebase/storage';
+import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject, StorageReference, type StorageError } from 'firebase/storage';
 import dynamic from 'next/dynamic';
 
 const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { 
@@ -142,43 +143,51 @@ export default function ReceiptsPage() {
     }
 
     setIsLoadingData(true);
-    const receiptsCollectionRef = collection(db, "users", user.uid, "receipts");
-    const q = query(receiptsCollectionRef, orderBy("date", "desc"));
-    
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const fetchedReceipts = querySnapshot.docs.map(docSnap => {
-        const data = docSnap.data();
-        let receiptDate = data.date;
-        if (receiptDate instanceof Timestamp) receiptDate = receiptDate.toDate();
-        else if (receiptDate && typeof receiptDate.seconds === 'number') receiptDate = new Timestamp(receiptDate.seconds, receiptDate.nanoseconds).toDate();
-        else if (typeof receiptDate === 'string') receiptDate = parseISO(receiptDate);
-        else if (!(receiptDate instanceof Date)) receiptDate = new Date(); 
+    let unsubscribe: Unsubscribe | undefined;
 
-        return {
-          id: docSnap.id,
-          ...data,
-          vendor: data.vendor as string,
-          totalAmount: typeof data.totalAmount === 'number' ? data.totalAmount : parseFloat(data.totalAmount || '0'),
-          costType: data.costType as CostType,
-          assignedToEventId: data.assignedToEventId as string | undefined,
-          assignedToMenuId: data.assignedToMenuId as string | undefined,
-          notes: data.notes as string | undefined,
-          imageUrl: data.imageUrl as string | undefined,
-          fileName: data.fileName as string | undefined,
-          date: isValid(receiptDate) ? receiptDate : new Date(), 
-          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
-          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
-        } as Receipt;
-      });
-      setAllReceipts(fetchedReceipts);
-      setIsLoadingData(false);
-    }, (error) => {
-      console.error("ReceiptsPage: Error fetching receipts:", error);
-      toast({ title: "Error Fetching Receipts", description: "Could not fetch your receipts.", variant: "destructive" });
-      setIsLoadingData(false);
-      setAllReceipts([]);
-    });
-    
+    try {
+        const receiptsCollectionRef = collection(db, "users", user.uid, "receipts");
+        const q = query(receiptsCollectionRef, orderBy("date", "desc"));
+        
+        unsubscribe = onSnapshot(q, (querySnapshot) => {
+          const fetchedReceipts = querySnapshot.docs.map(docSnap => {
+            const data = docSnap.data();
+            let receiptDate = data.date;
+            if (receiptDate instanceof Timestamp) receiptDate = receiptDate.toDate();
+            else if (receiptDate && typeof receiptDate.seconds === 'number') receiptDate = new Timestamp(receiptDate.seconds, receiptDate.nanoseconds).toDate();
+            else if (typeof receiptDate === 'string') receiptDate = parseISO(receiptDate);
+            else if (!(receiptDate instanceof Date)) receiptDate = new Date(); 
+
+            return {
+              id: docSnap.id,
+              ...data,
+              vendor: data.vendor as string,
+              totalAmount: typeof data.totalAmount === 'number' ? data.totalAmount : parseFloat(data.totalAmount || '0'),
+              costType: data.costType as CostType,
+              assignedToEventId: data.assignedToEventId as string | undefined,
+              assignedToMenuId: data.assignedToMenuId as string | undefined,
+              notes: data.notes as string | undefined,
+              imageUrl: data.imageUrl as string | undefined,
+              fileName: data.fileName as string | undefined,
+              date: isValid(receiptDate) ? receiptDate : new Date(), 
+              createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+              updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
+            } as Receipt;
+          });
+          setAllReceipts(fetchedReceipts);
+          setIsLoadingData(false);
+        }, (error) => {
+          console.error("ReceiptsPage: Error fetching receipts:", error);
+          toast({ title: "Error Fetching Receipts", description: "Could not fetch your receipts.", variant: "destructive" });
+          setIsLoadingData(false);
+          setAllReceipts([]); // Clear existing data on error
+        });
+    } catch (error) {
+        console.error("ReceiptsPage: Error setting up receipts listener:", error);
+        toast({ title: "Setup Error", description: "Could not set up real-time updates for receipts.", variant: "destructive" });
+        setIsLoadingData(false);
+        setAllReceipts([]); // Clear existing data on error
+    }
     return () => {
       if (unsubscribe) {
         console.log("ReceiptsPage: Unsubscribing from receipts listener.");

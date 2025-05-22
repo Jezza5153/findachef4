@@ -101,7 +101,6 @@ export default function ChefWallPage() {
 
   useEffect(() => {
     if (authLoading || !user) {
-      setIsLoadingData(false);
       if (!authLoading && !user) {
         // Redirection handled by layout
         setWallEvents([]);
@@ -109,10 +108,10 @@ export default function ChefWallPage() {
       return;
     }
 
-    setIsLoadingData(true);
+    setIsLoadingData(true); // Start loading when user becomes available
     const eventsCollectionRef = collection(db, "chefWallEvents");
     const q = query(eventsCollectionRef, where("chefId", "==", user.uid), orderBy("createdAt", "desc"));
-    
+
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
       const fetchedEvents = querySnapshot.docs.map(docSnap => {
         const data = docSnap.data();
@@ -125,8 +124,8 @@ export default function ChefWallPage() {
             console.warn("ChefWallPage: Invalid eventDateTime format from Firestore:", eventDateTimeStr, "for event ID:", docSnap.id);
             eventDateTimeStr = new Date().toISOString(); 
         }
-        
-        return { 
+
+        return {
           id: docSnap.id, 
           ...data,
           eventDateTime: eventDateTimeStr,
@@ -135,15 +134,17 @@ export default function ChefWallPage() {
         } as ChefWallEvent;
       });
       setWallEvents(fetchedEvents);
-      setIsLoadingData(false);
     }, (error) => {
       console.error("ChefWallPage: Error fetching wall events:", error);
-      toast({ title: "Error Fetching Events", description: "Could not fetch your event posts.", variant: "destructive" });
-      setIsLoadingData(false);
-      setWallEvents([]);
+      toast({ title: "Error Fetching Events", description: "Could not fetch your event posts. Please try refreshing.", variant: "destructive" });
+      // Optionally clear events on error, or keep previous state
+      // setWallEvents([]);
     });
- 
+
+    // Cleanup function
     return () => {
+      console.log("ChefWallPage: Cleaning up wall events listener.");
+      setIsLoadingData(false);
       if (unsubscribe) {
         console.log("ChefWallPage: Unsubscribing from wall events listener.");
         unsubscribe();
