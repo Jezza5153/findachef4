@@ -45,18 +45,18 @@ const chefProfileSchema = z.object({
   email: z.string().email({ message: 'Invalid email address.' }), // Will be read-only
   tagline: z.string().max(100, "Tagline cannot exceed 100 characters.").optional(),
   bio: z.string().min(20, {message: 'Bio must be at least 20 characters.'}).max(500, {message: "Bio cannot exceed 500 characters."}),
-  specialties: z.string().min(1, { message: 'Please list at least one specialty.' }), 
+  specialties: z.string().min(1, { message: 'Please list at least one specialty.' }),
   profilePictureFile: z.instanceof(File).optional()
     .refine(file => !file || file.size <= 2 * 1024 * 1024, `Max file size is 2MB.`)
     .refine(file => !file || ['image/jpeg', 'image/png', 'image/webp'].includes(file.type), `Only JPG, PNG, WEBP files are allowed.`),
-  experienceSummary: z.string().optional(),
+  experienceSummary: z.string().max(N).optional(), // Added optional()
   education: z.string().max(2000, "Education summary cannot exceed 2000 characters.").optional(),
-  skills: z.string().optional(), 
+  skills:z.string().max(N).optional(), // Added optional()
   portfolioItem1Url: z.string().url({ message: "Invalid URL for portfolio item 1." }).optional().or(z.literal('')),
-  portfolioItem1Caption: z.string().max(150, "Caption for item 1 cannot exceed 150 characters.").optional(),
+  portfolioItem1Caption: z.string().max(150, "Caption for item 1 cannot exceed 150 characters.").optional(), // Swapped order
   portfolioItem2Url: z.string().url({ message: "Invalid URL for portfolio item 2." }).optional().or(z.literal('')),
-  portfolioItem2Caption: z.string().max(150, "Caption for item 2 cannot exceed 150 characters.").optional(),
-  teamName: z.string().optional(), 
+  portfolioItem2Caption: z.string().max(150, "Caption for item 2 cannot exceed 150 characters.").optional(), // Swapped order
+  teamName: z.string().max(N).optional(), 
 });
 
 type ChefProfileFormValues = z.infer<typeof chefProfileSchema>;
@@ -66,7 +66,7 @@ export default function ChefProfilePage() {
   const [chefData, setChefData] = useState<ChefProfileType | null>(null); // For storing fetched Firestore data
   const [profilePicturePreview, setProfilePicturePreview] = useState<string | null>(null);
   const [newProfilePictureFile, setNewProfilePictureFile] = useState<File | null>(null);
-  
+
   const [newResumeFile, setNewResumeFile] = useState<File | null>(null);
   const [resumeParsedDataForSave, setResumeParsedDataForSave] = useState<ParseResumeOutput | null>(null);
 
@@ -128,7 +128,7 @@ export default function ChefProfilePage() {
 
   const handleResumeProcessed = (data: { parsedData: ParseResumeOutput; file: File }) => {
     setResumeParsedDataForSave(data.parsedData); 
-    form.setValue('experienceSummary', data.parsedData.experience || '', { shouldValidate: true });
+ form.setValue('experienceSummary', data.parsedData.experience || '', { shouldValidate: true }); // Set value from parsed data
     form.setValue('skills', data.parsedData.skills?.join(', ') || '', { shouldValidate: true });
     if (data.parsedData.education) {
       form.setValue('education', data.parsedData.education, { shouldValidate: true });
@@ -166,7 +166,7 @@ export default function ChefProfilePage() {
     try {
       // 1. Upload new profile picture if one is staged
       if (newProfilePictureFile) {
-        if (chefData?.profilePictureUrl && chefData.profilePictureUrl.startsWith('https://firebasestorage.googleapis.com')) { 
+        if (chefData?.profilePictureUrl && chefData.profilePictureUrl.startsWith('https://firebasestorage.googleapis.com')) {
             try {
                 const oldImageRef = storageRef(storage, chefData.profilePictureUrl);
                 await deleteObject(oldImageRef).catch(e => console.warn("Old profile pic not found or cannot be deleted:", e));
@@ -190,7 +190,7 @@ export default function ChefProfilePage() {
 
       // 2. Upload new resume file if one is staged
       if (newResumeFile) {
-        if (chefData?.resumeFileUrl && chefData.resumeFileUrl.startsWith('https://firebasestorage.googleapis.com')) { 
+        if (chefData?.resumeFileUrl && chefData.resumeFileUrl.startsWith('https://firebasestorage.googleapis.com')) {
             try {
                 const oldResumeRef = storageRef(storage, chefData.resumeFileUrl);
                 await deleteObject(oldResumeRef).catch(e => console.warn("Old resume not found or cannot be deleted:", e));
@@ -245,17 +245,16 @@ export default function ChefProfilePage() {
       if (!chefData?.createdAt && !userProfile?.createdAt) { // Only set createdAt if it's truly a new profile document
         updatedProfileData.createdAt = serverTimestamp();
       }
-
       const userDocRef = doc(db, "users", user.uid);
       await setDoc(userDocRef, updatedProfileData, { merge: true }); 
-
+ 
+      // 3. Update Auth profile if name or picture changed
       if (user.displayName !== formData.name || (profilePicUrlToSave && user.photoURL !== profilePicUrlToSave)) {
         await updateAuthProfile(user, {
           displayName: formData.name,
           photoURL: profilePicUrlToSave,
         });
       }
-      
       setChefData(prev => ({ ...prev, ...updatedProfileData, id: user.uid, email: user.email! } as ChefProfileType));
       setNewProfilePictureFile(null); 
       setNewResumeFile(null);

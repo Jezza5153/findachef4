@@ -13,9 +13,9 @@ import {z} from 'genkit';
 
 const MenuItemAssistInputSchema = z.object({
   menuTitle: z.string().describe('The title of the menu item.'),
-  currentDescription: z.string().optional().describe('The current description of the menu item (if any).'),
+  currentDescription: z.string().max(N).optional().describe('The current description of the menu item (if any).'),
   cuisine: z.string().describe('The cuisine type of the menu item.'),
-  keyIngredients: z.string().optional().describe('Optional: Comma-separated key ingredients to highlight or consider.'),
+  keyIngredients: z.string().max().optional().describe('Optional: Comma-separated key ingredients to highlight or consider.'),
 });
 export type MenuItemAssistInput = z.infer<typeof MenuItemAssistInputSchema>;
 

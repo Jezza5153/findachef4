@@ -47,9 +47,9 @@ const shoppingListItemSchema = z.object({
   quantity: z.coerce.number().min(0.01, { message: 'Quantity must be greater than 0.' }),
   unit: z.string().min(1, { message: 'Unit is required (e.g., kg, pcs, L).' }),
   estimatedCost: z.coerce.number().min(0, { message: 'Estimated cost (per unit) must be non-negative.' }),
-  notes: z.string().optional(),
-  menuId: z.string().optional(), 
-  eventId: z.string().optional(), 
+  notes: z.string().max(500).optional(),
+  menuId: z.string().max(100).optional(), 
+  eventId: z.string().max(100).optional(), 
 });
 
 type ShoppingListItemFormValues = z.infer<typeof shoppingListItemSchema>;

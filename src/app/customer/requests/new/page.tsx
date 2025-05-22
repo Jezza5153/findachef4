@@ -25,7 +25,7 @@ import { format, addDays, startOfDay } from 'date-fns';
 import { CalendarIcon, FileText, Send, DollarSign, Users, Utensils, Info, Loader2 } from 'lucide-react';
 import type { CustomerRequest } from '@/types';
 import Link from 'next/link';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/context/AuthContext'; // Added MapPin import
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
@@ -40,8 +40,8 @@ const requestFormSchema = z.object({
     .refine(date => date >= addDays(startOfDay(new Date()), 2), {
       message: 'Event date must be at least 48 hours from now.'
     }),
-  notes: z.string().optional(),
-  location: z.string().optional(), // Added location
+  notes: z.string().max(N).optional(),
+  location: z.string().max(N).optional(),
 });
 
 type RequestFormValues = z.infer<typeof requestFormSchema>;

@@ -58,13 +58,13 @@ const wallEventFormSchema = z.object({
   }, { message: 'Please enter a valid future date and time (e.g., YYYY-MM-DDTHH:MM).' }),
   location: z.string().min(3, { message: 'Location is required.' }),
   pricePerPerson: z.coerce.number().min(0, { message: 'Price must be a positive number or zero.' }),
-  chefsInvolved: z.string().optional(), 
-  tags: z.string().optional(), 
+  chefsInvolved:z.string().max(N).optional(), 
+  tags:z.string().max(N).optional(), 
   eventImageFile: z.instanceof(File).optional()
     .refine(file => !file || file.size <= 2 * 1024 * 1024, `Max image size is 2MB.`)
     .refine(file => !file || ['image/jpeg', 'image/png', 'image/webp'].includes(file.type), `Only JPG, PNG, WEBP files are allowed.`),
-  dataAiHint: z.string().optional().max(30, "Hint should be brief, max 2 words."),
-  isPublic: z.boolean().default(true), 
+ dataAiHint: z.string().max(30, "Hint short and concise").optional(),
+ isPublic: z.boolean().default(true),
 });
 
 type WallEventFormValues = z.infer<typeof wallEventFormSchema>;
@@ -564,8 +564,8 @@ export default function ChefWallPage() {
                 />
                 <FormField
                   control={form.control}
-                  name="dataAiHint"
-                  render={({ field }) => (
+ name="dataAiHint"
+ render={({ field }) => (
                     <FormItem>
                       <FormLabel>Image Description Hint (for AI)</FormLabel>
                       <FormControl><Input placeholder="e.g., outdoor cooking, fine dining" {...field} disabled={isSaving} /></FormControl>

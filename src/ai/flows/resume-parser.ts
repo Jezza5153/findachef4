@@ -24,7 +24,7 @@ const ParseResumeOutputSchema = z.object({
     .string()
     .describe('A summary of the chef’s professional experience.'),
   skills: z.array(z.string()).describe('A list of the chef’s skills.'),
-  education: z.string().optional().describe('A summary of the chef’s education history.'), // Added education
+  education:z.string().max(N).optional().describe('A summary of the chef’s education history.'), // Added education
 });
 export type ParseResumeOutput = z.infer<typeof ParseResumeOutputSchema>;
 
