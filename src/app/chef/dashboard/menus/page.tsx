@@ -61,7 +61,7 @@ const menuIngredientSchema = z.object({
   notes: z.string().max().optional()
 }).strip();
 
-const menuSchema = z.object({
+const menuFormSchema = z.object({
   // ...other fields...
   menuImageFile: z.instanceof(File).optional()
     .refine(file => !file || file.size <= 2 * 1024 * 1024, `Max image size is 2MB.`)
