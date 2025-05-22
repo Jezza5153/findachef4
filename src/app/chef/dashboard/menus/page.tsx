@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState, useEffect, ChangeEvent, useMemo } from 'react';
+import { useState, useEffect, ChangeEvent, useMemo, useCallback } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm, Controller, useFieldArray } from 'react-hook-form';
 import * as z from 'zod';
@@ -20,7 +20,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-// import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { MenuCard } from '@/components/menu-card';
 import type { Menu, Option, ShoppingListItem, MenuIngredient } from '@/types';
 import { useToast } from '@/hooks/use-toast';
@@ -28,14 +27,14 @@ import { PlusCircle, Edit, Trash2, NotebookText, Eye, EyeOff, ShoppingCart, Aler
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
-import { collection, addDoc, doc, updateDoc, deleteDoc, query, where, serverTimestamp, Timestamp, setDoc, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, deleteDoc, query, where, serverTimestamp, Timestamp, setDoc, onSnapshot, orderBy, Unsubscribe } from 'firebase/firestore';
 import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import Image from 'next/image';
 import { assistMenuItem } from '@/ai/flows/menu-item-assist-flow';
 import { v4 as uuidv4 } from 'uuid';
 import dynamic from 'next/dynamic';
 
-const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false });
+const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false, loading: () => <p>Loading dialog...</p> });
 const DialogContent = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogContent), { ssr: false });
 const DialogHeader = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogHeader), { ssr: false });
 const DialogTitle = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogTitle), { ssr: false });
@@ -112,7 +111,7 @@ export default function MenuManagementPage() {
     },
   });
   
-  const { fields: ingredientFields, append: appendIngredient, remove: removeIngredient } = useFieldArray({
+  const { fields: ingredientFields, append: appendIngredient, remove: removeIngredient, replace: replaceIngredients } = useFieldArray({
     control: form.control,
     name: "menuIngredients",
   });
@@ -138,7 +137,7 @@ export default function MenuManagementPage() {
     if (!user) {
       setIsLoading(false);
       setMenus([]);
-      return;
+      return () => {}; // Return an empty cleanup function
     }
     setIsLoading(true);
     const menusCollectionRef = collection(db, "menus");
@@ -150,9 +149,9 @@ export default function MenuManagementPage() {
          return { 
           id: docSnap.id, 
           ...data,
-          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : undefined),
-          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt) : undefined),
-        } as Menu
+          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
+        } as Menu;
       });
       setMenus(fetchedMenus);
       setIsLoading(false);
@@ -162,7 +161,10 @@ export default function MenuManagementPage() {
       setIsLoading(false);
     });
     
-    return () => unsubscribe();
+    return () => {
+      console.log("MenuManagementPage: Unsubscribing from menus listener.");
+      unsubscribe();
+    };
   }, [user, toast]);
 
   const handleMenuImageFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -190,32 +192,45 @@ export default function MenuManagementPage() {
     setIsSaving(true);
 
     let imageUrlToSave = editingMenu?.imageUrl || ''; 
-    const menuIdForPath = editingMenu?.id || doc(collection(db, 'menus')).id;
+    const menuIdForPath = editingMenu?.id || doc(collection(db, 'menus')).id; // Generate ID upfront if new
 
     try {
       if (menuImageFile) {
         if (editingMenu && editingMenu.imageUrl && editingMenu.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
             const oldImageRef = storageRef(storage, editingMenu.imageUrl);
-            await deleteObject(oldImageRef).catch(e => console.warn("Old image not found or could not be deleted for menu:", e));
-          } catch (e) {
-            console.warn("Error deleting old menu image:", e);
+            await deleteObject(oldImageRef);
+            console.log("MenuManagementPage: Deleted old menu image from Storage.");
+          } catch (e: any) {
+            if (e.code !== 'storage/object-not-found') {
+              console.warn("MenuManagementPage: Could not delete old menu image, it might not exist or path is incorrect:", e);
+            }
           }
         }
         
-        const fileExtension = menuImageFile.name.split('.').pop();
+        const fileExtension = menuImageFile.name.split('.').pop() || 'jpg';
         const imagePath = `users/${user.uid}/menus/${menuIdForPath}/image.${fileExtension}`;
         const imageStorageRefInstance = storageRef(storage, imagePath);
         
         toast({ title: "Uploading image...", description: "Please wait." });
         const uploadTask = uploadBytesResumable(imageStorageRefInstance, menuImageFile);
+        
         await new Promise<void>((resolve, reject) => {
           uploadTask.on('state_changed', 
             null, 
-            (error) => { console.error("Menu image upload error:", error); reject(error); },
+            (error) => { 
+              console.error("Menu image upload error:", error); 
+              reject(error); 
+            },
             async () => {
-              imageUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
-              resolve();
+              try {
+                imageUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
+                console.log("MenuManagementPage: Menu image uploaded successfully:", imageUrlToSave);
+                resolve();
+              } catch (getUrlError) {
+                console.error("MenuManagementPage: Error getting download URL for menu image:", getUrlError);
+                reject(getUrlError);
+              }
             }
           );
         });
@@ -247,7 +262,7 @@ export default function MenuManagementPage() {
         menuIngredients: finalMenuIngredients,
         calculatedTotalIngredientCost: totalIngredientCost,
         calculatedCostPricePerHead: costPerHeadFromIngredients,
-        adminStatus: editingMenu?.adminStatus || 'pending', // Preserve existing or default
+        adminStatus: editingMenu?.adminStatus || 'pending', 
         updatedAt: serverTimestamp(),
       };
 
@@ -266,6 +281,7 @@ export default function MenuManagementPage() {
       setIsDialogOpen(false);
       setMenuImageFile(null);
       setMenuImagePreview(null);
+      replaceIngredients([]); // Clear ingredients field array
 
     } catch (error) {
       console.error('Error saving menu:', error);
@@ -310,8 +326,11 @@ export default function MenuManagementPage() {
           try {
             const imageRefToDelete = storageRef(storage, menuToDelete.imageUrl);
             await deleteObject(imageRefToDelete);
-          } catch (e) {
-            console.warn("Could not delete menu image from storage:", menuToDelete.imageUrl, e);
+            console.log("MenuManagementPage: Deleted menu image from Storage for menu:", menuId);
+          } catch (e: any) {
+            if (e.code !== 'storage/object-not-found') {
+               console.warn("MenuManagementPage: Could not delete menu image from storage, it might not exist or path is incorrect:", e);
+            }
           }
         }
         await deleteDoc(doc(db, "menus", menuId));
@@ -325,42 +344,45 @@ export default function MenuManagementPage() {
     }
   };
 
- const handleAddToShoppingList = async (menu: Menu) => {
+ const handleAddToShoppingList = useCallback(async (menu: Menu) => {
     if (!user) {
       toast({ title: "Not Logged In", description: "Please log in to add items to your shopping list.", variant: "destructive"});
       return;
     }
     
-    const determinedCostPrice = menu.costPrice ?? menu.calculatedCostPricePerHead ?? 0;
-    const determinedPax = menu.pax ?? 1;
-
-    const newItem: Omit<ShoppingListItem, 'id' | 'createdAt' | 'updatedAt'> = {
-      chefId: user.uid,
-      name: `Ingredients for ${menu.title}`,
-      quantity: determinedPax, 
-      unit: 'Servings', 
-      estimatedCost: determinedCostPrice * determinedPax, 
-      notes: `For menu: ${menu.title} (ID: ${menu.id}). Cost per head: $${determinedCostPrice.toFixed(2)} for ${determinedPax} PAX.`,
-      purchased: false,
-      menuId: menu.id,
-    };
-
+    setIsSaving(true); // Indicate processing
     try {
-      const shoppingListCollectionRef = collection(db, `users/${user.uid}/shoppingListItems`);
-      await addDoc(shoppingListCollectionRef, { ...newItem, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
-      toast({
-        title: 'Added to Shopping List',
-        description: `"${newItem.name}" added.`,
-      });
+        const determinedCostPrice = menu.costPrice ?? menu.calculatedCostPricePerHead ?? 0;
+        const determinedPax = menu.pax ?? 1;
+
+        const newItem: Omit<ShoppingListItem, 'id' | 'createdAt' | 'updatedAt'> = {
+        chefId: user.uid,
+        name: `Ingredients for ${menu.title}`,
+        quantity: determinedPax, 
+        unit: 'Servings', 
+        estimatedCost: determinedCostPrice * determinedPax, 
+        notes: `For menu: ${menu.title} (ID: ${menu.id}). Cost per head: $${determinedCostPrice.toFixed(2)} for ${determinedPax} PAX.`,
+        purchased: false,
+        menuId: menu.id,
+        };
+
+        const shoppingListCollectionRef = collection(db, `users/${user.uid}/shoppingListItems`);
+        await addDoc(shoppingListCollectionRef, { ...newItem, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+        toast({
+            title: 'Added to Shopping List',
+            description: `"${newItem.name}" added.`,
+        });
     } catch (error) {
-      console.error("Error adding to shopping list:", error);
-      toast({
-        title: 'Error',
-        description: 'Could not add item to shopping list.',
-        variant: 'destructive',
-      });
+        console.error("Error adding to shopping list:", error);
+        toast({
+            title: 'Error',
+            description: 'Could not add item to shopping list.',
+            variant: 'destructive',
+        });
+    } finally {
+        setIsSaving(false);
     }
-  };
+  }, [user, toast]);
 
 
   const openNewMenuDialog = () => {
@@ -380,6 +402,7 @@ export default function MenuManagementPage() {
     setEditingMenu(null);
     setMenuImageFile(null);
     setMenuImagePreview(null);
+    replaceIngredients([]); // Ensure ingredients field array is cleared for new menu
     setIsDialogOpen(true);
   };
 
@@ -420,322 +443,325 @@ export default function MenuManagementPage() {
 
 
   if (isLoading) {
-    return <div className="flex h-screen items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /> Loading menus...</div>;
+    return <div className="flex h-screen items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" data-ai-hint="loading spinner"/> Loading menus...</div>;
   }
 
   return (
     <div className="space-y-8">
       <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold flex items-center"><NotebookText className="mr-3 h-8 w-8 text-primary"/> Manage Your Menus</h1>
+        <h1 className="text-3xl font-bold flex items-center"><NotebookText className="mr-3 h-8 w-8 text-primary" data-ai-hint="notebook icon"/> Manage Your Menus</h1>
         <Button onClick={openNewMenuDialog} disabled={isSaving}>
           <PlusCircle className="mr-2 h-5 w-5" /> Add New Menu
         </Button>
       </div>
 
-      <Dialog open={isDialogOpen} onOpenChange={(isOpen) => {
-          if ((isSaving || isAiAssisting) && isOpen) return; 
-          setIsDialogOpen(isOpen);
-          if (!isOpen) {
-            setMenuImageFile(null);
-            setMenuImagePreview(null);
-            form.reset();
-            setEditingMenu(null);
-          }
-      }}>
-        <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editingMenu ? 'Edit Menu' : 'Create New Menu'}</DialogTitle>
-          </DialogHeader>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 p-1">
-              <FormField
-                control={form.control}
-                name="title"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Menu Title</FormLabel>
-                    <FormControl><Input placeholder="e.g., Summer BBQ Special" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-               <FormField
+      {isDialogOpen && Dialog && (
+        <Dialog open={isDialogOpen} onOpenChange={(isOpen) => {
+            if ((isSaving || isAiAssisting) && isOpen) return; 
+            setIsDialogOpen(isOpen);
+            if (!isOpen) {
+              setMenuImageFile(null);
+              setMenuImagePreview(null);
+              form.reset();
+              setEditingMenu(null);
+              replaceIngredients([]); // Clear ingredients on dialog close too
+            }
+        }}>
+          <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>{editingMenu ? 'Edit Menu' : 'Create New Menu'}</DialogTitle>
+            </DialogHeader>
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6 p-1">
+                <FormField
                   control={form.control}
-                  name="cuisine"
+                  name="title"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Cuisine Type</FormLabel>
-                      <FormControl><Input placeholder="e.g., Mexican, Thai, Fusion" {...field} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              <FormField
-                control={form.control}
-                name="description"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Description</FormLabel>
-                    <FormControl><Textarea placeholder="Detailed description of the menu..." {...field} className="min-h-[100px]" /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-               <Button type="button" variant="outline" onClick={handleAiAssist} size="sm" className="w-full" disabled={isAiAssisting || isSaving}>
-                {isAiAssisting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                {isAiAssisting ? "Getting Suggestion..." : "AI Assist: Enhance Description"}
-              </Button>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                 <FormField
-                  control={form.control}
-                  name="pricePerHead"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Sale Price per Head ($)</FormLabel>
-                      <FormControl><Input type="number" step="0.01" placeholder="75.00" {...field} /></FormControl>
-                       <FormDescription>The price customers will pay.</FormDescription>
+                      <FormLabel>Menu Title</FormLabel>
+                      <FormControl><Input placeholder="e.g., Summer BBQ Special" {...field} /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
                  <FormField
-                  control={form.control}
-                  name="pax"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Serves (PAX)</FormLabel>
-                      <FormControl><Input type="number" placeholder="e.g., 10" {...field} defaultValue={1} /></FormControl>
-                      <FormDescription>Number of people this menu typically serves. Affects per-head cost calculation.</FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-               <FormField
-                control={form.control}
-                name="menuImageFile"
-                render={() => ( 
-                  <FormItem>
-                    <FormLabel>Menu Image (Optional)</FormLabel>
-                    <FormControl>
-                      <Input 
-                        type="file" 
-                        accept="image/jpeg,image/png,image/webp"
-                        onChange={handleMenuImageFileChange} 
-                        className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
-                      />
-                    </FormControl>
-                    {menuImagePreview && (
-                      <div className="mt-2">
-                        <Image src={menuImagePreview} alt="Menu image preview" width={200} height={150} className="rounded-md object-cover" data-ai-hint="menu food"/>
-                      </div>
+                    control={form.control}
+                    name="cuisine"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Cuisine Type</FormLabel>
+                        <FormControl><Input placeholder="e.g., Mexican, Thai, Fusion" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
                     )}
-                    <FormDescription>A captivating image for your menu (max 2MB, JPG/PNG/WEBP).</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-               <FormField
-                control={form.control}
-                name="dataAiHint"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Image Description Hint (for AI)</FormLabel>
-                    <FormControl><Input placeholder="e.g., italian food, pasta dish" {...field} /></FormControl>
-                    <FormDescription>One or two keywords to help AI understand the image content (max 2 words).</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              
-              <div className="space-y-4 pt-4 border-t">
-                <h3 className="text-lg font-semibold flex items-center"><Calculator className="mr-2 h-5 w-5"/>Ingredients & Costing</h3>
-                {ingredientFields.map((field, index) => (
-                  <Card key={field.id} className="p-4 space-y-3 bg-muted/30">
-                    <div className="flex justify-between items-center">
-                       <FormLabel>Ingredient {index + 1}</FormLabel>
-                       <Button type="button" variant="ghost" size="icon" onClick={() => removeIngredient(index)} className="text-destructive hover:text-destructive">
-                         <PackageMinus className="h-4 w-4" />
-                       </Button>
-                    </div>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                       <FormField
-                        control={form.control}
-                        name={`menuIngredients.${index}.name`}
-                        render={({ field: f }) => (
-                          <FormItem className="col-span-2 md:col-span-1">
-                            <FormLabel className="text-xs">Name</FormLabel>
-                            <FormControl><Input placeholder="e.g., Flour" {...f} /></FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name={`menuIngredients.${index}.quantity`}
-                        render={({ field: f }) => (
-                          <FormItem>
-                            <FormLabel className="text-xs">Qty</FormLabel>
-                            <FormControl><Input type="number" step="0.01" placeholder="2.5" {...f} /></FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name={`menuIngredients.${index}.unit`}
-                        render={({ field: f }) => (
-                          <FormItem>
-                            <FormLabel className="text-xs">Unit</FormLabel>
-                            <FormControl><Input placeholder="kg, pcs, L" {...f} /></FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name={`menuIngredients.${index}.costPerUnit`}
-                        render={({ field: f }) => (
-                          <FormItem>
-                            <FormLabel className="text-xs">Cost/Unit ($)</FormLabel>
-                            <FormControl><Input type="number" step="0.01" placeholder="5.99" {...f} /></FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </div>
-                     <FormField
-                        control={form.control}
-                        name={`menuIngredients.${index}.notes`}
-                        render={({ field: f }) => (
-                          <FormItem>
-                            <FormLabel className="text-xs">Notes (Optional)</FormLabel>
-                            <FormControl><Input placeholder="Brand, specific type" {...f} /></FormControl>
-                          </FormItem>
-                        )}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Total for this ingredient: $ {((Number(form.getValues(`menuIngredients.${index}.quantity`)) || 0) * (Number(form.getValues(`menuIngredients.${index}.costPerUnit`)) || 0)).toFixed(2)}
-                      </p>
-                  </Card>
-                ))}
-                <Button type="button" variant="outline" size="sm" onClick={() => appendIngredient({ id: uuidv4(), name: '', quantity: 1, unit: '', costPerUnit: 0, notes: '' })}>
-                  <PackagePlus className="mr-2 h-4 w-4" /> Add Ingredient
+                  />
+                <FormField
+                  control={form.control}
+                  name="description"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Description</FormLabel>
+                      <FormControl><Textarea placeholder="Detailed description of the menu..." {...field} className="min-h-[100px]" /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                 <Button type="button" variant="outline" onClick={handleAiAssist} size="sm" className="w-full" disabled={isAiAssisting || isSaving}>
+                  {isAiAssisting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                  {isAiAssisting ? "Getting Suggestion..." : "AI Assist: Enhance Description"}
                 </Button>
-                
-                <div className="mt-4 p-3 bg-secondary rounded-md space-y-1 text-sm">
-                    <p><strong>Total Ingredient Cost for Menu:</strong> ${calculatedTotalIngredientCost.toFixed(2)}</p>
-                    <p><strong>Calculated Cost per Head (for {form.getValues('pax') || 1} PAX):</strong> ${calculatedCostPricePerHead.toFixed(2)}</p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                   <FormField
+                    control={form.control}
+                    name="pricePerHead"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Sale Price per Head ($)</FormLabel>
+                        <FormControl><Input type="number" step="0.01" placeholder="75.00" {...field} /></FormControl>
+                         <FormDescription>The price customers will pay.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                   <FormField
+                    control={form.control}
+                    name="pax"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Serves (PAX)</FormLabel>
+                        <FormControl><Input type="number" placeholder="e.g., 10" {...field} defaultValue={1} /></FormControl>
+                        <FormDescription>Number of people this menu typically serves. Affects per-head cost calculation.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
                 </div>
                  <FormField
                   control={form.control}
-                  name="costPrice"
-                  render={({ field }) => (
+                  name="menuImageFile"
+                  render={() => ( 
                     <FormItem>
-                      <FormLabel>Final Determined Cost Price per Head ($)</FormLabel>
-                      <FormControl><Input type="number" step="0.01" placeholder="30.00" {...field} /></FormControl>
-                      <FormDescription>Your internal cost per serving. You can use the calculated value above or enter your own.</FormDescription>
+                      <FormLabel>Menu Image (Optional)</FormLabel>
+                      <FormControl>
+                        <Input 
+                          type="file" 
+                          accept="image/jpeg,image/png,image/webp"
+                          onChange={handleMenuImageFileChange} 
+                          className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
+                        />
+                      </FormControl>
+                      {menuImagePreview && (
+                        <div className="mt-2">
+                          <Image src={menuImagePreview} alt="Menu image preview" width={200} height={150} className="rounded-md object-cover" data-ai-hint="menu food"/>
+                        </div>
+                      )}
+                      <FormDescription>A captivating image for your menu (max 2MB, JPG/PNG/WEBP).</FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-                <Button 
-                    type="button" 
-                    variant="link" 
-                    size="sm" 
-                    className="p-0 h-auto"
-                    onClick={() => form.setValue('costPrice', parseFloat(calculatedCostPricePerHead.toFixed(2)) )}
-                    disabled={calculatedCostPricePerHead === 0 && calculatedTotalIngredientCost === 0}
-                >
-                    Use Calculated Cost per Head
-                </Button>
-              </div>
-
-
-              <FormItem className="pt-4 border-t">
-                <FormLabel>Dietary Information (Flags)</FormLabel>
-                <Controller
-                    name="dietaryInfo"
-                    control={form.control}
-                    render={({ field }) => (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                        {dietaryOptions.map((option) => (
-                            <FormItem key={option.value} className="flex flex-row items-start space-x-3 space-y-0">
-                            <FormControl>
-                                <Checkbox
-                                checked={field.value?.includes(option.value)}
-                                onCheckedChange={(checked) => {
-                                    return checked
-                                    ? field.onChange([...(field.value || []), option.value])
-                                    : field.onChange(
-                                        (field.value || []).filter(
-                                        (value) => value !== option.value
-                                        )
-                                    );
-                                }}
-                                />
-                            </FormControl>
-                            <FormLabel className="font-normal">{option.label}</FormLabel>
+                 <FormField
+                  control={form.control}
+                  name="dataAiHint"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Image Description Hint (for AI)</FormLabel>
+                      <FormControl><Input placeholder="e.g., italian food, pasta dish" {...field} /></FormControl>
+                      <FormDescription>One or two keywords to help AI understand the image content (max 2 words).</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                
+                <div className="space-y-4 pt-4 border-t">
+                  <h3 className="text-lg font-semibold flex items-center"><Calculator className="mr-2 h-5 w-5" data-ai-hint="calculator math"/>Ingredients & Costing</h3>
+                  {ingredientFields.map((field, index) => (
+                    <Card key={field.id} className="p-4 space-y-3 bg-muted/30">
+                      <div className="flex justify-between items-center">
+                         <FormLabel>Ingredient {index + 1}</FormLabel>
+                         <Button type="button" variant="ghost" size="icon" onClick={() => removeIngredient(index)} className="text-destructive hover:text-destructive">
+                           <PackageMinus className="h-4 w-4" />
+                         </Button>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                         <FormField
+                          control={form.control}
+                          name={`menuIngredients.${index}.name`}
+                          render={({ field: f }) => (
+                            <FormItem className="col-span-2 md:col-span-1">
+                              <FormLabel className="text-xs">Name</FormLabel>
+                              <FormControl><Input placeholder="e.g., Flour" {...f} /></FormControl>
+                              <FormMessage />
                             </FormItem>
-                        ))}
-                        </div>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name={`menuIngredients.${index}.quantity`}
+                          render={({ field: f }) => (
+                            <FormItem>
+                              <FormLabel className="text-xs">Qty</FormLabel>
+                              <FormControl><Input type="number" step="0.01" placeholder="2.5" {...f} /></FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name={`menuIngredients.${index}.unit`}
+                          render={({ field: f }) => (
+                            <FormItem>
+                              <FormLabel className="text-xs">Unit</FormLabel>
+                              <FormControl><Input placeholder="kg, pcs, L" {...f} /></FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                        <FormField
+                          control={form.control}
+                          name={`menuIngredients.${index}.costPerUnit`}
+                          render={({ field: f }) => (
+                            <FormItem>
+                              <FormLabel className="text-xs">Cost/Unit ($)</FormLabel>
+                              <FormControl><Input type="number" step="0.01" placeholder="5.99" {...f} /></FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                       <FormField
+                          control={form.control}
+                          name={`menuIngredients.${index}.notes`}
+                          render={({ field: f }) => (
+                            <FormItem>
+                              <FormLabel className="text-xs">Notes (Optional)</FormLabel>
+                              <FormControl><Input placeholder="Brand, specific type" {...f} /></FormControl>
+                            </FormItem>
+                          )}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Total for this ingredient: $ {((Number(form.getValues(`menuIngredients.${index}.quantity`)) || 0) * (Number(form.getValues(`menuIngredients.${index}.costPerUnit`)) || 0)).toFixed(2)}
+                        </p>
+                    </Card>
+                  ))}
+                  <Button type="button" variant="outline" size="sm" onClick={() => appendIngredient({ id: uuidv4(), name: '', quantity: 1, unit: '', costPerUnit: 0, notes: '' })}>
+                    <PackagePlus className="mr-2 h-4 w-4" /> Add Ingredient
+                  </Button>
+                  
+                  <div className="mt-4 p-3 bg-secondary rounded-md space-y-1 text-sm">
+                      <p><strong>Total Ingredient Cost for Menu:</strong> ${calculatedTotalIngredientCost.toFixed(2)}</p>
+                      <p><strong>Calculated Cost per Head (for {form.getValues('pax') || 1} PAX):</strong> ${calculatedCostPricePerHead.toFixed(2)}</p>
+                  </div>
+                   <FormField
+                    control={form.control}
+                    name="costPrice"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Final Determined Cost Price per Head ($)</FormLabel>
+                        <FormControl><Input type="number" step="0.01" placeholder="30.00" {...field} /></FormControl>
+                        <FormDescription>Your internal cost per serving. You can use the calculated value above or enter your own.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
                     )}
-                    />
-                <FormMessage />
-              </FormItem>
-              <FormField
-                control={form.control}
-                name="isPublic"
-                render={({ field }) => (
-                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4 shadow-sm">
-                    <div className="space-y-0.5">
-                      <FormLabel className="text-base">Publish Menu</FormLabel>
-                      <FormDescription>
-                        Make this menu visible to customers on the public menu listings.
-                        {(!isChefSubscribed && field.value) && " Public visibility requires an active subscription."}
-                        {(!isChefSubscribed && !field.value) && " Publishing public menus requires an active subscription."}
-                      </FormDescription>
-                    </div>
-                    <TooltipProvider>
-                      <Tooltip delayDuration={100}>
-                        <TooltipTrigger asChild>
-                          <FormControl>
-                            <Switch
-                              checked={field.value}
-                              onCheckedChange={(checked) => {
-                                if (checked && !isChefSubscribed) {
-                                    toast({ title: "Subscription Required", description: "You need an active subscription to publish menus publicly.", variant: "destructive"});
-                                    return; 
-                                }
-                                field.onChange(checked);
-                              }}
-                              disabled={isSaving || (field.value && !isChefSubscribed)} 
-                            />
-                          </FormControl>
-                        </TooltipTrigger>
-                        {!isChefSubscribed && (
-                          <TooltipContent>
-                            <p className="flex items-center"><AlertCircle className="mr-2 h-4 w-4" />Subscription required to publish publicly.</p>
-                          </TooltipContent>
-                        )}
-                      </Tooltip>
-                    </TooltipProvider>
-                  </FormItem>
-                )}
-              />
-              <DialogFooter>
-                <DialogClose asChild>
-                    <Button type="button" variant="outline" disabled={isSaving || isAiAssisting}>Cancel</Button>
-                </DialogClose>
-                <Button type="submit" disabled={isSaving || isAiAssisting || (form.getValues("isPublic") && !isChefSubscribed) }>
-                  {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (editingMenu ? 'Save Changes' : 'Create Menu')}
-                </Button>
-              </DialogFooter>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
+                  />
+                  <Button 
+                      type="button" 
+                      variant="link" 
+                      size="sm" 
+                      className="p-0 h-auto"
+                      onClick={() => form.setValue('costPrice', parseFloat(calculatedCostPricePerHead.toFixed(2)) )}
+                      disabled={calculatedCostPricePerHead === 0 && calculatedTotalIngredientCost === 0}
+                  >
+                      Use Calculated Cost per Head
+                  </Button>
+                </div>
+
+
+                <FormItem className="pt-4 border-t">
+                  <FormLabel>Dietary Information (Flags)</FormLabel>
+                  <Controller
+                      name="dietaryInfo"
+                      control={form.control}
+                      render={({ field }) => (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                          {dietaryOptions.map((option) => (
+                              <FormItem key={option.value} className="flex flex-row items-start space-x-3 space-y-0">
+                              <FormControl>
+                                  <Checkbox
+                                  checked={field.value?.includes(option.value)}
+                                  onCheckedChange={(checked) => {
+                                      return checked
+                                      ? field.onChange([...(field.value || []), option.value])
+                                      : field.onChange(
+                                          (field.value || []).filter(
+                                          (value) => value !== option.value
+                                          )
+                                      );
+                                  }}
+                                  />
+                              </FormControl>
+                              <FormLabel className="font-normal">{option.label}</FormLabel>
+                              </FormItem>
+                          ))}
+                          </div>
+                      )}
+                      />
+                  <FormMessage />
+                </FormItem>
+                <FormField
+                  control={form.control}
+                  name="isPublic"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4 shadow-sm">
+                      <div className="space-y-0.5">
+                        <FormLabel className="text-base">Publish Menu</FormLabel>
+                        <FormDescription>
+                          Make this menu visible to customers on the public menu listings.
+                          {(!isChefSubscribed && field.value) && " Public visibility requires an active subscription."}
+                          {(!isChefSubscribed && !field.value) && " Publishing public menus requires an active subscription."}
+                        </FormDescription>
+                      </div>
+                      <TooltipProvider>
+                        <Tooltip delayDuration={100}>
+                          <TooltipTrigger asChild>
+                            <FormControl>
+                              <Switch
+                                checked={field.value}
+                                onCheckedChange={(checked) => {
+                                  if (checked && !isChefSubscribed) {
+                                      toast({ title: "Subscription Required", description: "You need an active subscription to publish menus publicly.", variant: "destructive"});
+                                      return; 
+                                  }
+                                  field.onChange(checked);
+                                }}
+                                disabled={isSaving || (field.value && !isChefSubscribed)} 
+                              />
+                            </FormControl>
+                          </TooltipTrigger>
+                          {!isChefSubscribed && (
+                            <TooltipContent>
+                              <p className="flex items-center"><AlertCircle className="mr-2 h-4 w-4" />Subscription required to publish publicly.</p>
+                            </TooltipContent>
+                          )}
+                        </Tooltip>
+                      </TooltipProvider>
+                    </FormItem>
+                  )}
+                />
+                <DialogFooter>
+                  <DialogClose asChild>
+                      <Button type="button" variant="outline" disabled={isSaving || isAiAssisting}>Cancel</Button>
+                  </DialogClose>
+                  <Button type="submit" disabled={isSaving || isAiAssisting || (form.getValues("isPublic") && !isChefSubscribed) }>
+                    {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (editingMenu ? 'Save Changes' : 'Create Menu')}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </Form>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {menus.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -770,3 +796,5 @@ export default function MenuManagementPage() {
     </div>
   );
 }
+
+    

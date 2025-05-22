@@ -3,8 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-// import { DashboardLayout, type NavItem } from '@/components/dashboard-layout'; // Dynamic import
-import { LayoutDashboard, NotebookText, UserCircle, MessageSquare, CalendarDays, FileText, Users, ShoppingBag, LayoutGrid, ShieldAlert, LifeBuoy, Bell, LogOut, Users2, Combine } from 'lucide-react';
+import { LayoutDashboard, NotebookText, UserCircle, MessageSquare, CalendarDays, FileText, Users, ShoppingBag, LayoutGrid, ShieldAlert, LifeBuoy, Bell, LogOut, Users2, Combine, CombineIcon } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -12,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { auth } from '@/lib/firebase';
 import { signOut } from 'firebase/auth';
 import { Loader2 } from 'lucide-react';
-import type { NavItem } from '@/components/dashboard-layout'; // Import type directly
+import type { NavItem } from '@/components/dashboard-layout'; 
 import dynamic from 'next/dynamic';
 
 const DashboardLayout = dynamic(() => 
@@ -30,7 +29,7 @@ const chefNavItems: NavItem[] = [
   { href: '/chef/dashboard/menus', label: 'Menus', icon: <NotebookText /> },
   { href: '/chef/dashboard/shopping-list', label: 'Shopping List', icon: <ShoppingBag /> },
   { href: '/chef/dashboard/chefs', label: 'Chef Directory', icon: <Users2 /> },
-  { href: '/chef/dashboard/collaborations', label: 'Collaborations', icon: <Combine /> },
+  { href: '/chef/dashboard/collaborations', label: 'Collaborations', icon: <CombineIcon /> }, // Updated icon
   { href: '/chef/dashboard/receipts', label: 'Receipts & Costs', icon: <FileText /> },
 ];
 
@@ -43,16 +42,18 @@ export default function ChefDashboardLayout({
   const { toast } = useToast();
   const { user, userProfile, loading: authLoading, isChef, isChefApproved, profileLoading } = useAuth();
   
-  const isLoading = authLoading || profileLoading;
+  const isLoading = authLoading || profileLoading; // Combined loading state
 
   useEffect(() => {
+    console.log("ChefDashboardLayout: isLoading:", isLoading, "user:", !!user, "isChef:", isChef, "isChefApproved:", isChefApproved);
     if (isLoading) {
       return; 
     }
 
     if (!user) {
       console.log("ChefDashboardLayout: No user, redirecting to login.");
-      router.push('/login?redirect=/chef/dashboard');
+      // router.push('/login?redirect=/chef/dashboard'); // Using window.location to ensure full context reload
+      window.location.href = ('/login?redirect=/chef/dashboard');
       return;
     }
 
@@ -63,11 +64,12 @@ export default function ChefDashboardLayout({
           variant: 'destructive',
       });
       console.log("ChefDashboardLayout: Not a chef, redirecting to login.");
-      router.push('/login');
+      // router.push('/login');
+      window.location.href = ('/login');
       return;
     }
     
-  }, [user, isLoading, isChef, router, toast]);
+  }, [user, isLoading, isChef, isChefApproved, router, toast]); // isChefApproved added to deps
 
   if (isLoading) {
     return (
@@ -78,17 +80,17 @@ export default function ChefDashboardLayout({
     );
   }
   
-  // This check handles the case after loading but before potential redirection effect runs
-  if (!user || !isChef) {
+  if (!user || !isChef) { // This check handles the case after loading but before potential redirection effect runs
      return (
       <div className="flex h-screen items-center justify-center">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="ml-3 text-lg">Verifying access...</p>
+        <p className="ml-3 text-lg">Verifying chef access...</p>
       </div>
     );
   }
 
-  if (!isChefApproved) { // Check if user is a chef but not approved
+  // Check for chef approval after confirming user is a chef and not loading
+  if (!isChefApproved) { 
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background p-4">
         <Card className="w-full max-w-md text-center shadow-lg">
@@ -124,6 +126,7 @@ export default function ChefDashboardLayout({
     );
   }
 
+  // If user is logged in, is a chef, and is approved, render the dashboard
   return (
     <DashboardLayout 
       navItems={chefNavItems}
@@ -132,3 +135,5 @@ export default function ChefDashboardLayout({
     </DashboardLayout>
   );
 }
+
+    

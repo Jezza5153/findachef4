@@ -1,21 +1,11 @@
 
 'use client';
 
-import { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm, useForm as useTaxForm } from 'react-hook-form';
 import * as z from 'zod';
 import { Button } from '@/components/ui/button';
-// import {
-//   Dialog,
-//   DialogContent,
-//   DialogHeader,
-//   DialogTitle,
-//   DialogTrigger,
-//   DialogFooter,
-//   DialogClose,
-//   DialogDescription as ShadDialogDescription,
-// } from '@/components/ui/dialog';
 import {
   Form,
   FormControl,
@@ -43,25 +33,25 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
 import type { Receipt, CostType, TaxAdviceInput, TaxAdviceOutput } from '@/types';
 import { cn } from '@/lib/utils';
-import { format, startOfDay, endOfDay } from 'date-fns';
+import { format, startOfDay, endOfDay, parseISO } from 'date-fns';
 import { PlusCircle, Trash2, FileText, Edit3, UploadCloud, CalendarIcon, Download, DollarSign, Camera, Sparkles, InfoIcon, MessageCircleQuestion, Loader2, Filter, X } from 'lucide-react';
 import Image from 'next/image';
 import { receiptParserFlow } from '@/ai/flows/receipt-parser-flow'; 
 import { getTaxAdvice } from '@/ai/flows/tax-advice-flow';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
-import { collection, addDoc, doc, updateDoc, deleteDoc, query, serverTimestamp, Timestamp, onSnapshot, orderBy, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, deleteDoc, query, serverTimestamp, Timestamp, onSnapshot, orderBy, setDoc, writeBatch, Unsubscribe } from 'firebase/firestore';
 import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import dynamic from 'next/dynamic';
 
-const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false });
+const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false, loading: () => <p>Loading dialog...</p> });
 const DialogContent = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogContent), { ssr: false });
 const DialogHeader = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogHeader), { ssr: false });
 const DialogTitle = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogTitle), { ssr: false });
 const DialogFooter = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogFooter), { ssr: false });
 const DialogClose = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogClose), { ssr: false });
 const ShadDialogDescription = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogDescription), { ssr: false });
-
+const CameraDialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false, loading: () => <p>Loading camera...</p> }); // For camera dialog
 
 const costTypes: CostType[] = ['Ingredient', 'Equipment', 'Tax', 'BAS', 'Travel', 'Other'];
 
@@ -135,7 +125,7 @@ export default function ReceiptsPage() {
     if (!user) {
       setIsLoading(false);
       setAllReceipts([]);
-      return;
+      return () => {}; // Return an empty cleanup function
     }
     setIsLoading(true);
     const receiptsCollectionRef = collection(db, "users", user.uid, "receipts");
@@ -147,9 +137,9 @@ export default function ReceiptsPage() {
         return {
           id: docSnap.id,
           ...data,
-          date: (data.date as Timestamp).toDate(), 
-          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : undefined),
-          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt) : undefined),
+          date: data.date instanceof Timestamp ? data.date.toDate() : (data.date ? new Date(data.date as any) : new Date()), 
+          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
         } as Receipt;
       });
       setAllReceipts(fetchedReceipts);
@@ -160,15 +150,18 @@ export default function ReceiptsPage() {
       setIsLoading(false);
     });
     
-    return () => unsubscribe();
+    return () => {
+      console.log("ReceiptsPage: Unsubscribing from receipts listener.");
+      unsubscribe();
+    };
   }, [user, toast]);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
-    if (isCameraDialogOpen && hasCameraPermission === null) { 
-      const getCameraPermission = async () => {
+    const getCameraPermission = async () => {
+      if (isCameraDialogOpen && videoRef.current && hasCameraPermission === null) {
         try {
-          stream = await navigator.mediaDevices.getUserMedia({ video: true });
+          stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
           setHasCameraPermission(true);
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
@@ -182,9 +175,10 @@ export default function ReceiptsPage() {
             description: 'Please enable camera permissions in your browser settings.',
           });
         }
-      };
-      getCameraPermission();
-    }
+      }
+    };
+    getCameraPermission();
+    
     return () => {
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
@@ -193,12 +187,12 @@ export default function ReceiptsPage() {
         videoRef.current.srcObject = null;
       }
     };
-  }, [isCameraDialogOpen, toast, hasCameraPermission]);
+  }, [isCameraDialogOpen, hasCameraPermission, toast]); // hasCameraPermission added
 
   const filteredReceipts = useMemo(() => {
     return allReceipts.filter(receipt => {
       const matchesCostType = filterCostType === 'all' || receipt.costType === filterCostType;
-      const receiptDate = startOfDay(new Date(receipt.date));
+      const receiptDate = startOfDay(new Date(receipt.date as any)); // Ensure date is a Date object
       const matchesStartDate = !filterStartDate || receiptDate >= startOfDay(filterStartDate);
       const matchesEndDate = !filterEndDate || receiptDate <= endOfDay(filterEndDate);
       return matchesCostType && matchesStartDate && matchesEndDate;
@@ -213,7 +207,7 @@ export default function ReceiptsPage() {
     if (receiptToEdit) {
       form.reset({
         vendor: receiptToEdit.vendor,
-        date: receiptToEdit.date ? new Date(receiptToEdit.date) : new Date(),
+        date: receiptToEdit.date ? new Date(receiptToEdit.date as any) : new Date(),
         totalAmount: receiptToEdit.totalAmount,
         assignedToEventId: receiptToEdit.assignedToEventId || '',
         assignedToMenuId: receiptToEdit.assignedToMenuId || '',
@@ -253,6 +247,12 @@ export default function ReceiptsPage() {
 
   const handleUseCapturedImage = () => {
     setIsCameraDialogOpen(false);
+     if (videoRef.current?.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach(track => track.stop());
+        videoRef.current.srcObject = null;
+     }
+     setHasCameraPermission(null); // Reset for next time
   };
 
   const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -283,12 +283,19 @@ export default function ReceiptsPage() {
         if (result.vendor) form.setValue('vendor', result.vendor);
         if (result.date) {
            try {
-            const parsedDate = new Date(result.date.replace(/-/g, '/')); 
+            // Handle various date formats AI might return, prefer YYYY-MM-DD or YYYY/MM/DD
+            const parsedDate = parseISO(result.date); // Handles YYYY-MM-DD
             if (!isNaN(parsedDate.getTime())) {
                  form.setValue('date', parsedDate);
             } else {
-                console.warn("AI returned unparsable date format for receipt:", result.date);
-                toast({ title: "AI Autofill", description: "Could not parse date from AI. Please set manually.", variant: "default" });
+                // Try common alternative if parseISO fails
+                const altParsedDate = new Date(result.date.replace(/-/g, '/'));
+                if (!isNaN(altParsedDate.getTime())) {
+                    form.setValue('date', altParsedDate);
+                } else {
+                    console.warn("AI returned unparsable date format for receipt:", result.date);
+                    toast({ title: "AI Autofill", description: "Could not parse date from AI. Please set manually.", variant: "default" });
+                }
             }
            } catch (e) { 
                 console.warn("AI returned invalid date format for receipt:", result.date, e);
@@ -301,23 +308,35 @@ export default function ReceiptsPage() {
       } else {
         toast({ title: "AI Autofill", description: "Could not extract all information. Please fill manually.", variant: "default" });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error parsing receipt with AI:", error);
-      toast({ title: "AI Error", description: "Failed to process receipt with AI.", variant: "destructive" });
+      let errorMsg = "Failed to process receipt with AI.";
+      if (error.message && error.message.toLowerCase().includes('api key not valid')) {
+        errorMsg = "AI Service Error: Invalid API Key for receipt parsing.";
+      } else if (error.message) {
+        errorMsg = `AI Error: ${error.message.substring(0,100)}${error.message.length > 100 ? '...' : ''}`;
+      }
+      toast({ title: "AI Error", description: errorMsg, variant: "destructive" });
     } finally {
       setIsParsingReceipt(false);
     }
   };
 
-  const dataURIToBlob = (dataURI: string) => {
-    const byteString = atob(dataURI.split(',')[1]);
-    const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0];
-    const ab = new ArrayBuffer(byteString.length);
-    const ia = new Uint8Array(ab);
-    for (let i = 0; i < byteString.length; i++) {
-        ia[i] = byteString.charCodeAt(i);
+  const dataURIToBlob = (dataURI: string): Blob | null => {
+    try {
+        const byteString = atob(dataURI.split(',')[1]);
+        const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0];
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteString.length; i++) {
+            ia[i] = byteString.charCodeAt(i);
+        }
+        return new Blob([ab], { type: mimeString });
+    } catch (e) {
+        console.error("Error converting data URI to Blob:", e);
+        toast({title: "Image Error", description: "Could not process captured image.", variant: "destructive"});
+        return null;
     }
-    return new Blob([ab], { type: mimeString });
   };
 
   const onSubmitReceipt = async (data: ReceiptFormValues) => {
@@ -334,28 +353,45 @@ export default function ReceiptsPage() {
     const originalFileName = fileNameForForm || (editingReceipt?.fileName) || `receipt_${Date.now()}.jpg`;
 
     try {
-      const receiptIdForPath = editingReceipt?.id || doc(collection(db, 'temp')).id; 
+      const receiptIdForPath = editingReceipt?.id || doc(collection(db, 'temp')).id; // Generate ID upfront
 
       if (capturedImageDataUri && (!editingReceipt || capturedImageDataUri !== editingReceipt.imageUrl)) {
+        // Only upload if new image data is present
         if (editingReceipt?.imageUrl && editingReceipt.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
             const oldImageRef = storageRef(storage, editingReceipt.imageUrl);
-            await deleteObject(oldImageRef).catch(e => console.warn("Old image not found or could not be deleted for receipt:", e));
-          } catch (e) { console.warn("Error deleting old receipt image:", e); }
+            await deleteObject(oldImageRef);
+            console.log("ReceiptsPage: Deleted old receipt image from Storage.");
+          } catch (e: any) { 
+            if (e.code !== 'storage/object-not-found') {
+                console.warn("ReceiptsPage: Could not delete old receipt image, it might not exist or path is incorrect:", e);
+            }
+          }
         }
 
         const blob = dataURIToBlob(capturedImageDataUri);
-        const imagePath = `users/${user.uid}/receipts/${receiptIdForPath}/${originalFileName.replace(/[^a-zA-Z0-9.]/g, '_')}`; // Sanitize filename
+        if (!blob) throw new Error("Failed to convert image data for upload.");
+
+        const imagePath = `users/${user.uid}/receipts/${receiptIdForPath}/${originalFileName.replace(/[^a-zA-Z0-9.]/g, '_')}`;
         const imageStorageRefInstance = storageRef(storage, imagePath);
         
         const uploadTask = uploadBytesResumable(imageStorageRefInstance, blob);
         await new Promise<void>((resolve, reject) => {
           uploadTask.on('state_changed', 
             (snapshot) => { /* Optional: track progress */ }, 
-            (error) => { console.error("Receipt image upload error:", error); reject(error); },
+            (error) => { 
+              console.error("Receipt image upload error:", error); 
+              reject(error); 
+            },
             async () => {
-              imageUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
-              resolve();
+              try {
+                imageUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
+                console.log("ReceiptsPage: Receipt image uploaded successfully:", imageUrlToSave);
+                resolve();
+              } catch (getUrlError) {
+                console.error("ReceiptsPage: Error getting download URL for receipt image:", getUrlError);
+                reject(getUrlError);
+              }
             }
           );
         });
@@ -390,7 +426,7 @@ export default function ReceiptsPage() {
 
     } catch (error) {
       console.error('Error saving receipt:', error);
-      toast({ title: 'Save Failed', description: 'Could not save your receipt. Please try again.', variant: 'destructive' });
+      toast({ title: 'Save Failed', description: (error instanceof Error ? error.message : 'Could not save your receipt. Please try again.'), variant: 'destructive' });
     } finally {
       setIsSaving(false);
     }
@@ -408,8 +444,11 @@ export default function ReceiptsPage() {
           try {
             const imageRefToDelete = storageRef(storage, receiptToDelete.imageUrl);
             await deleteObject(imageRefToDelete);
-          } catch (e) {
-            console.warn("Could not delete receipt image from storage:", receiptToDelete.imageUrl, e);
+            console.log("ReceiptsPage: Deleted receipt image from Storage for receipt ID:", receiptId);
+          } catch (e: any) {
+            if (e.code !== 'storage/object-not-found') {
+                console.warn("ReceiptsPage: Could not delete receipt image from storage, it might not exist or path is incorrect:", e);
+            }
           }
         }
         await deleteDoc(doc(db, "users", user.uid, "receipts", receiptId));
@@ -429,13 +468,9 @@ export default function ReceiptsPage() {
 
   const expensesByCostType = useMemo(() => {
     const summary: { [key in CostType]?: number } = {};
-    costTypes.forEach(type => summary[type] = 0);
+    costTypes.forEach(type => summary[type] = 0); // Initialize all cost types with 0
     filteredReceipts.forEach(receipt => {
-      if (summary[receipt.costType] !== undefined) {
-        summary[receipt.costType]! += receipt.totalAmount;
-      } else {
-        summary[receipt.costType] = receipt.totalAmount;
-      }
+      summary[receipt.costType] = (summary[receipt.costType] || 0) + receipt.totalAmount;
     });
     return summary;
   }, [filteredReceipts]);
@@ -450,7 +485,7 @@ export default function ReceiptsPage() {
       headers.join(','),
       ...filteredReceipts.map(receipt => [
         `"${(receipt.vendor || '').replace(/"/g, '""')}"`,
-        format(receipt.date, 'yyyy-MM-dd'),
+        receipt.date ? format(new Date(receipt.date as any), 'yyyy-MM-dd') : '',
         receipt.totalAmount.toFixed(2),
         `"${(receipt.costType || '').replace(/"/g, '""')}"`,
         `"${(receipt.assignedToEventId || '').replace(/"/g, '""')}"`,
@@ -483,9 +518,15 @@ export default function ReceiptsPage() {
     try {
         const response = await getTaxAdvice(data);
         setTaxAdviceResponse(response);
-    } catch (error) {
+    } catch (error: any) {
         console.error("Error getting tax advice:", error);
-        toast({ title: "AI Error", description: "Failed to get tax advice.", variant: "destructive" });
+        let errorMsg = "Failed to get tax advice.";
+        if (error.message && error.message.toLowerCase().includes('api key not valid')) {
+          errorMsg = "AI Service Error: Invalid API Key for tax advice.";
+        } else if (error.message) {
+          errorMsg = `AI Error: ${error.message.substring(0,100)}${error.message.length > 100 ? '...' : ''}`;
+        }
+        toast({ title: "AI Error", description: errorMsg, variant: "destructive" });
         setTaxAdviceResponse({ advice: "Could not retrieve advice at this time.", disclaimer: "Please try again later."});
     } finally {
         setIsFetchingTaxAdvice(false);
@@ -517,15 +558,17 @@ export default function ReceiptsPage() {
             <Button onClick={() => openUploadDialog()} disabled={isSaving || isParsingReceipt}>
                 <PlusCircle className="mr-2 h-5 w-5" /> Add New Receipt
             </Button>
-            <Button variant="outline" onClick={() => { taxForm.reset(); setTaxAdviceResponse(null); setIsTaxAdviceDialogOpen(true);}}>
-                <MessageCircleQuestion className="mr-2 h-5 w-5" /> Get Tax Advice
-            </Button>
+            { Dialog && (
+              <Button variant="outline" onClick={() => { taxForm.reset(); setTaxAdviceResponse(null); setIsTaxAdviceDialogOpen(true);}}>
+                  <MessageCircleQuestion className="mr-2 h-5 w-5" /> Get Tax Advice
+              </Button>
+            )}
         </div>
       </div>
 
        <Card>
         <CardHeader>
-          <CardTitle className="flex items-center"><Filter className="mr-2 h-5 w-5 text-primary"/> Filter Receipts</CardTitle>
+          <CardTitle className="flex items-center"><Filter className="mr-2 h-5 w-5 text-primary" data-ai-hint="filter icon"/> Filter Receipts</CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
           <FormItem>
@@ -572,7 +615,7 @@ export default function ReceiptsPage() {
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0">
-                <Calendar mode="single" selected={filterEndDate} onSelect={setFilterEndDate} initialFocus disabled={{ before: filterStartDate }} />
+                <Calendar mode="single" selected={filterEndDate} onSelect={setFilterEndDate} initialFocus disabled={filterStartDate ? { before: filterStartDate } : undefined} />
               </PopoverContent>
             </Popover>
           </FormItem>
@@ -582,273 +625,280 @@ export default function ReceiptsPage() {
         </CardContent>
       </Card>
 
-      <Dialog open={isUploadDialogOpen} onOpenChange={(isOpen) => {
-          if ((isSaving || isParsingReceipt) && isOpen) return;
-          setIsUploadDialogOpen(isOpen);
-          if (!isOpen) {
-            setCapturedImageDataUri(null); 
-            setFileNameForForm(null);
-            setIsPreviewCapture(false);
-            if (fileInputRef.current) fileInputRef.current.value = "";
-          }
-      }}>
-        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editingReceipt ? 'Edit Receipt' : 'Add New Receipt'}</DialogTitle>
-            {ShadDialogDescription && <ShadDialogDescription>Fill in the details for your expense. Use camera or upload a file.</ShadDialogDescription>}
-          </DialogHeader>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmitReceipt)} className="space-y-4 p-1">
-              <FormItem>
-                <FormLabel>Receipt Image</FormLabel>
-                <div className="flex flex-col sm:flex-row items-center gap-2">
-                    <Button type="button" variant="outline" onClick={() => setIsCameraDialogOpen(true)} className="w-full sm:w-auto">
-                        <Camera className="mr-2 h-4 w-4"/> Capture with Camera
-                    </Button>
-                    <span className="text-xs text-muted-foreground hidden sm:block">OR</span>
-                     <Input 
-                        id="receipt-upload-input" 
-                        type="file" 
-                        accept="image/png, image/jpeg, image/webp, application/pdf"
-                        className="w-full sm:flex-1"
-                        onChange={handleFileSelected}
-                        ref={fileInputRef}
-                      />
-                </div>
-                 {capturedImageDataUri && (
-                    <div className="mt-2 text-center">
-                        <Image src={capturedImageDataUri} alt="Receipt preview" width={150} height={200} className="rounded-md object-contain mx-auto border" data-ai-hint="receipt document" />
-                        {fileNameForForm && <p className="text-xs text-muted-foreground mt-1">Preview of: {fileNameForForm}</p>}
-                    </div>
-                )}
-                <FormDescription>Max 5MB. PDF, JPG, PNG, WEBP.</FormDescription>
-                 <Button 
-                    type="button" 
-                    onClick={handleAutoFillWithAI} 
-                    disabled={!capturedImageDataUri || isParsingReceipt || isSaving} 
-                    variant="outline"
-                    className="w-full mt-2"
-                  >
-                    {isParsingReceipt ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Sparkles className="mr-2 h-4 w-4"/> }
-                    {isParsingReceipt ? "Parsing..." : "Auto-fill with AI (from image)"}
-                </Button>
-              </FormItem>
-              <FormField
-                control={form.control}
-                name="vendor"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Vendor Name</FormLabel>
-                    <FormControl><Input placeholder="e.g., Fresh Produce Market" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="date"
-                  render={({ field }) => (
-                    <FormItem className="flex flex-col">
-                      <FormLabel>Date of Receipt</FormLabel>
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <FormControl>
-                            <Button
-                              variant={'outline'}
-                              className={cn('w-full pl-3 text-left font-normal', !field.value && 'text-muted-foreground')}
-                            >
-                              {field.value ? format(field.value, 'PPP') : <span>Pick a date</span>}
-                              <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                            </Button>
-                          </FormControl>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start">
-                          <Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus />
-                        </PopoverContent>
-                      </Popover>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="totalAmount"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Total Amount ($)</FormLabel>
-                      <FormControl><Input type="number" step="0.01" placeholder="e.g., 45.99" {...field} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-              <FormField
-                control={form.control}
-                name="costType"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Cost Type</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select a cost type" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {costTypes.map(type => (
-                          <SelectItem key={type} value={type}>{type}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField
-                  control={form.control}
-                  name="assignedToEventId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Assign to Event ID (Optional)</FormLabel>
-                      <FormControl><Input placeholder="e.g., event123" {...field} /></FormControl>
-                      <FormDescription>Link this expense to a specific event.</FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="assignedToMenuId"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Assign to Menu ID (Optional)</FormLabel>
-                      <FormControl><Input placeholder="e.g., menu456" {...field} /></FormControl>
-                      <FormDescription>Link this expense to a specific menu.</FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-              <FormField
-                control={form.control}
-                name="notes"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Notes (Optional)</FormLabel>
-                    <FormControl><Textarea placeholder="e.g., Specific items, reason for expense" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <DialogFooter>
-                <DialogClose asChild>
-                  <Button type="button" variant="outline" disabled={isSaving || isParsingReceipt}>Cancel</Button>
-                </DialogClose>
-                <Button type="submit" disabled={isSaving || isParsingReceipt}>
-                  {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : (editingReceipt ? 'Save Changes' : 'Add Receipt')}
-                </Button>
-              </DialogFooter>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isCameraDialogOpen} onOpenChange={(open) => {
-          if (!open && videoRef.current?.srcObject) {
-            const stream = videoRef.current.srcObject as MediaStream;
-            stream.getTracks().forEach(track => track.stop());
-            videoRef.current.srcObject = null;
-            setHasCameraPermission(null); // Reset permission check for next open
-          }
-          setIsCameraDialogOpen(open);
-      }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Capture Receipt with Camera</DialogTitle>
-          </DialogHeader>
-          {hasCameraPermission === false && (
-            <Alert variant="destructive">
-              <AlertTitle>Camera Access Required</AlertTitle>
-              <AlertDescription>
-                Please allow camera access in your browser settings to use this feature. You might need to refresh the page after granting permission.
-              </AlertDescription>
-            </Alert>
-          )}
-           {/* Video tag is always rendered to avoid race condition with srcObject */}
-          <video ref={videoRef} className={cn("w-full aspect-video rounded-md bg-muted", { 'hidden': isPreviewCapture })} autoPlay playsInline muted />
-          <canvas ref={canvasRef} className="hidden"></canvas>
-          {isPreviewCapture && capturedImageDataUri && (
-            <Image src={capturedImageDataUri} alt="Captured receipt" width={400} height={300} className="rounded-md object-contain mx-auto border" data-ai-hint="receipt scan" />
-          )}
-          
-          <DialogFooter className="sm:justify-between">
-            {!isPreviewCapture ? (
-              <>
-                <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
-                <Button type="button" onClick={handleCapturePhoto} disabled={hasCameraPermission !== true}>Capture Photo</Button>
-              </>
-            ) : (
-              <>
-                <Button type="button" variant="outline" onClick={() => {setIsPreviewCapture(false); setCapturedImageDataUri(null); setFileNameForForm(null);}}>Retake</Button>
-                <Button type="button" onClick={handleUseCapturedImage}>Use This Image</Button>
-              </>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isTaxAdviceDialogOpen} onOpenChange={setIsTaxAdviceDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
+      {Dialog && isUploadDialogOpen && (
+        <Dialog open={isUploadDialogOpen} onOpenChange={(isOpen) => {
+            if ((isSaving || isParsingReceipt) && isOpen) return;
+            setIsUploadDialogOpen(isOpen);
+            if (!isOpen) {
+              setCapturedImageDataUri(null); 
+              setFileNameForForm(null);
+              setIsPreviewCapture(false);
+              if (fileInputRef.current) fileInputRef.current.value = "";
+            }
+        }}>
+          <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-                <DialogTitle>AI Tax Advice Assistant</DialogTitle>
-                {ShadDialogDescription && <ShadDialogDescription>Ask a tax-related question based on your region. This is not professional advice.</ShadDialogDescription>}
+              <DialogTitle>{editingReceipt ? 'Edit Receipt' : 'Add New Receipt'}</DialogTitle>
+              {ShadDialogDescription && <ShadDialogDescription>Fill in the details for your expense. Use camera or upload a file.</ShadDialogDescription>}
             </DialogHeader>
-            <Form {...taxForm}>
-                <form onSubmit={taxForm.handleSubmit(onSubmitTaxAdvice)} className="space-y-4">
-                    <FormField
-                        control={taxForm.control}
-                        name="region"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Your Country/Region</FormLabel>
-                                <FormControl><Input placeholder="e.g., Australia, California, UK" {...field} /></FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
-                    <FormField
-                        control={taxForm.control}
-                        name="query"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Your Tax Question</FormLabel>
-                                <FormControl><Textarea placeholder="e.g., What are common tax deductions for private chefs?" {...field} /></FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
-                    <Button type="submit" disabled={isFetchingTaxAdvice} className="w-full">
-                        {isFetchingTaxAdvice ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageCircleQuestion className="mr-2 h-4 w-4" />}
-                        {isFetchingTaxAdvice ? "Getting Advice..." : "Ask AI"}
-                    </Button>
-                </form>
-            </Form>
-            {taxAdviceResponse && (
-                <div className="mt-6 space-y-3 rounded-md border bg-muted/50 p-4">
-                    <h4 className="font-semibold">AI Response:</h4>
-                    <p className="text-sm whitespace-pre-wrap">{taxAdviceResponse.advice}</p>
-                    <p className="text-xs italic text-muted-foreground">{taxAdviceResponse.disclaimer}</p>
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmitReceipt)} className="space-y-4 p-1">
+                <FormItem>
+                  <FormLabel>Receipt Image</FormLabel>
+                  <div className="flex flex-col sm:flex-row items-center gap-2">
+                      {CameraDialog && (
+                        <Button type="button" variant="outline" onClick={() => { setHasCameraPermission(null); setIsCameraDialogOpen(true);}} className="w-full sm:w-auto">
+                            <Camera className="mr-2 h-4 w-4"/> Capture with Camera
+                        </Button>
+                      )}
+                      <span className="text-xs text-muted-foreground hidden sm:block">OR</span>
+                       <Input 
+                          id="receipt-upload-input" 
+                          type="file" 
+                          accept="image/png, image/jpeg, image/webp, application/pdf"
+                          className="w-full sm:flex-1"
+                          onChange={handleFileSelected}
+                          ref={fileInputRef}
+                        />
+                  </div>
+                   {capturedImageDataUri && (
+                      <div className="mt-2 text-center">
+                          <Image src={capturedImageDataUri} alt="Receipt preview" width={150} height={200} className="rounded-md object-contain mx-auto border" data-ai-hint="receipt document" />
+                          {fileNameForForm && <p className="text-xs text-muted-foreground mt-1">Preview of: {fileNameForForm}</p>}
+                      </div>
+                  )}
+                  <FormDescription>Max 5MB. PDF, JPG, PNG, WEBP.</FormDescription>
+                   <Button 
+                      type="button" 
+                      onClick={handleAutoFillWithAI} 
+                      disabled={!capturedImageDataUri || isParsingReceipt || isSaving} 
+                      variant="outline"
+                      className="w-full mt-2"
+                    >
+                      {isParsingReceipt ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Sparkles className="mr-2 h-4 w-4"/> }
+                      {isParsingReceipt ? "Parsing..." : "Auto-fill with AI (from image)"}
+                  </Button>
+                </FormItem>
+                <FormField
+                  control={form.control}
+                  name="vendor"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Vendor Name</FormLabel>
+                      <FormControl><Input placeholder="e.g., Fresh Produce Market" {...field} /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="date"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-col">
+                        <FormLabel>Date of Receipt</FormLabel>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <FormControl>
+                              <Button
+                                variant={'outline'}
+                                className={cn('w-full pl-3 text-left font-normal', !field.value && 'text-muted-foreground')}
+                              >
+                                {field.value ? format(field.value, 'PPP') : <span>Pick a date</span>}
+                                <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                              </Button>
+                            </FormControl>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar mode="single" selected={field.value} onSelect={field.onChange} initialFocus />
+                          </PopoverContent>
+                        </Popover>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="totalAmount"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Total Amount ($)</FormLabel>
+                        <FormControl><Input type="number" step="0.01" placeholder="e.g., 45.99" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
                 </div>
+                <FormField
+                  control={form.control}
+                  name="costType"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Cost Type</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select a cost type" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {costTypes.map(type => (
+                            <SelectItem key={type} value={type}>{type}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FormField
+                    control={form.control}
+                    name="assignedToEventId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Assign to Event ID (Optional)</FormLabel>
+                        <FormControl><Input placeholder="e.g., event123" {...field} /></FormControl>
+                        <FormDescription>Link this expense to a specific event.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name="assignedToMenuId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Assign to Menu ID (Optional)</FormLabel>
+                        <FormControl><Input placeholder="e.g., menu456" {...field} /></FormControl>
+                        <FormDescription>Link this expense to a specific menu.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <FormField
+                  control={form.control}
+                  name="notes"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Notes (Optional)</FormLabel>
+                      <FormControl><Textarea placeholder="e.g., Specific items, reason for expense" {...field} /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <DialogFooter>
+                  <DialogClose asChild>
+                    <Button type="button" variant="outline" disabled={isSaving || isParsingReceipt}>Cancel</Button>
+                  </DialogClose>
+                  <Button type="submit" disabled={isSaving || isParsingReceipt}>
+                    {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : (editingReceipt ? 'Save Changes' : 'Add Receipt')}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </Form>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {CameraDialog && isCameraDialogOpen && (
+        <CameraDialog open={isCameraDialogOpen} onOpenChange={(open) => {
+            if (!open && videoRef.current?.srcObject) {
+              const stream = videoRef.current.srcObject as MediaStream;
+              stream.getTracks().forEach(track => track.stop());
+              videoRef.current.srcObject = null;
+              setHasCameraPermission(null); 
+            }
+            setIsCameraDialogOpen(open);
+        }}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Capture Receipt with Camera</DialogTitle>
+            </DialogHeader>
+            {hasCameraPermission === false && (
+              <Alert variant="destructive">
+                <AlertTitle>Camera Access Required</AlertTitle>
+                <AlertDescription>
+                  Please allow camera access in your browser settings to use this feature. You might need to refresh the page after granting permission.
+                </AlertDescription>
+              </Alert>
             )}
-             <DialogFooter className="mt-4">
-                <DialogClose asChild>
-                    <Button type="button" variant="outline">Close</Button>
-                </DialogClose>
+            <video ref={videoRef} className={cn("w-full aspect-video rounded-md bg-muted", { 'hidden': isPreviewCapture })} autoPlay playsInline muted data-ai-hint="camera feed"/>
+            <canvas ref={canvasRef} className="hidden"></canvas>
+            {isPreviewCapture && capturedImageDataUri && (
+              <Image src={capturedImageDataUri} alt="Captured receipt" width={400} height={300} className="rounded-md object-contain mx-auto border" data-ai-hint="receipt scan" />
+            )}
+            
+            <DialogFooter className="sm:justify-between">
+              {!isPreviewCapture ? (
+                <>
+                  <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
+                  <Button type="button" onClick={handleCapturePhoto} disabled={hasCameraPermission !== true}>Capture Photo</Button>
+                </>
+              ) : (
+                <>
+                  <Button type="button" variant="outline" onClick={() => {setIsPreviewCapture(false); setCapturedImageDataUri(null); setFileNameForForm(null);}}>Retake</Button>
+                  <Button type="button" onClick={handleUseCapturedImage}>Use This Image</Button>
+                </>
+              )}
             </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </DialogContent>
+        </CameraDialog>
+      )}
+
+      {Dialog && isTaxAdviceDialogOpen && (
+        <Dialog open={isTaxAdviceDialogOpen} onOpenChange={setIsTaxAdviceDialogOpen}>
+          <DialogContent className="sm:max-w-lg">
+              <DialogHeader>
+                  <DialogTitle>AI Tax Advice Assistant</DialogTitle>
+                  {ShadDialogDescription && <ShadDialogDescription>Ask a tax-related question based on your region. This is not professional advice.</ShadDialogDescription>}
+              </DialogHeader>
+              <Form {...taxForm}>
+                  <form onSubmit={taxForm.handleSubmit(onSubmitTaxAdvice)} className="space-y-4">
+                      <FormField
+                          control={taxForm.control}
+                          name="region"
+                          render={({ field }) => (
+                              <FormItem>
+                                  <FormLabel>Your Country/Region</FormLabel>
+                                  <FormControl><Input placeholder="e.g., Australia, California, UK" {...field} /></FormControl>
+                                  <FormMessage />
+                              </FormItem>
+                          )}
+                      />
+                      <FormField
+                          control={taxForm.control}
+                          name="query"
+                          render={({ field }) => (
+                              <FormItem>
+                                  <FormLabel>Your Tax Question</FormLabel>
+                                  <FormControl><Textarea placeholder="e.g., What are common tax deductions for private chefs?" {...field} /></FormControl>
+                                  <FormMessage />
+                              </FormItem>
+                          )}
+                      />
+                      <Button type="submit" disabled={isFetchingTaxAdvice} className="w-full">
+                          {isFetchingTaxAdvice ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <MessageCircleQuestion className="mr-2 h-4 w-4" />}
+                          {isFetchingTaxAdvice ? "Getting Advice..." : "Ask AI"}
+                      </Button>
+                  </form>
+              </Form>
+              {taxAdviceResponse && (
+                  <div className="mt-6 space-y-3 rounded-md border bg-muted/50 p-4">
+                      <h4 className="font-semibold">AI Response:</h4>
+                      <p className="text-sm whitespace-pre-wrap">{taxAdviceResponse.advice}</p>
+                      <p className="text-xs italic text-muted-foreground">{taxAdviceResponse.disclaimer}</p>
+                  </div>
+              )}
+               <DialogFooter className="mt-4">
+                  <DialogClose asChild>
+                      <Button type="button" variant="outline">Close</Button>
+                  </DialogClose>
+              </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       <Card>
         <CardHeader>
@@ -857,7 +907,7 @@ export default function ReceiptsPage() {
         <CardContent>
           {isLoading ? (
              <div className="flex justify-center items-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              <Loader2 className="h-6 w-6 animate-spin text-primary" data-ai-hint="loading icon"/>
               <p className="ml-2">Loading summary...</p>
             </div>
           ) : filteredReceipts.length === 0 && allReceipts.length > 0 ? (
@@ -874,7 +924,8 @@ export default function ReceiptsPage() {
                   </div>
                 )
               ))}
-               {Object.values(expensesByCostType).every(val => (val ?? 0) === 0) && <p className="text-xs text-muted-foreground">No expenses for selected filters.</p>}
+               {Object.values(expensesByCostType).every(val => (val ?? 0) === 0) && filteredReceipts.length > 0 && <p className="text-xs text-muted-foreground">No expenses for selected filters in these cost types.</p>}
+               {filteredReceipts.length === 0 && <p className="text-xs text-muted-foreground">No expenses to summarize.</p>}
             </div>
             <div className="flex flex-col justify-end items-end">
               <div className="text-lg font-semibold flex items-center">
@@ -898,7 +949,7 @@ export default function ReceiptsPage() {
         <CardContent>
           {isLoading && allReceipts.length === 0 ? (
              <div className="flex justify-center items-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              <Loader2 className="h-6 w-6 animate-spin text-primary" data-ai-hint="loading data"/>
               <p className="ml-2">Loading receipts...</p>
             </div>
           ) : filteredReceipts.length > 0 ? (
@@ -918,7 +969,7 @@ export default function ReceiptsPage() {
                 {filteredReceipts.map((receipt) => (
                   <TableRow key={receipt.id}>
                     <TableCell className="font-medium">{receipt.vendor}</TableCell>
-                    <TableCell>{format(new Date(receipt.date), 'PP')}</TableCell>
+                    <TableCell>{receipt.date ? format(new Date(receipt.date as any), 'PP') : 'N/A'}</TableCell>
                     <TableCell className="text-right">${receipt.totalAmount.toFixed(2)}</TableCell>
                     <TableCell>{receipt.costType}</TableCell>
                     <TableCell className="text-xs">
@@ -970,13 +1021,13 @@ export default function ReceiptsPage() {
       </Card>
 
       <Alert className="mt-8">
-        <InfoIcon className="h-4 w-4" />
+        <InfoIcon className="h-4 w-4" data-ai-hint="info icon"/>
         <AlertTitle>Payout &amp; Financial Information</AlertTitle>
         <AlertDescription>
           <ul className="list-disc list-inside text-xs space-y-1">
-            <li><strong>Initial Fund Distribution:</strong> Upon customer booking confirmation, 46% of the event cost is released to the chef and 4% to FindAChef immediately.</li>
-            <li><strong>Escrow &amp; Final Release:</strong> The remaining 50% is held by FindAChef. This portion is released to the chef after the event is confirmed complete by the customer (typically via QR code scan at the event).</li>
-            <li><strong>Public Ticketed Events:</strong> For events you host and sell tickets for via The Chef's Wall, payouts are generally scheduled 7 days *before* the event date to assist with upfront costs (subject to terms).</li>
+            <li><strong>Initial Fund Distribution:</strong> Upon customer booking confirmation, 46% of the event cost is released to the chef and 4% to FindAChef immediately (simulated, requires backend Stripe Connect).</li>
+            <li><strong>Escrow &amp; Final Release:</strong> The remaining 50% is held. This portion is released to the chef after the event is confirmed complete by the customer (e.g., via QR code scan at the event, requires backend).</li>
+            <li><strong>Public Ticketed Events:</strong> For events you host and sell tickets for via The Chef's Wall, payouts are generally scheduled 7 days *before* the event date to assist with upfront costs (subject to terms, backend logic).</li>
             <li><strong>Cancellations by Chef:</strong> If a chef cancels an event, a full refund is issued to the customer. Admin will be notified to assist and manage chef accountability, which may include penalties if a replacement cannot be found.</li>
             <li><strong>Cancellations by Customer:</strong>
                 <ul>
@@ -998,3 +1049,5 @@ export default function ReceiptsPage() {
     </div>
   );
 }
+
+    

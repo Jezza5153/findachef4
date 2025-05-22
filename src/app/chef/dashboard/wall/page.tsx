@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState, useEffect, ChangeEvent } from 'react';
+import { useState, useEffect, ChangeEvent, useCallback } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import * as z from 'zod';
@@ -19,7 +19,6 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-// import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import type { ChefWallEvent, CalendarEvent } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
@@ -28,12 +27,12 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
-import { collection, addDoc, getDoc, doc, updateDoc, deleteDoc, query, where, serverTimestamp, Timestamp, setDoc, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, addDoc, getDoc, doc, updateDoc, deleteDoc, query, where, serverTimestamp, Timestamp, setDoc, onSnapshot, orderBy, Unsubscribe } from 'firebase/firestore';
 import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
-import { format } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import dynamic from 'next/dynamic';
 
-const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false });
+const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false, loading: () => <p>Loading dialog...</p> });
 const DialogContent = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogContent), { ssr: false });
 const DialogHeader = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogHeader), { ssr: false });
 const DialogTitle = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogTitle), { ssr: false });
@@ -100,7 +99,7 @@ export default function ChefWallPage() {
     if (!user) {
       setIsLoading(false);
       setWallEvents([]);
-      return;
+      return () => {}; // Return an empty cleanup function
     }
     setIsLoading(true);
     const eventsCollectionRef = collection(db, "chefWallEvents");
@@ -109,13 +108,23 @@ export default function ChefWallPage() {
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
       const fetchedEvents = querySnapshot.docs.map(docSnap => {
         const data = docSnap.data();
+        let eventDateTimeStr = data.eventDateTime;
+        if (eventDateTimeStr instanceof Timestamp) {
+          eventDateTimeStr = eventDateTimeStr.toDate().toISOString();
+        } else if (typeof eventDateTimeStr === 'object' && eventDateTimeStr.seconds) {
+           eventDateTimeStr = new Timestamp(eventDateTimeStr.seconds, eventDateTimeStr.nanoseconds).toDate().toISOString();
+        } else if (typeof eventDateTimeStr !== 'string') {
+            console.warn("Invalid eventDateTime format from Firestore:", eventDateTimeStr);
+            eventDateTimeStr = new Date().toISOString(); // Fallback
+        }
+        
         return { 
           id: docSnap.id, 
           ...data,
-          eventDateTime: data.eventDateTime instanceof Timestamp ? data.eventDateTime.toDate().toISOString() : data.eventDateTime as string,
-          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt) : undefined),
-          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt) : undefined),
-        } as ChefWallEvent
+          eventDateTime: eventDateTimeStr,
+          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
+        } as ChefWallEvent;
       });
       setWallEvents(fetchedEvents);
       setIsLoading(false);
@@ -125,7 +134,10 @@ export default function ChefWallPage() {
       setIsLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+        console.log("ChefWallPage: Unsubscribing from wall events listener.");
+        unsubscribe();
+    };
   }, [user, toast]);
 
   const handleEventImageFileChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -158,29 +170,44 @@ export default function ChefWallPage() {
 
     const eventDate = new Date(data.eventDateTime);
     let imageUrlToSave = editingEvent?.imageUrl || '';
-    const eventIdForPath = editingEvent?.id || doc(collection(db, 'chefWallEvents')).id;
+    const eventIdForPath = editingEvent?.id || doc(collection(db, 'chefWallEvents')).id; // Generate ID upfront
 
     try {
       if (eventImageFile) {
         if (editingEvent && editingEvent.imageUrl && editingEvent.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
             const oldImageRef = storageRef(storage, editingEvent.imageUrl);
-            await deleteObject(oldImageRef).catch(e => console.warn("Old image not found or cannot be deleted for wall event:", e));
-          } catch (e) { console.warn("Error deleting old wall event image:", e); }
+            await deleteObject(oldImageRef);
+            console.log("ChefWallPage: Deleted old event image from Storage.");
+          } catch (e: any) {
+            if (e.code !== 'storage/object-not-found') {
+              console.warn("ChefWallPage: Could not delete old event image from storage (it might not exist or path is incorrect):", e);
+            }
+          }
         }
         
-        const fileExtension = eventImageFile.name.split('.').pop();
+        const fileExtension = eventImageFile.name.split('.').pop() || 'jpg';
         const imagePath = `users/${user.uid}/chefWallEvents/${eventIdForPath}/eventImage.${fileExtension}`;
         const imageStorageRefInstance = storageRef(storage, imagePath);
         
         toast({ title: "Uploading image...", description: "Please wait." });
         const uploadTask = uploadBytesResumable(imageStorageRefInstance, eventImageFile);
+        
         await new Promise<void>((resolve, reject) => {
           uploadTask.on('state_changed', null,
-            (error) => { console.error("Wall event image upload error:", error); reject(error); },
+            (error) => { 
+              console.error("ChefWallPage: Event image upload error:", error);
+              reject(error); 
+            },
             async () => {
-              imageUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
-              resolve();
+              try {
+                imageUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
+                console.log("ChefWallPage: Event image uploaded successfully:", imageUrlToSave);
+                resolve();
+              } catch (getUrlError) {
+                console.error("ChefWallPage: Error getting download URL for event image:", getUrlError);
+                reject(getUrlError);
+              }
             }
           );
         });
@@ -205,16 +232,16 @@ export default function ChefWallPage() {
       };
       
       const calendarEventData: Omit<CalendarEvent, 'id' | 'createdAt' | 'updatedAt'> & {id: string} = {
-        id: eventIdForPath,
+        id: eventIdForPath, 
         title: finalEventData.title,
         date: Timestamp.fromDate(eventDate),
         location: finalEventData.location,
         pax: finalEventData.maxPax,
-        menuName: `Event: ${finalEventData.title}`,
+        menuName: `Event: ${finalEventData.title}`, 
         pricePerHead: finalEventData.pricePerPerson,
         notes: finalEventData.description,
         coChefs: finalEventData.chefsInvolved,
-        status: 'WallEvent',
+        status: 'WallEvent', 
         chefId: user.uid,
         isWallEvent: true,
       };
@@ -254,8 +281,14 @@ export default function ChefWallPage() {
 
   const handleEditEventPost = (eventToEdit: ChefWallEvent) => {
     setEditingEvent(eventToEdit);
-    const eventDate = new Date(eventToEdit.eventDateTime);
-    // Format for datetime-local input: YYYY-MM-DDTHH:MM
+    let eventDate;
+    try {
+      eventDate = parseISO(eventToEdit.eventDateTime);
+    } catch (e) {
+      console.error("Error parsing eventDateTime for editing:", eventToEdit.eventDateTime, e);
+      eventDate = new Date(); // Fallback to now
+    }
+    
     const year = eventDate.getFullYear();
     const month = ('0' + (eventDate.getMonth() + 1)).slice(-2);
     const day = ('0' + eventDate.getDate()).slice(-2);
@@ -293,8 +326,11 @@ export default function ChefWallPage() {
           try {
             const imageRefToDelete = storageRef(storage, eventToDelete.imageUrl);
             await deleteObject(imageRefToDelete);
-          } catch (e) {
-             console.warn("Could not delete wall event image from storage, it might not exist or path is incorrect:", e);
+            console.log("ChefWallPage: Deleted event image from Storage for event:", eventIdToDelete);
+          } catch (e: any) {
+            if (e.code !== 'storage/object-not-found') {
+              console.warn("ChefWallPage: Could not delete event image from storage, it might not exist or path is incorrect:", e);
+            }
           }
         }
         await deleteDoc(doc(db, "chefWallEvents", eventIdToDelete));
@@ -311,8 +347,9 @@ export default function ChefWallPage() {
   
   const openNewEventDialog = () => {
     const now = new Date();
-    now.setMinutes(now.getMinutes() + 1 - now.getTimezoneOffset()); 
-    const defaultDateTime = now.toISOString().slice(0,16);
+    // Adjust for local timezone to prefill datetime-local input correctly
+    const localNow = new Date(now.getTime() - (now.getTimezoneOffset() * 60000));
+    const defaultDateTime = localNow.toISOString().slice(0,16);
 
     form.reset({
       title: '',
@@ -333,232 +370,235 @@ export default function ChefWallPage() {
     setIsPostDialogOpen(true);
   };
   
-  const formatEventDateTimeForDisplay = (dateTimeString: string | undefined) => {
+  const formatEventDateTimeForDisplay = useCallback((dateTimeString: string | undefined) => {
     if (!dateTimeString) return "Date TBD";
     try {
-      const date = new Date(dateTimeString);
+      const date = parseISO(dateTimeString); // Use parseISO for ISO strings
       if (isNaN(date.getTime())) return "Invalid Date";
       return format(date, "MMM d, yyyy 'at' h:mm a");
     } catch (e) {
+      console.warn("Could not format date for display:", dateTimeString, e);
       return String(dateTimeString); 
     }
-  };
+  }, []);
 
 
   if (isLoading) {
-    return <div className="flex justify-center items-center h-64"><Loader2 className="h-8 w-8 animate-spin text-primary" /> Loading event posts...</div>;
+    return <div className="flex justify-center items-center h-64"><Loader2 className="h-8 w-8 animate-spin text-primary" data-ai-hint="loading spinner"/> Loading event posts...</div>;
   }
 
   return (
     <div className="space-y-8">
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold flex items-center">
-          <LayoutGrid className="mr-3 h-8 w-8 text-primary" /> The Chef's Wall (Your Events)
+          <LayoutGrid className="mr-3 h-8 w-8 text-primary" data-ai-hint="layout grid icon" /> The Chef's Wall (Your Events)
         </h1>
         <Button onClick={openNewEventDialog} disabled={isSaving}>
           <PlusCircle className="mr-2 h-5 w-5" /> Post New Event
         </Button>
       </div>
 
-      <Dialog open={isPostDialogOpen} onOpenChange={(open) => {
-        if (isSaving && open) return; 
-        setIsPostDialogOpen(open);
-        if (!open) {
-            form.reset();
-            setEditingEvent(null);
-            setEventImageFile(null);
-            setEventImagePreview(null);
-        }
-      }}>
-        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editingEvent ? 'Edit Event Post' : 'Create New Event Post'}</DialogTitle>
-            <CardDescription>Share your upcoming public or private culinary events with the community.</CardDescription>
-          </DialogHeader>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmitEventPost)} className="space-y-6 p-1">
-              <FormField
-                control={form.control}
-                name="title"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Event Title</FormLabel>
-                    <FormControl><Input placeholder="e.g., Pop-Up Dinner Series" {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="description"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Event Description</FormLabel>
-                    <FormControl><Textarea placeholder="Detailed description of the event experience..." {...field} className="min-h-[100px]" /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {isPostDialogOpen && Dialog && (
+        <Dialog open={isPostDialogOpen} onOpenChange={(open) => {
+          if (isSaving && open) return; 
+          setIsPostDialogOpen(open);
+          if (!open) {
+              form.reset();
+              setEditingEvent(null);
+              setEventImageFile(null);
+              setEventImagePreview(null);
+          }
+        }}>
+          <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>{editingEvent ? 'Edit Event Post' : 'Create New Event Post'}</DialogTitle>
+              <CardDescription>Share your upcoming public or private culinary events with the community.</CardDescription>
+            </DialogHeader>
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmitEventPost)} className="space-y-6 p-1">
                 <FormField
                   control={form.control}
-                  name="maxPax"
+                  name="title"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Maximum PAX (Guests)</FormLabel>
-                      <FormControl><Input type="number" placeholder="e.g., 25" {...field} /></FormControl>
+                      <FormLabel>Event Title</FormLabel>
+                      <FormControl><Input placeholder="e.g., Pop-Up Dinner Series" {...field} /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
                 <FormField
                   control={form.control}
-                  name="pricePerPerson"
+                  name="description"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Price per Person ($)</FormLabel>
-                      <FormControl><Input type="number" step="0.01" placeholder="e.g., 95.00" {...field} /></FormControl>
+                      <FormLabel>Event Description</FormLabel>
+                      <FormControl><Textarea placeholder="Detailed description of the event experience..." {...field} className="min-h-[100px]" /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-              </div>
-              <FormField
-                control={form.control}
-                name="eventDateTime"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Event Date & Time</FormLabel>
-                    <FormControl><Input type="datetime-local" {...field} /></FormControl>
-                    <FormDescription>Be specific. Must be a future date.</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="location"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Location</FormLabel>
-                    <FormControl><Input placeholder="e.g., My Studio, City Park, Client's Address (TBD)" {...field} /></FormControl>
-                    <FormDescription>Specify address or general location.</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-               <FormField
-                control={form.control}
-                name="eventImageFile"
-                render={() => (
-                  <FormItem>
-                    <FormLabel>Event Image (Optional)</FormLabel>
-                    <FormControl>
-                      <Input 
-                        type="file" 
-                        accept="image/jpeg,image/png,image/webp"
-                        onChange={handleEventImageFileChange} 
-                        className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
-                      />
-                    </FormControl>
-                    {eventImagePreview && (
-                      <div className="mt-2">
-                        <Image src={eventImagePreview} alt="Event image preview" width={200} height={150} className="rounded-md object-cover" data-ai-hint="event food crowd" />
-                      </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <FormField
+                    control={form.control}
+                    name="maxPax"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Maximum PAX (Guests)</FormLabel>
+                        <FormControl><Input type="number" placeholder="e.g., 25" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
                     )}
-                    <FormDescription>A captivating image for your event (max 2MB, JPG/PNG/WEBP).</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="dataAiHint"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Image Description Hint (for AI)</FormLabel>
-                    <FormControl><Input placeholder="e.g., outdoor cooking, fine dining" {...field} /></FormControl>
-                    <FormDescription>One or two keywords to help AI understand image content (max 2 words).</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="chefsInvolved"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Other Chefs Involved (Optional)</FormLabel>
-                    <FormControl><Input placeholder="e.g., Chef Jane Doe, Chef John Smith" {...field} /></FormControl>
-                    <FormDescription>Comma-separated names. This can include team members or collaborators.</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="tags"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Tags / Keywords (Optional)</FormLabel>
-                    <FormControl><Input placeholder="e.g., Fine Dining, Vegan, Wine Pairing, Casual" {...field} /></FormControl>
-                    <FormDescription>Comma-separated tags to help people find your event.</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="isPublic"
-                render={({ field }) => (
-                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4 shadow-sm">
-                    <div className="space-y-0.5">
-                      <FormLabel className="text-base">Event Visibility</FormLabel>
-                      <FormDescription>
-                        {field.value ? "Public: Visible to all customers on the Customer Wall." : "Private: Invite-only or for your records."}
-                        {(!isChefSubscribed && field.value) && " Public visibility requires an active subscription."}
-                        {(!isChefSubscribed && !field.value) && " Publishing public events requires an active subscription."}
-                      </FormDescription>
-                    </div>
-                     <TooltipProvider>
-                      <Tooltip delayDuration={100}>
-                        <TooltipTrigger asChild>
-                          <FormControl>
-                            <Switch
-                              checked={field.value}
-                              onCheckedChange={(checked) => {
-                                if (checked && !isChefSubscribed) {
-                                  toast({ title: "Subscription Required", description: "You need an active subscription to make events public.", variant: "destructive"});
-                                  return; 
-                                }
-                                field.onChange(checked);
-                              }}
-                              disabled={isSaving || (field.value && !isChefSubscribed)} 
-                            />
-                          </FormControl>
-                        </TooltipTrigger>
-                        {!isChefSubscribed && (
-                          <TooltipContent>
-                            <p className="flex items-center"><AlertCircle className="mr-2 h-4 w-4" />Subscription required to make event public.</p>
-                          </TooltipContent>
-                        )}
-                      </Tooltip>
-                    </TooltipProvider>
-                  </FormItem>
-                )}
-              />
-              <DialogFooter>
-                <DialogClose asChild>
-                    <Button type="button" variant="outline" disabled={isSaving}>Cancel</Button>
-                </DialogClose>
-                <Button type="submit" disabled={isSaving || (form.getValues('isPublic') && !isChefSubscribed)}>
-                  {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (editingEvent ? 'Save Changes' : 'Create Event Post')}
-                </Button>
-              </DialogFooter>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
+                  />
+                  <FormField
+                    control={form.control}
+                    name="pricePerPerson"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Price per Person ($)</FormLabel>
+                        <FormControl><Input type="number" step="0.01" placeholder="e.g., 95.00" {...field} /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+                <FormField
+                  control={form.control}
+                  name="eventDateTime"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Event Date & Time</FormLabel>
+                      <FormControl><Input type="datetime-local" {...field} /></FormControl>
+                      <FormDescription>Be specific. Must be a future date.</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="location"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Location</FormLabel>
+                      <FormControl><Input placeholder="e.g., My Studio, City Park, Client's Address (TBD)" {...field} /></FormControl>
+                      <FormDescription>Specify address or general location.</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                 <FormField
+                  control={form.control}
+                  name="eventImageFile"
+                  render={() => (
+                    <FormItem>
+                      <FormLabel>Event Image (Optional)</FormLabel>
+                      <FormControl>
+                        <Input 
+                          type="file" 
+                          accept="image/jpeg,image/png,image/webp"
+                          onChange={handleEventImageFileChange} 
+                          className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
+                        />
+                      </FormControl>
+                      {eventImagePreview && (
+                        <div className="mt-2">
+                          <Image src={eventImagePreview} alt="Event image preview" width={200} height={150} className="rounded-md object-cover" data-ai-hint="event food crowd" />
+                        </div>
+                      )}
+                      <FormDescription>A captivating image for your event (max 2MB, JPG/PNG/WEBP).</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="dataAiHint"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Image Description Hint (for AI)</FormLabel>
+                      <FormControl><Input placeholder="e.g., outdoor cooking, fine dining" {...field} /></FormControl>
+                      <FormDescription>One or two keywords to help AI understand image content (max 2 words).</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="chefsInvolved"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Other Chefs Involved (Optional)</FormLabel>
+                      <FormControl><Input placeholder="e.g., Chef Jane Doe, Chef John Smith" {...field} /></FormControl>
+                      <FormDescription>Comma-separated names. This can include team members or collaborators for your alliance.</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="tags"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Tags / Keywords (Optional)</FormLabel>
+                      <FormControl><Input placeholder="e.g., Fine Dining, Vegan, Wine Pairing, Casual" {...field} /></FormControl>
+                      <FormDescription>Comma-separated tags to help people find your event.</FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="isPublic"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4 shadow-sm">
+                      <div className="space-y-0.5">
+                        <FormLabel className="text-base">Event Visibility</FormLabel>
+                        <FormDescription>
+                          {field.value ? "Public: Visible to all customers on the Customer Wall." : "Private: Invite-only or for your records."}
+                          {(!isChefSubscribed && field.value) && " Public visibility requires an active subscription."}
+                          {(!isChefSubscribed && !field.value) && " Publishing public events requires an active subscription."}
+                        </FormDescription>
+                      </div>
+                       <TooltipProvider>
+                        <Tooltip delayDuration={100}>
+                          <TooltipTrigger asChild>
+                            <FormControl>
+                              <Switch
+                                checked={field.value}
+                                onCheckedChange={(checked) => {
+                                  if (checked && !isChefSubscribed) {
+                                    toast({ title: "Subscription Required", description: "You need an active subscription to make events public.", variant: "destructive"});
+                                    return; 
+                                  }
+                                  field.onChange(checked);
+                                }}
+                                disabled={isSaving || (field.value && !isChefSubscribed)} 
+                              />
+                            </FormControl>
+                          </TooltipTrigger>
+                          {!isChefSubscribed && (
+                            <TooltipContent>
+                              <p className="flex items-center"><AlertCircle className="mr-2 h-4 w-4" />Subscription required to make event public.</p>
+                            </TooltipContent>
+                          )}
+                        </Tooltip>
+                      </TooltipProvider>
+                    </FormItem>
+                  )}
+                />
+                <DialogFooter>
+                  <DialogClose asChild>
+                      <Button type="button" variant="outline" disabled={isSaving}>Cancel</Button>
+                  </DialogClose>
+                  <Button type="submit" disabled={isSaving || (form.getValues('isPublic') && !isChefSubscribed)}>
+                    {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (editingEvent ? 'Save Changes' : 'Create Event Post')}
+                  </Button>
+                </DialogFooter>
+              </form>
+            </Form>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {wallEvents.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -593,13 +633,13 @@ export default function ChefWallPage() {
               </CardHeader>
               <CardContent className="space-y-3 text-sm flex-grow">
                 <p className="line-clamp-3">{event.description}</p>
-                <div className="flex items-center"><CalendarClock className="mr-2 h-4 w-4 text-primary" /> {formatEventDateTimeForDisplay(event.eventDateTime)}</div>
-                <div className="flex items-center"><MapPin className="mr-2 h-4 w-4 text-primary" /> {event.location}</div>
-                <div className="flex items-center"><DollarSign className="mr-2 h-4 w-4 text-green-600" /> ${event.pricePerPerson.toFixed(2)}/person</div>
-                <div className="flex items-center"><Users className="mr-2 h-4 w-4 text-primary" /> Max {event.maxPax} guests</div>
+                <div className="flex items-center"><CalendarClock className="mr-2 h-4 w-4 text-primary" data-ai-hint="calendar clock"/> {formatEventDateTimeForDisplay(event.eventDateTime)}</div>
+                <div className="flex items-center"><MapPin className="mr-2 h-4 w-4 text-primary" data-ai-hint="map pin location"/> {event.location}</div>
+                <div className="flex items-center"><DollarSign className="mr-2 h-4 w-4 text-green-600" data-ai-hint="dollar sign money"/> ${event.pricePerPerson.toFixed(2)}/person</div>
+                <div className="flex items-center"><Users className="mr-2 h-4 w-4 text-primary" data-ai-hint="users group"/> Max {event.maxPax} guests</div>
                 {event.chefsInvolved && event.chefsInvolved.length > 0 && (
                   <div className="flex items-center text-xs">
-                    <ChefHat className="mr-1.5 h-3.5 w-3.5 text-muted-foreground" />
+                    <ChefHat className="mr-1.5 h-3.5 w-3.5 text-muted-foreground" data-ai-hint="chef hat"/>
                     <span className="font-medium mr-1">Chefs:</span> 
                     {event.chefsInvolved.map((chef) => (
                        <Badge key={chef} variant="outline" className="mr-1 text-xs">{chef}</Badge>
@@ -644,3 +684,5 @@ export default function ChefWallPage() {
     </div>
   );
 }
+
+    
