@@ -21,8 +21,8 @@
   "/chef/dashboard/receipts/page": "app/chef/dashboard/receipts/page.js",
   "/chef/dashboard/requests/page": "app/chef/dashboard/requests/page.js",
   "/chef/dashboard/shopping-list/page": "app/chef/dashboard/shopping-list/page.js",
-  "/chef/dashboard/wall/page": "app/chef/dashboard/wall/page.js",
   "/customer/dashboard/events/page": "app/customer/dashboard/events/page.js",
+  "/chef/dashboard/wall/page": "app/chef/dashboard/wall/page.js",
   "/customer/dashboard/messages/page": "app/customer/dashboard/messages/page.js",
   "/customer/dashboard/page": "app/customer/dashboard/page.js",
   "/customer/dashboard/profile/page": "app/customer/dashboard/profile/page.js"

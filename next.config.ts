@@ -23,6 +23,16 @@ const nextConfig: NextConfig = {
     //   "https://9004-firebase-studio-1747403680894.cluster-ancjwrkgr5dvux4qug5rbzyc2y.cloudworkstations.dev"
     // ],
   },
+  webpack: (config, { isServer }) => {
+    config.module.rules.push({
+      test: /\.handlebars$/,
+      loader: 'handlebars-loader',
+    });
+
+    // Return the modified config
+    return config;
+  },
+
 };
 
 
