@@ -33,7 +33,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
 import type { Receipt, CostType, TaxAdviceInput, TaxAdviceOutput, AppUserProfileContext } from '@/types';
 import { cn } from '@/lib/utils';
-import { format, startOfDay, endOfDay, parseISO, isValid } from 'date-fns';
+import { format, startOfDay, endOfDay, parseISO, isValid, fromUnixTime } from 'date-fns';
 import { PlusCircle, Trash2, FileText, Edit3, UploadCloud, CalendarIcon, Download, DollarSign, Camera, Sparkles, InfoIcon, MessageCircleQuestion, Loader2, Filter, X } from 'lucide-react';
 import Image from 'next/image';
 import { receiptParserFlow, type ReceiptParserInput, type ReceiptParserOutput } from '@/ai/flows/receipt-parser-flow'; 
@@ -41,7 +41,7 @@ import { getTaxAdvice } from '@/ai/flows/tax-advice-flow';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
 import { collection, addDoc, doc, updateDoc, deleteDoc, query, serverTimestamp, Timestamp, onSnapshot, orderBy, setDoc, writeBatch, Unsubscribe } from 'firebase/firestore';
-import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
+import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject, StorageReference } from 'firebase/storage';
 import dynamic from 'next/dynamic';
 
 const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false, loading: () => <div className="p-4 text-center"><Loader2 className="h-6 w-6 animate-spin inline-block"/> Loading Dialog...</div> });
@@ -137,12 +137,22 @@ export default function ReceiptsPage() {
           const fetchedReceipts = querySnapshot.docs.map(docSnap => {
             const data = docSnap.data();
             return {
+              // Explicitly cast data types from Firestore
               id: docSnap.id,
               ...data,
-              date: data.date instanceof Timestamp ? data.date.toDate() : (data.date ? new Date(data.date as any) : new Date()), 
-              createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
-              updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any): undefined),
+              vendor: data.vendor as string,
+              totalAmount: typeof data.totalAmount === 'number' ? data.totalAmount : parseFloat(data.totalAmount || '0'), // Handle potential string numbers
+              costType: data.costType as CostType,
+              assignedToEventId: data.assignedToEventId as string | undefined,
+              assignedToMenuId: data.assignedToMenuId as string | undefined,
+              notes: data.notes as string | undefined,
+              imageUrl: data.imageUrl as string | undefined,
+              fileName: data.fileName as string | undefined,
+              date: data.date instanceof Timestamp ? data.date.toDate() : (data.date ? fromUnixTime(data.date.seconds) : new Date()), // Handle Timestamp or potentially legacy formats
+              createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? fromUnixTime(data.createdAt.seconds) : undefined),
+              updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? fromUnixTime(data.updatedAt.seconds) : undefined),
             } as Receipt;
+
           });
           setAllReceipts(fetchedReceipts);
           setIsLoading(false);
@@ -223,12 +233,16 @@ export default function ReceiptsPage() {
     setEditingReceipt(receiptToEdit);
     setCapturedImageDataUri(receiptToEdit?.imageUrl || null);
     setFileNameForForm(receiptToEdit?.fileName || null);
+    // Reset camera preview state when opening upload dialog
     setIsPreviewCapture(false); 
+    // If editing and there's an image, clear the file input state so user must re-upload or capture
+    if (fileInputRef.current) fileInputRef.current.value = "";
+
     if (receiptToEdit) {
       let dateToSet = new Date();
       if (receiptToEdit.date) {
           if (receiptToEdit.date instanceof Timestamp) dateToSet = receiptToEdit.date.toDate();
-          else if (isValid(new Date(receiptToEdit.date as any))) dateToSet = new Date(receiptToEdit.date as any);
+          else if (receiptToEdit.date instanceof Date && isValid(receiptToSet)) dateToSet = receiptToEdit.date; // Check if it's already a valid Date object
       }
       form.reset({
         vendor: receiptToEdit.vendor,
@@ -309,7 +323,7 @@ export default function ReceiptsPage() {
       if (result) {
         if (result.vendor) form.setValue('vendor', result.vendor);
         if (result.date) {
-           try {
+            try {
             let parsedDate = parseISO(result.date); // Expects YYYY-MM-DD
             if (!isValid(parsedDate)) { // Fallback for other common formats if parseISO fails
                 parsedDate = new Date(result.date.replace(/-/g, '/')); 
@@ -323,7 +337,7 @@ export default function ReceiptsPage() {
            } catch (e) { 
                 console.warn("Error processing date from AI for receipt:", result.date, e);
                 toast({ title: "AI Autofill", description: "Error processing date from AI. Please set manually.", variant: "default" });
-            }
+           }
         }
         if (result.totalAmount !== undefined && result.totalAmount !== null) form.setValue('totalAmount', result.totalAmount);
         if (result.suggestedCostType) form.setValue('costType', result.suggestedCostType);
@@ -374,13 +388,16 @@ export default function ReceiptsPage() {
     const originalFileName = fileNameForForm || (editingReceipt?.fileName) || `receipt_${Date.now()}.jpg`;
 
     try {
-      const receiptIdForPath = editingReceipt?.id || doc(collection(db, 'temp')).id; 
+      // Generate a new ID upfront if not editing, so the image path is stable
+      const receiptIdForPath = editingReceipt?.id || doc(collection(db, `users/${user.uid}/receipts`)).id;
+      const receiptDocRef = doc(db, "users", user.uid, "receipts", receiptIdForPath);
+
 
       if (capturedImageDataUri && (!editingReceipt || capturedImageDataUri !== editingReceipt.imageUrl)) {
         // Delete old image if editing and new image provided
         if (editingReceipt?.imageUrl && editingReceipt.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
-            const oldImageRef = storageRef(storage, editingReceipt.imageUrl);
+             const oldImageRef: StorageReference = storageRef(storage, editingReceipt.imageUrl);
             await deleteObject(oldImageRef);
           } catch (e: any) { 
             if (e.code !== 'storage/object-not-found') {
@@ -392,7 +409,8 @@ export default function ReceiptsPage() {
         const blob = dataURIToBlob(capturedImageDataUri);
         if (!blob) throw new Error("Failed to convert image data for upload.");
 
-        const imagePath = `users/${user.uid}/receipts/${receiptIdForPath}/${originalFileName.replace(/[^a-zA-Z0-9.]/g, '_')}`;
+        // Sanitize filename for storage path
+        const imagePath = `users/${user.uid}/receipts/${receiptIdForPath}/${originalFileName.replace(/[^a-zA-Z0-9_.-]/g, '_')}`;
         const imageStorageRefInstance = storageRef(storage, imagePath);
         
         const uploadTask = uploadBytesResumable(imageStorageRefInstance, blob);
@@ -424,8 +442,6 @@ export default function ReceiptsPage() {
         fileName: originalFileName,
         updatedAt: serverTimestamp(),
       };
-
-      const receiptDocRef = doc(db, "users", user.uid, "receipts", receiptIdForPath);
 
       if (editingReceipt) {
         await updateDoc(receiptDocRef, receiptDataToSave);
@@ -467,7 +483,7 @@ export default function ReceiptsPage() {
         // Delete image from Storage if it exists
         if (receiptToDelete.imageUrl && receiptToDelete.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
-            const imageRefToDelete = storageRef(storage, receiptToDelete.imageUrl);
+            const imageRefToDelete: StorageReference = storageRef(storage, receiptToDelete.imageUrl);
             await deleteObject(imageRefToDelete);
           } catch (e: any) {
             if (e.code !== 'storage/object-not-found') {
@@ -667,7 +683,7 @@ export default function ReceiptsPage() {
               setFileNameForForm(null);
               setIsPreviewCapture(false);
               if (fileInputRef.current) fileInputRef.current.value = "";
-            }
+          }
         }}>
           <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>

@@ -59,7 +59,7 @@ export default function ChefRequestsPage() {
 
         setRequests(fetchedRequests);
       } catch (error) {
-        console.error("Error fetching customer requests:", error);
+        console.error("Error fetching customer requests:", error, JSON.stringify(error));
         toast({ title: "Error", description: "Could not fetch customer requests.", variant: "destructive" });
       } finally {
         setIsLoading(false);

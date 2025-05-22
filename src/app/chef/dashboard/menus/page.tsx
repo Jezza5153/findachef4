@@ -208,46 +208,48 @@ export default function MenuManagementPage() {
     const menuIdForPath = editingMenu?.id || doc(collection(db, 'menus')).id; 
 
     try {
-      if (menuImageFile) {
-        // Delete old image if editing and new image provided
-        if (editingMenu?.imageUrl && editingMenu.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
-          try {
-            const oldImageRef = storageRef(storage, editingMenu.imageUrl);
-            await deleteObject(oldImageRef);
-          } catch (e: any) {
-            if (e.code !== 'storage/object-not-found') {
-              console.warn("MenuManagementPage: Could not delete old menu image during update:", e.message);
-            }
-          }
+ if (menuImageFile) {
+ // Delete old image if editing and new image provided
+ if (editingMenu?.imageUrl && editingMenu.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
+ try {
+ const oldImageRef = storageRef(storage, editingMenu.imageUrl);
+ await deleteObject(oldImageRef);
+ } catch (e: any) {
+ if (e.code !== 'storage/object-not-found') {
+ console.warn("MenuManagementPage: Could not delete old menu image during update:", e.message);
+ toast({ title: "Image Update Warning", description: "Failed to delete old image, proceeding with new upload.", variant: "warning" });
+ }
+ }
         }
-        
-        const fileExtension = menuImageFile.name.split('.').pop() || 'jpg';
-        const imagePath = `users/${user.uid}/menus/${menuIdForPath}/image.${fileExtension}`;
-        const imageStorageRefInstance = storageRef(storage, imagePath);
-        
-        toast({ title: "Uploading image...", description: "Please wait." });
-        const uploadTask = uploadBytesResumable(imageStorageRefInstance, menuImageFile);
-        
-        await new Promise<void>((resolve, reject) => {
-          uploadTask.on('state_changed', 
-            null, 
-            (error) => { 
-              console.error("Menu image upload error:", error); 
-              reject(error); 
-            },
-            async () => {
-              try {
-                imageUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
-                resolve();
-              } catch (getUrlError) {
-                console.error("Error getting download URL for menu image:", getUrlError);
-                reject(getUrlError);
-              }
-            }
-          );
-        });
-      }
 
+ const fileExtension = menuImageFile.name.split('.').pop() || 'jpg';
+ const imagePath = `users/${user.uid}/menus/${menuIdForPath}/image.${fileExtension}`;
+ const imageStorageRefInstance = storageRef(storage, imagePath);
+
+ toast({ title: "Uploading image...", description: "Please wait." });
+ const uploadTask = uploadBytesResumable(imageStorageRefInstance, menuImageFile);
+
+ await new Promise<void>((resolve, reject) => {
+ uploadTask.on('state_changed',
+ null,
+ (error) => {
+ console.error("Menu image upload error:", error);
+ toast({ title: "Upload Failed", description: `Image upload failed: ${error.message}`, variant: "destructive" });
+ reject(error);
+ },
+ async () => {
+ try {
+ imageUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
+ resolve();
+ } catch (getUrlError: any) {
+ console.error("Error getting download URL for menu image:", getUrlError);
+ toast({ title: "Upload Failed", description: `Failed to get image URL: ${getUrlError.message}`, variant: "destructive" });
+ reject(getUrlError);
+          }
+ }
+ );
+ });
+ }
       const finalMenuIngredients = data.menuIngredients?.map(ing => ({
         ...ing,
         totalCost: (Number(ing.quantity) || 0) * (Number(ing.costPerUnit) || 0)
@@ -280,12 +282,23 @@ export default function MenuManagementPage() {
 
       if (editingMenu) {
         const menuDocRef = doc(db, "menus", editingMenu.id);
+ try {
         await updateDoc(menuDocRef, menuDataToSave);
-        toast({ title: 'Menu Updated', description: `"${data.title}" has been successfully updated.` });
+ toast({ title: 'Menu Updated', description: `"${data.title}" has been successfully updated.` });
+ } catch (updateError: any) {
+ console.error("Error updating menu document:", updateError);
+ toast({ title: 'Update Failed', description: `Failed to update menu document: ${updateError.message}`, variant: 'destructive' });
+ throw updateError; // Rethrow to hit the outer catch
+ }
       } else {
-        const newMenuDocRef = doc(db, "menus", menuIdForPath); 
+ const newMenuDocRef = doc(db, "menus", menuIdForPath);
+ try {
         await setDoc(newMenuDocRef, { ...menuDataToSave, id: newMenuDocRef.id, createdAt: serverTimestamp() });
         toast({ title: 'Menu Created', description: `"${data.title}" has been successfully created.` });
+ } catch (createError: any) {
+ console.error("Error creating menu document:", createError);
+ toast({ title: 'Create Failed', description: `Failed to create menu document: ${createError.message}`, variant: 'destructive' });
+ throw createError; // Rethrow to hit the outer catch
       }
       
       form.reset();
@@ -296,8 +309,13 @@ export default function MenuManagementPage() {
       replaceIngredients([]);
 
     } catch (error: any) {
-      console.error('Error saving menu:', error);
-      toast({ title: 'Save Failed', description: `Could not save menu. ${error.message}`, variant: 'destructive' });
+ console.error('Menu save operation failed:', error);
+ // If a specific error toast wasn't shown by sub-catches (like upload), show a generic one
+ if (!toast.isActive) { // Assuming toast library has a way to check if a toast is currently active
+ toast({ title: 'Save Failed', description: `Could not save menu due to an unexpected error. ${error.message}`, variant: 'destructive' });
+ }
+ // Reset image state if save fails after upload
+ setMenuImageFile(null);
     } finally {
       setIsSaving(false);
     }
@@ -342,19 +360,25 @@ export default function MenuManagementPage() {
       try {
         // Delete image from Storage if it exists
         if (menuToDelete.imageUrl && menuToDelete.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
-          try {
+ try {
             const imageRefToDelete = storageRef(storage, menuToDelete.imageUrl);
             await deleteObject(imageRefToDelete);
-          } catch (e: any) {
-            if (e.code !== 'storage/object-not-found') {
+ } catch (e: any) {
+ if (e.code !== 'storage/object-not-found') {
                console.warn("MenuManagementPage: Could not delete menu image from storage during menu deletion:", e.message);
-            }
-          }
+ toast({ title: "Image Deletion Warning", description: "Failed to delete menu image from storage.", variant: "warning" });
+ }
+ }
         }
-        await deleteDoc(doc(db, "menus", menuId));
+
+ try {
+ await deleteDoc(doc(db, "menus", menuId));
         toast({ title: 'Menu Deleted', description: `"${menuToDelete?.title}" has been deleted.`, variant: 'destructive' });
-      } catch (error: any) {
-        console.error("Error deleting menu:", error);
+ } catch (firestoreError: any) {
+ console.error("Error deleting menu document:", firestoreError);
+ toast({ title: "Delete Error", description: `Failed to delete menu document: ${firestoreError.message}`, variant: "destructive" });
+ }      } catch (error: any) { // Catch any other errors during the process (like potential image delete)
+ console.error("Menu deletion process error:", error);
         toast({ title: "Delete Error", description: `Could not delete menu. ${error.message}`, variant: "destructive" });
       } finally {
         setIsSaving(false);
@@ -392,11 +416,15 @@ export default function MenuManagementPage() {
             batch.set(newItemRef, { ...newItemData, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
         });
         
-        await batch.commit();
-        toast({
+ try {
+ await batch.commit();
+ toast({
             title: 'Added to Shopping List',
             description: `Ingredients from "${menu.title}" added.`,
         });
+ } catch (batchError: any) {
+ throw batchError; // Rethrow to outer catch
+ }
     } catch (error: any) {
         console.error("Error adding to shopping list:", error);
         toast({

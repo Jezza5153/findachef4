@@ -103,7 +103,7 @@ export default function ChefWallPage() {
       const eventsCollectionRef = collection(db, "chefWallEvents");
       const q = query(eventsCollectionRef, where("chefId", "==", user.uid), orderBy("createdAt", "desc"));
       
-      try {
+      
         unsubscribe = onSnapshot(q, (querySnapshot) => {
           const fetchedEvents = querySnapshot.docs.map(docSnap => {
             const data = docSnap.data();
@@ -132,11 +132,7 @@ export default function ChefWallPage() {
           toast({ title: "Error", description: "Could not fetch your event posts.", variant: "destructive" });
           setIsLoading(false);
         });
-      } catch (e) {
-        console.error("Error setting up wall events listener:", e);
-        toast({title: "Setup Error", description: "Failed to initialize event post tracking.", variant: "destructive"});
-        setIsLoading(false);
-      }
+     
     } else {
       setIsLoading(false);
       setWallEvents([]);
@@ -177,6 +173,11 @@ export default function ChefWallPage() {
     }
     setIsSaving(true);
 
+    // --- Start Date Validation ---
+    // Moved date parsing here to ensure validity before proceeding with image upload/Firestore ops
+    // This also ensures editingEvent.eventDateTime is only accessed if editingEvent exists.
+    let eventDate: Date;
+
     let eventDate: Date;
     try {
       eventDate = new Date(data.eventDateTime); // HTML datetime-local input provides ISO string
@@ -188,11 +189,17 @@ export default function ChefWallPage() {
       return;
     }
     
+    // --- End Date Validation ---
+
     let imageUrlToSave = editingEvent?.imageUrl || '';
     const eventIdForPath = editingEvent?.id || doc(collection(db, 'chefWallEvents')).id;
 
     try {
+      // --- Start Image Upload Logic ---
       if (eventImageFile) {
+
+        // --- Start Old Image Deletion ---
+        // Wrap old image deletion in try/catch as it's not critical if it fails
         // Delete old image if editing and new image provided
         if (editingEvent?.imageUrl && editingEvent.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
@@ -204,6 +211,7 @@ export default function ChefWallPage() {
             }
           }
         }
+        // --- End Old Image Deletion ---
         
         const fileExtension = eventImageFile.name.split('.').pop() || 'jpg';
         const imagePath = `users/${user.uid}/chefWallEvents/${eventIdForPath}/eventImage.${fileExtension}`;
@@ -229,6 +237,7 @@ export default function ChefWallPage() {
             }
           );
         });
+        // --- End Image Upload Logic ---
       }
 
       const finalEventData: Omit<ChefWallEvent, 'id' | 'createdAt' | 'updatedAt'> & { chefId: string, chefName: string, chefAvatarUrl?: string, updatedAt: any, createdAt?: any } = {
@@ -264,6 +273,7 @@ export default function ChefWallPage() {
         updatedAt: serverTimestamp(),
       };
 
+      // --- Start Firestore Batch Write ---
       const batch = writeBatch(db);
       const eventDocRef = doc(db, "chefWallEvents", eventIdForPath);
       const calendarEventDocRef = doc(db, `users/${user.uid}/calendarEvents`, eventIdForPath);
@@ -280,7 +290,8 @@ export default function ChefWallPage() {
         toast({ title: 'Event Post Created', description: `"${finalEventData.title}" has been created.` });
       }
       
-      await batch.commit();
+      await batch.commit(); // Commit the batch write (Firestore ops)
+      // --- End Firestore Batch Write ---
       
       form.reset();
       setEditingEvent(null);
@@ -342,6 +353,7 @@ export default function ChefWallPage() {
 
     if (window.confirm(`Are you sure you want to delete the event post "${eventToDelete?.title}"? This will also remove it from your calendar.`)) {
       setIsSaving(true);
+      // --- Start Deletion Logic ---
       try {
         const batch = writeBatch(db);
         const wallEventDocRef = doc(db, "chefWallEvents", eventIdToDelete);
@@ -350,6 +362,7 @@ export default function ChefWallPage() {
         const calendarEventDocRef = doc(db, `users/${user.uid}/calendarEvents`, eventIdToDelete);
         batch.delete(calendarEventDocRef);
 
+        // --- Start Image Deletion ---
         // Delete image from Storage if it exists
         if (eventToDelete.imageUrl && eventToDelete.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
@@ -361,6 +374,7 @@ export default function ChefWallPage() {
             }
           }
         }
+        // --- End Image Deletion ---
         
         await batch.commit();
         toast({ title: 'Event Post Deleted', description: `"${eventToDelete?.title}" has been deleted.`, variant: 'destructive' });
@@ -369,6 +383,7 @@ export default function ChefWallPage() {
         toast({ title: "Delete Error", description: `Could not delete event post. ${error.message}`, variant: "destructive" });
       } finally {
         setIsSaving(false);
+        // --- End Deletion Logic ---
       }
     }
   };
