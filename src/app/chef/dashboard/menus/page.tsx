@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState, useEffect, ChangeEvent, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, ChangeEvent, useMemo, useCallback } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm, Controller, useFieldArray } from 'react-hook-form';
 import * as z from 'zod';
@@ -21,7 +21,7 @@ import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { MenuCard } from '@/components/menu-card';
-import type { Menu, Option, ShoppingListItem, MenuIngredient } from '@/types';
+import type { Menu, Option, ShoppingListItem, MenuIngredient, AppUserProfileContext } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import { PlusCircle, Edit, Trash2, NotebookText, Eye, EyeOff, ShoppingCart, AlertCircle, Sparkles, UploadCloud, Image as ImageIconLucide, Loader2, PackagePlus, PackageMinus, Calculator } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -34,7 +34,7 @@ import { assistMenuItem } from '@/ai/flows/menu-item-assist-flow';
 import { v4 as uuidv4 } from 'uuid';
 import dynamic from 'next/dynamic';
 
-const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false, loading: () => <p>Loading dialog...</p> });
+const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false, loading: () => <div className="p-4 text-center"><Loader2 className="h-6 w-6 animate-spin inline-block"/> Loading Dialog...</div> });
 const DialogContent = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogContent), { ssr: false });
 const DialogHeader = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogHeader), { ssr: false });
 const DialogTitle = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogTitle), { ssr: false });
@@ -134,36 +134,39 @@ export default function MenuManagementPage() {
 
 
   useEffect(() => {
-    if (!user) {
+    let unsubscribe: Unsubscribe | undefined;
+    if (user) {
+      setIsLoading(true);
+      const menusCollectionRef = collection(db, "menus");
+      const q = query(menusCollectionRef, where("chefId", "==", user.uid), orderBy("createdAt", "desc"));
+      
+      unsubscribe = onSnapshot(q, (querySnapshot) => {
+        const fetchedMenus = querySnapshot.docs.map(docSnap => {
+          const data = docSnap.data();
+           return { 
+            id: docSnap.id, 
+            ...data,
+            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
+          } as Menu;
+        });
+        setMenus(fetchedMenus);
+        setIsLoading(false);
+      }, (error) => {
+        console.error("Error fetching menus:", error);
+        toast({ title: "Error", description: "Could not fetch your menus.", variant: "destructive" });
+        setIsLoading(false);
+      });
+    } else {
       setIsLoading(false);
       setMenus([]);
-      return () => {}; // Return an empty cleanup function
     }
-    setIsLoading(true);
-    const menusCollectionRef = collection(db, "menus");
-    const q = query(menusCollectionRef, where("chefId", "==", user.uid), orderBy("createdAt", "desc"));
-    
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const fetchedMenus = querySnapshot.docs.map(docSnap => {
-        const data = docSnap.data();
-         return { 
-          id: docSnap.id, 
-          ...data,
-          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
-          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
-        } as Menu;
-      });
-      setMenus(fetchedMenus);
-      setIsLoading(false);
-    }, (error) => {
-      console.error("Error fetching menus:", error);
-      toast({ title: "Error", description: "Could not fetch your menus.", variant: "destructive" });
-      setIsLoading(false);
-    });
     
     return () => {
-      console.log("MenuManagementPage: Unsubscribing from menus listener.");
-      unsubscribe();
+      if (unsubscribe) {
+        console.log("MenuManagementPage: Unsubscribing from menus listener.");
+        unsubscribe();
+      }
     };
   }, [user, toast]);
 
@@ -189,21 +192,24 @@ export default function MenuManagementPage() {
       toast({ title: "Authentication Error", description: "You must be logged in to manage menus.", variant: "destructive" });
       return;
     }
+     if (data.isPublic && !isChefSubscribed && !(userProfile as AppUserProfileContext).isAdmin) {
+        toast({title: "Subscription Required", description: "An active subscription is needed to publish menus publicly.", variant: "destructive"});
+        return;
+    }
     setIsSaving(true);
 
     let imageUrlToSave = editingMenu?.imageUrl || ''; 
-    const menuIdForPath = editingMenu?.id || doc(collection(db, 'menus')).id; // Generate ID upfront if new
+    const menuIdForPath = editingMenu?.id || doc(collection(db, 'menus')).id; 
 
     try {
       if (menuImageFile) {
-        if (editingMenu && editingMenu.imageUrl && editingMenu.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
+        if (editingMenu?.imageUrl && editingMenu.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
             const oldImageRef = storageRef(storage, editingMenu.imageUrl);
             await deleteObject(oldImageRef);
-            console.log("MenuManagementPage: Deleted old menu image from Storage.");
           } catch (e: any) {
             if (e.code !== 'storage/object-not-found') {
-              console.warn("MenuManagementPage: Could not delete old menu image, it might not exist or path is incorrect:", e);
+              console.warn("Could not delete old menu image:", e.message);
             }
           }
         }
@@ -225,10 +231,9 @@ export default function MenuManagementPage() {
             async () => {
               try {
                 imageUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
-                console.log("MenuManagementPage: Menu image uploaded successfully:", imageUrlToSave);
                 resolve();
               } catch (getUrlError) {
-                console.error("MenuManagementPage: Error getting download URL for menu image:", getUrlError);
+                console.error("Error getting download URL for menu image:", getUrlError);
                 reject(getUrlError);
               }
             }
@@ -281,11 +286,11 @@ export default function MenuManagementPage() {
       setIsDialogOpen(false);
       setMenuImageFile(null);
       setMenuImagePreview(null);
-      replaceIngredients([]); // Clear ingredients field array
+      replaceIngredients([]);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving menu:', error);
-      toast({ title: 'Save Failed', description: 'Could not save your menu. Please try again.', variant: 'destructive' });
+      toast({ title: 'Save Failed', description: `Could not save menu. ${error.message}`, variant: 'destructive' });
     } finally {
       setIsSaving(false);
     }
@@ -315,9 +320,15 @@ export default function MenuManagementPage() {
   };
 
   const handleDelete = async (menuId: string) => {
-    if (!user) return;
+    if (!user) {
+        toast({ title: "Authentication Error", description: "You must be logged in.", variant: "destructive" });
+        return;
+    }
     const menuToDelete = menus.find(m => m.id === menuId);
-    if (!menuToDelete) return;
+    if (!menuToDelete) {
+        toast({ title: "Error", description: "Menu not found.", variant: "destructive" });
+        return;
+    }
 
     if (window.confirm(`Are you sure you want to delete the menu "${menuToDelete?.title}"?`)) {
       setIsSaving(true);
@@ -326,18 +337,17 @@ export default function MenuManagementPage() {
           try {
             const imageRefToDelete = storageRef(storage, menuToDelete.imageUrl);
             await deleteObject(imageRefToDelete);
-            console.log("MenuManagementPage: Deleted menu image from Storage for menu:", menuId);
           } catch (e: any) {
             if (e.code !== 'storage/object-not-found') {
-               console.warn("MenuManagementPage: Could not delete menu image from storage, it might not exist or path is incorrect:", e);
+               console.warn("Could not delete menu image from storage:", e.message);
             }
           }
         }
         await deleteDoc(doc(db, "menus", menuId));
         toast({ title: 'Menu Deleted', description: `"${menuToDelete?.title}" has been deleted.`, variant: 'destructive' });
-      } catch (error) {
+      } catch (error: any) {
         console.error("Error deleting menu:", error);
-        toast({ title: "Delete Error", description: "Could not delete menu.", variant: "destructive" });
+        toast({ title: "Delete Error", description: `Could not delete menu. ${error.message}`, variant: "destructive" });
       } finally {
         setIsSaving(false);
       }
@@ -349,34 +359,37 @@ export default function MenuManagementPage() {
       toast({ title: "Not Logged In", description: "Please log in to add items to your shopping list.", variant: "destructive"});
       return;
     }
+    if (!menu.menuIngredients || menu.menuIngredients.length === 0) {
+        toast({ title: "No Ingredients", description: "This menu has no ingredients listed to add to the shopping list.", variant: "default"});
+        return;
+    }
     
-    setIsSaving(true); // Indicate processing
+    setIsSaving(true);
     try {
-        const determinedCostPrice = menu.costPrice ?? menu.calculatedCostPricePerHead ?? 0;
-        const determinedPax = menu.pax ?? 1;
-
-        const newItem: Omit<ShoppingListItem, 'id' | 'createdAt' | 'updatedAt'> = {
-        chefId: user.uid,
-        name: `Ingredients for ${menu.title}`,
-        quantity: determinedPax, 
-        unit: 'Servings', 
-        estimatedCost: determinedCostPrice * determinedPax, 
-        notes: `For menu: ${menu.title} (ID: ${menu.id}). Cost per head: $${determinedCostPrice.toFixed(2)} for ${determinedPax} PAX.`,
-        purchased: false,
-        menuId: menu.id,
-        };
-
-        const shoppingListCollectionRef = collection(db, `users/${user.uid}/shoppingListItems`);
-        await addDoc(shoppingListCollectionRef, { ...newItem, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+        const batch = []; // For potential batch write if adding multiple items per ingredient
+        for (const ing of menu.menuIngredients) {
+            const newItem: Omit<ShoppingListItem, 'id' | 'createdAt' | 'updatedAt'> = {
+                chefId: user.uid,
+                name: ing.name,
+                quantity: ing.quantity, 
+                unit: ing.unit, 
+                estimatedCost: ing.costPerUnit, // Cost per unit
+                notes: `For menu: ${menu.title}. ${ing.notes || ''}`.trim(),
+                purchased: false,
+                menuId: menu.id,
+            };
+            batch.push(addDoc(collection(db, `users/${user.uid}/shoppingListItems`), { ...newItem, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }));
+        }
+        await Promise.all(batch);
         toast({
             title: 'Added to Shopping List',
-            description: `"${newItem.name}" added.`,
+            description: `Ingredients from "${menu.title}" added.`,
         });
-    } catch (error) {
+    } catch (error: any) {
         console.error("Error adding to shopping list:", error);
         toast({
             title: 'Error',
-            description: 'Could not add item to shopping list.',
+            description: `Could not add items to shopping list. ${error.message}`,
             variant: 'destructive',
         });
     } finally {
@@ -402,7 +415,7 @@ export default function MenuManagementPage() {
     setEditingMenu(null);
     setMenuImageFile(null);
     setMenuImagePreview(null);
-    replaceIngredients([]); // Ensure ingredients field array is cleared for new menu
+    replaceIngredients([]);
     setIsDialogOpen(true);
   };
 
@@ -433,9 +446,13 @@ export default function MenuManagementPage() {
       } else {
         toast({ title: "AI Menu Assist", description: "Could not generate a suggestion at this time.", variant: "default" });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error with AI Menu Assist:", error);
-      toast({ title: "AI Error", description: "Failed to get AI suggestions.", variant: "destructive" });
+      let errorMsg = `Failed to get AI suggestions. ${error.message}`;
+      if (error.message && error.message.toLowerCase().includes('api key not valid')) {
+        errorMsg = "AI Service Error: Invalid API Key for menu assist.";
+      }
+      toast({ title: "AI Error", description: errorMsg, variant: "destructive" });
     } finally {
       setIsAiAssisting(false);
     }
@@ -443,19 +460,19 @@ export default function MenuManagementPage() {
 
 
   if (isLoading) {
-    return <div className="flex h-screen items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" data-ai-hint="loading spinner"/> Loading menus...</div>;
+    return <div className="flex justify-center items-center h-64"><Loader2 className="h-8 w-8 animate-spin text-primary" data-ai-hint="loading spinner"/> Loading menus...</div>;
   }
 
   return (
     <div className="space-y-8">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-center gap-2">
         <h1 className="text-3xl font-bold flex items-center"><NotebookText className="mr-3 h-8 w-8 text-primary" data-ai-hint="notebook icon"/> Manage Your Menus</h1>
         <Button onClick={openNewMenuDialog} disabled={isSaving}>
           <PlusCircle className="mr-2 h-5 w-5" /> Add New Menu
         </Button>
       </div>
 
-      {isDialogOpen && Dialog && (
+      {isDialogOpen && (
         <Dialog open={isDialogOpen} onOpenChange={(isOpen) => {
             if ((isSaving || isAiAssisting) && isOpen) return; 
             setIsDialogOpen(isOpen);
@@ -464,7 +481,7 @@ export default function MenuManagementPage() {
               setMenuImagePreview(null);
               form.reset();
               setEditingMenu(null);
-              replaceIngredients([]); // Clear ingredients on dialog close too
+              replaceIngredients([]);
             }
         }}>
           <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -671,7 +688,7 @@ export default function MenuManagementPage() {
                       size="sm" 
                       className="p-0 h-auto"
                       onClick={() => form.setValue('costPrice', parseFloat(calculatedCostPricePerHead.toFixed(2)) )}
-                      disabled={calculatedCostPricePerHead === 0 && calculatedTotalIngredientCost === 0}
+                      disabled={(calculatedCostPricePerHead === 0 && calculatedTotalIngredientCost === 0) || isNaN(calculatedCostPricePerHead)}
                   >
                       Use Calculated Cost per Head
                   </Button>
@@ -718,8 +735,8 @@ export default function MenuManagementPage() {
                         <FormLabel className="text-base">Publish Menu</FormLabel>
                         <FormDescription>
                           Make this menu visible to customers on the public menu listings.
-                          {(!isChefSubscribed && field.value) && " Public visibility requires an active subscription."}
-                          {(!isChefSubscribed && !field.value) && " Publishing public menus requires an active subscription."}
+                          {(!isChefSubscribed && field.value && !(userProfile as AppUserProfileContext)?.isAdmin) && " Public visibility requires an active subscription."}
+                          {(!isChefSubscribed && !field.value && !(userProfile as AppUserProfileContext)?.isAdmin) && " Publishing public menus requires an active subscription."}
                         </FormDescription>
                       </div>
                       <TooltipProvider>
@@ -729,17 +746,17 @@ export default function MenuManagementPage() {
                               <Switch
                                 checked={field.value}
                                 onCheckedChange={(checked) => {
-                                  if (checked && !isChefSubscribed) {
+                                  if (checked && !isChefSubscribed && !(userProfile as AppUserProfileContext)?.isAdmin) {
                                       toast({ title: "Subscription Required", description: "You need an active subscription to publish menus publicly.", variant: "destructive"});
                                       return; 
                                   }
                                   field.onChange(checked);
                                 }}
-                                disabled={isSaving || (field.value && !isChefSubscribed)} 
+                                disabled={isSaving || (field.value && !isChefSubscribed && !(userProfile as AppUserProfileContext)?.isAdmin)} 
                               />
                             </FormControl>
                           </TooltipTrigger>
-                          {!isChefSubscribed && (
+                          {(!isChefSubscribed && !(userProfile as AppUserProfileContext)?.isAdmin) && (
                             <TooltipContent>
                               <p className="flex items-center"><AlertCircle className="mr-2 h-4 w-4" />Subscription required to publish publicly.</p>
                             </TooltipContent>
@@ -753,7 +770,7 @@ export default function MenuManagementPage() {
                   <DialogClose asChild>
                       <Button type="button" variant="outline" disabled={isSaving || isAiAssisting}>Cancel</Button>
                   </DialogClose>
-                  <Button type="submit" disabled={isSaving || isAiAssisting || (form.getValues("isPublic") && !isChefSubscribed) }>
+                  <Button type="submit" disabled={isSaving || isAiAssisting || (form.getValues("isPublic") && !isChefSubscribed && !(userProfile as AppUserProfileContext)?.isAdmin) }>
                     {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (editingMenu ? 'Save Changes' : 'Create Menu')}
                   </Button>
                 </DialogFooter>
@@ -771,7 +788,7 @@ export default function MenuManagementPage() {
               menu={menu}
               onEdit={() => handleEdit(menu.id)}
               onDelete={() => handleDelete(menu.id)}
-              onAddToShoppingList={() => handleAddToShoppingList(menu)}
+              onAddToShoppingList={handleAddToShoppingList}
               isChefOwner={true}
               showChefDetails={false}
             />
@@ -796,5 +813,4 @@ export default function MenuManagementPage() {
     </div>
   );
 }
-
     

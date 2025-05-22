@@ -3,7 +3,7 @@
 
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useForm, useForm as useTaxForm } from 'react-hook-form';
+import { useForm, useForm as useTaxForm } from 'react-hook-form'; // Renamed one useForm import
 import * as z from 'zod';
 import { Button } from '@/components/ui/button';
 import {
@@ -33,7 +33,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
 import type { Receipt, CostType, TaxAdviceInput, TaxAdviceOutput } from '@/types';
 import { cn } from '@/lib/utils';
-import { format, startOfDay, endOfDay, parseISO } from 'date-fns';
+import { format, startOfDay, endOfDay, parseISO, isValid } from 'date-fns';
 import { PlusCircle, Trash2, FileText, Edit3, UploadCloud, CalendarIcon, Download, DollarSign, Camera, Sparkles, InfoIcon, MessageCircleQuestion, Loader2, Filter, X } from 'lucide-react';
 import Image from 'next/image';
 import { receiptParserFlow } from '@/ai/flows/receipt-parser-flow'; 
@@ -44,16 +44,20 @@ import { collection, addDoc, doc, updateDoc, deleteDoc, query, serverTimestamp, 
 import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import dynamic from 'next/dynamic';
 
-const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false, loading: () => <p>Loading dialog...</p> });
+const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false, loading: () => <div className="p-4 text-center"><Loader2 className="h-6 w-6 animate-spin inline-block"/> Loading Dialog...</div> });
 const DialogContent = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogContent), { ssr: false });
 const DialogHeader = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogHeader), { ssr: false });
 const DialogTitle = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogTitle), { ssr: false });
 const DialogFooter = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogFooter), { ssr: false });
 const DialogClose = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogClose), { ssr: false });
 const ShadDialogDescription = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogDescription), { ssr: false });
-const CameraDialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false, loading: () => <p>Loading camera...</p> }); // For camera dialog
+
+const CameraDialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false, loading: () => <div className="p-4 text-center"><Loader2 className="h-6 w-6 animate-spin inline-block"/> Loading Camera...</div> });
+
 
 const costTypes: CostType[] = ['Ingredient', 'Equipment', 'Tax', 'BAS', 'Travel', 'Other'];
+const costTypesForZod: [CostType, ...CostType[]] = ['Ingredient', 'Equipment', 'Tax', 'BAS', 'Travel', 'Other'];
+
 
 const receiptFormSchema = z.object({
   vendor: z.string().min(1, { message: 'Vendor name is required.' }),
@@ -61,7 +65,7 @@ const receiptFormSchema = z.object({
   totalAmount: z.coerce.number().min(0.01, { message: 'Total amount must be greater than 0.' }),
   assignedToEventId: z.string().optional(),
   assignedToMenuId: z.string().optional(),
-  costType: z.enum(costTypes as [CostType, ...CostType[]], { required_error: 'Cost type is required.'}),
+  costType: z.enum(costTypesForZod, { required_error: 'Cost type is required.'}),
   notes: z.string().optional(),
 });
 
@@ -122,44 +126,47 @@ export default function ReceiptsPage() {
   });
 
   useEffect(() => {
-    if (!user) {
+    let unsubscribe: Unsubscribe | undefined;
+    if (user) {
+      setIsLoading(true);
+      const receiptsCollectionRef = collection(db, "users", user.uid, "receipts");
+      const q = query(receiptsCollectionRef, orderBy("date", "desc"));
+      
+      unsubscribe = onSnapshot(q, (querySnapshot) => {
+        const fetchedReceipts = querySnapshot.docs.map(docSnap => {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id,
+            ...data,
+            date: data.date instanceof Timestamp ? data.date.toDate() : (data.date ? new Date(data.date as any) : new Date()), 
+            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+            updatedAt: data.updatedAt.toDate(),
+          } as Receipt;
+        });
+        setAllReceipts(fetchedReceipts);
+        setIsLoading(false);
+      }, (error) => {
+        console.error("Error fetching receipts:", error);
+        toast({ title: "Error", description: "Could not fetch your receipts.", variant: "destructive" });
+        setIsLoading(false);
+      });
+    } else {
       setIsLoading(false);
       setAllReceipts([]);
-      return () => {}; // Return an empty cleanup function
     }
-    setIsLoading(true);
-    const receiptsCollectionRef = collection(db, "users", user.uid, "receipts");
-    const q = query(receiptsCollectionRef, orderBy("date", "desc"));
-    
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const fetchedReceipts = querySnapshot.docs.map(docSnap => {
-        const data = docSnap.data();
-        return {
-          id: docSnap.id,
-          ...data,
-          date: data.date instanceof Timestamp ? data.date.toDate() : (data.date ? new Date(data.date as any) : new Date()), 
-          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
-          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
-        } as Receipt;
-      });
-      setAllReceipts(fetchedReceipts);
-      setIsLoading(false);
-    }, (error) => {
-      console.error("Error fetching receipts:", error);
-      toast({ title: "Error", description: "Could not fetch your receipts.", variant: "destructive" });
-      setIsLoading(false);
-    });
     
     return () => {
-      console.log("ReceiptsPage: Unsubscribing from receipts listener.");
-      unsubscribe();
+      if (unsubscribe) {
+        console.log("ReceiptsPage: Unsubscribing from receipts listener.");
+        unsubscribe();
+      }
     };
   }, [user, toast]);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
     const getCameraPermission = async () => {
-      if (isCameraDialogOpen && videoRef.current && hasCameraPermission === null) {
+      if (isCameraDialogOpen && videoRef.current && hasCameraPermission === null && !isPreviewCapture) { // Only try if not already previewing
         try {
           stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
           setHasCameraPermission(true);
@@ -177,7 +184,9 @@ export default function ReceiptsPage() {
         }
       }
     };
-    getCameraPermission();
+    if (isCameraDialogOpen && !isPreviewCapture) { // Condition moved here
+      getCameraPermission();
+    }
     
     return () => {
       if (stream) {
@@ -187,14 +196,20 @@ export default function ReceiptsPage() {
         videoRef.current.srcObject = null;
       }
     };
-  }, [isCameraDialogOpen, hasCameraPermission, toast]); // hasCameraPermission added
+  }, [isCameraDialogOpen, hasCameraPermission, toast, isPreviewCapture]);
 
   const filteredReceipts = useMemo(() => {
     return allReceipts.filter(receipt => {
       const matchesCostType = filterCostType === 'all' || receipt.costType === filterCostType;
-      const receiptDate = startOfDay(new Date(receipt.date as any)); // Ensure date is a Date object
-      const matchesStartDate = !filterStartDate || receiptDate >= startOfDay(filterStartDate);
-      const matchesEndDate = !filterEndDate || receiptDate <= endOfDay(filterEndDate);
+      let receiptDate = receipt.date;
+      if (!(receiptDate instanceof Date)) {
+          receiptDate = new Date(receiptDate as any);
+      }
+      if (!isValid(receiptDate)) return false; // Skip invalid dates
+
+      const rDate = startOfDay(receiptDate);
+      const matchesStartDate = !filterStartDate || rDate >= startOfDay(filterStartDate);
+      const matchesEndDate = !filterEndDate || rDate <= endOfDay(filterEndDate);
       return matchesCostType && matchesStartDate && matchesEndDate;
     });
   }, [allReceipts, filterCostType, filterStartDate, filterEndDate]);
@@ -203,11 +218,16 @@ export default function ReceiptsPage() {
     setEditingReceipt(receiptToEdit);
     setCapturedImageDataUri(receiptToEdit?.imageUrl || null);
     setFileNameForForm(receiptToEdit?.fileName || null);
-    setIsPreviewCapture(false);
+    setIsPreviewCapture(false); // Reset preview state
     if (receiptToEdit) {
+      let dateToSet = new Date();
+      if (receiptToEdit.date) {
+          if (receiptToEdit.date instanceof Timestamp) dateToSet = receiptToEdit.date.toDate();
+          else if (isValid(new Date(receiptToEdit.date as any))) dateToSet = new Date(receiptToEdit.date as any);
+      }
       form.reset({
         vendor: receiptToEdit.vendor,
-        date: receiptToEdit.date ? new Date(receiptToEdit.date as any) : new Date(),
+        date: dateToSet,
         totalAmount: receiptToEdit.totalAmount,
         assignedToEventId: receiptToEdit.assignedToEventId || '',
         assignedToMenuId: receiptToEdit.assignedToMenuId || '',
@@ -240,19 +260,22 @@ export default function ReceiptsPage() {
         const dataUri = canvas.toDataURL('image/jpeg');
         setCapturedImageDataUri(dataUri);
         setFileNameForForm(`cam_capture_${Date.now()}.jpg`);
-        setIsPreviewCapture(true);
+        setIsPreviewCapture(true); // Show preview, hide video
+        // Stop camera stream after capture
+        if (videoRef.current?.srcObject) {
+            const stream = videoRef.current.srcObject as MediaStream;
+            stream.getTracks().forEach(track => track.stop());
+            videoRef.current.srcObject = null;
+        }
+        setHasCameraPermission(null); // Allow re-requesting permission if dialog is reopened
       }
     }
   };
 
   const handleUseCapturedImage = () => {
-    setIsCameraDialogOpen(false);
-     if (videoRef.current?.srcObject) {
-        const stream = videoRef.current.srcObject as MediaStream;
-        stream.getTracks().forEach(track => track.stop());
-        videoRef.current.srcObject = null;
-     }
-     setHasCameraPermission(null); // Reset for next time
+    setIsCameraDialogOpen(false); // Close camera dialog
+    setIsPreviewCapture(false); // Reset preview state for next time
+    // No need to stop stream here, already stopped in handleCapturePhoto or on dialog close effect
   };
 
   const handleFileSelected = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -283,22 +306,18 @@ export default function ReceiptsPage() {
         if (result.vendor) form.setValue('vendor', result.vendor);
         if (result.date) {
            try {
-            // Handle various date formats AI might return, prefer YYYY-MM-DD or YYYY/MM/DD
-            const parsedDate = parseISO(result.date); // Handles YYYY-MM-DD
-            if (!isNaN(parsedDate.getTime())) {
+            let parsedDate = parseISO(result.date);
+            if (!isValid(parsedDate)) {
+                parsedDate = new Date(result.date.replace(/-/g, '/'));
+            }
+            if (isValid(parsedDate)) {
                  form.setValue('date', parsedDate);
             } else {
-                // Try common alternative if parseISO fails
-                const altParsedDate = new Date(result.date.replace(/-/g, '/'));
-                if (!isNaN(altParsedDate.getTime())) {
-                    form.setValue('date', altParsedDate);
-                } else {
-                    console.warn("AI returned unparsable date format for receipt:", result.date);
-                    toast({ title: "AI Autofill", description: "Could not parse date from AI. Please set manually.", variant: "default" });
-                }
+                console.warn("AI returned unparsable date format for receipt:", result.date);
+                toast({ title: "AI Autofill", description: "Could not parse date from AI. Please set manually.", variant: "default" });
             }
            } catch (e) { 
-                console.warn("AI returned invalid date format for receipt:", result.date, e);
+                console.warn("Error processing date from AI for receipt:", result.date, e);
                 toast({ title: "AI Autofill", description: "Error processing date from AI. Please set manually.", variant: "default" });
             }
         }
@@ -310,11 +329,9 @@ export default function ReceiptsPage() {
       }
     } catch (error: any) {
       console.error("Error parsing receipt with AI:", error);
-      let errorMsg = "Failed to process receipt with AI.";
+      let errorMsg = `Failed to process receipt with AI. ${error.message}`;
       if (error.message && error.message.toLowerCase().includes('api key not valid')) {
         errorMsg = "AI Service Error: Invalid API Key for receipt parsing.";
-      } else if (error.message) {
-        errorMsg = `AI Error: ${error.message.substring(0,100)}${error.message.length > 100 ? '...' : ''}`;
       }
       toast({ title: "AI Error", description: errorMsg, variant: "destructive" });
     } finally {
@@ -356,15 +373,13 @@ export default function ReceiptsPage() {
       const receiptIdForPath = editingReceipt?.id || doc(collection(db, 'temp')).id; // Generate ID upfront
 
       if (capturedImageDataUri && (!editingReceipt || capturedImageDataUri !== editingReceipt.imageUrl)) {
-        // Only upload if new image data is present
         if (editingReceipt?.imageUrl && editingReceipt.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
             const oldImageRef = storageRef(storage, editingReceipt.imageUrl);
             await deleteObject(oldImageRef);
-            console.log("ReceiptsPage: Deleted old receipt image from Storage.");
           } catch (e: any) { 
             if (e.code !== 'storage/object-not-found') {
-                console.warn("ReceiptsPage: Could not delete old receipt image, it might not exist or path is incorrect:", e);
+                console.warn("Could not delete old receipt image:", e.message);
             }
           }
         }
@@ -386,10 +401,9 @@ export default function ReceiptsPage() {
             async () => {
               try {
                 imageUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
-                console.log("ReceiptsPage: Receipt image uploaded successfully:", imageUrlToSave);
                 resolve();
               } catch (getUrlError) {
-                console.error("ReceiptsPage: Error getting download URL for receipt image:", getUrlError);
+                console.error("Error getting download URL for receipt image:", getUrlError);
                 reject(getUrlError);
               }
             }
@@ -424,18 +438,24 @@ export default function ReceiptsPage() {
       setFileNameForForm(null);
       if (fileInputRef.current) fileInputRef.current.value = ""; 
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error saving receipt:', error);
-      toast({ title: 'Save Failed', description: (error instanceof Error ? error.message : 'Could not save your receipt. Please try again.'), variant: 'destructive' });
+      toast({ title: 'Save Failed', description: `Could not save receipt. ${error.message}`, variant: 'destructive' });
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleDeleteReceipt = async (receiptId: string) => {
-    if (!user) return;
+    if (!user) {
+        toast({ title: "Authentication Error", description: "You must be logged in.", variant: "destructive" });
+        return;
+    }
     const receiptToDelete = allReceipts.find(r => r.id === receiptId);
-    if (!receiptToDelete) return;
+    if (!receiptToDelete) {
+        toast({ title: "Error", description: "Receipt not found.", variant: "destructive" });
+        return;
+    }
 
     if (window.confirm(`Are you sure you want to delete the receipt from "${receiptToDelete?.vendor}"?`)) {
       setIsSaving(true);
@@ -444,18 +464,17 @@ export default function ReceiptsPage() {
           try {
             const imageRefToDelete = storageRef(storage, receiptToDelete.imageUrl);
             await deleteObject(imageRefToDelete);
-            console.log("ReceiptsPage: Deleted receipt image from Storage for receipt ID:", receiptId);
           } catch (e: any) {
             if (e.code !== 'storage/object-not-found') {
-                console.warn("ReceiptsPage: Could not delete receipt image from storage, it might not exist or path is incorrect:", e);
+                console.warn("Could not delete receipt image from storage:", e.message);
             }
           }
         }
         await deleteDoc(doc(db, "users", user.uid, "receipts", receiptId));
         toast({ title: 'Receipt Deleted', description: `Receipt from "${receiptToDelete?.vendor}" removed.`, variant: "destructive" });
-      } catch (error) {
+      } catch (error: any) {
         console.error("Error deleting receipt:", error);
-        toast({ title: "Delete Error", description: "Could not delete receipt.", variant: "destructive" });
+        toast({ title: "Delete Error", description: `Could not delete receipt. ${error.message}`, variant: "destructive" });
       } finally {
         setIsSaving(false);
       }
@@ -468,7 +487,7 @@ export default function ReceiptsPage() {
 
   const expensesByCostType = useMemo(() => {
     const summary: { [key in CostType]?: number } = {};
-    costTypes.forEach(type => summary[type] = 0); // Initialize all cost types with 0
+    costTypes.forEach(type => summary[type] = 0); 
     filteredReceipts.forEach(receipt => {
       summary[receipt.costType] = (summary[receipt.costType] || 0) + receipt.totalAmount;
     });
@@ -483,9 +502,17 @@ export default function ReceiptsPage() {
     const headers = ["Vendor", "Date", "Total Amount", "Cost Type", "Assigned to Event ID", "Assigned to Menu ID", "Notes", "File Name", "Image URL"];
     const csvRows = [
       headers.join(','),
-      ...filteredReceipts.map(receipt => [
+      ...filteredReceipts.map(receipt => {
+        let formattedDate = '';
+        if (receipt.date) {
+            const dateObj = receipt.date instanceof Timestamp ? receipt.date.toDate() : new Date(receipt.date as any);
+            if (isValid(dateObj)) {
+                formattedDate = format(dateObj, 'yyyy-MM-dd');
+            }
+        }
+        return [
         `"${(receipt.vendor || '').replace(/"/g, '""')}"`,
-        receipt.date ? format(new Date(receipt.date as any), 'yyyy-MM-dd') : '',
+        formattedDate,
         receipt.totalAmount.toFixed(2),
         `"${(receipt.costType || '').replace(/"/g, '""')}"`,
         `"${(receipt.assignedToEventId || '').replace(/"/g, '""')}"`,
@@ -493,7 +520,8 @@ export default function ReceiptsPage() {
         `"${(receipt.notes || '').replace(/"/g, '""')}"`,
         `"${(receipt.fileName || '').replace(/"/g, '""')}"`,
         `"${(receipt.imageUrl || '').replace(/"/g, '""')}"`,
-      ].join(','))
+      ].join(',');
+    })
     ];
     const csvString = csvRows.join('\n');
     const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
@@ -520,11 +548,9 @@ export default function ReceiptsPage() {
         setTaxAdviceResponse(response);
     } catch (error: any) {
         console.error("Error getting tax advice:", error);
-        let errorMsg = "Failed to get tax advice.";
+        let errorMsg = `Failed to get tax advice. ${error.message}`;
         if (error.message && error.message.toLowerCase().includes('api key not valid')) {
           errorMsg = "AI Service Error: Invalid API Key for tax advice.";
-        } else if (error.message) {
-          errorMsg = `AI Error: ${error.message.substring(0,100)}${error.message.length > 100 ? '...' : ''}`;
         }
         toast({ title: "AI Error", description: errorMsg, variant: "destructive" });
         setTaxAdviceResponse({ advice: "Could not retrieve advice at this time.", disclaimer: "Please try again later."});
@@ -539,11 +565,11 @@ export default function ReceiptsPage() {
     setFilterEndDate(undefined);
   };
 
-  if (isLoading && !user) { 
+  if (isLoading && (!user || allReceipts.length === 0)) { 
     return (
       <div className="flex justify-center items-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" data-ai-hint="loading spinner"/>
-        <p className="ml-2">Loading page...</p>
+        <p className="ml-2">Loading receipts data...</p>
       </div>
     );
   }
@@ -558,7 +584,7 @@ export default function ReceiptsPage() {
             <Button onClick={() => openUploadDialog()} disabled={isSaving || isParsingReceipt}>
                 <PlusCircle className="mr-2 h-5 w-5" /> Add New Receipt
             </Button>
-            { Dialog && (
+            {(
               <Button variant="outline" onClick={() => { taxForm.reset(); setTaxAdviceResponse(null); setIsTaxAdviceDialogOpen(true);}}>
                   <MessageCircleQuestion className="mr-2 h-5 w-5" /> Get Tax Advice
               </Button>
@@ -615,7 +641,7 @@ export default function ReceiptsPage() {
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0">
-                <Calendar mode="single" selected={filterEndDate} onSelect={setFilterEndDate} initialFocus disabled={filterStartDate ? { before: filterStartDate } : undefined} />
+                <Calendar mode="single" selected={filterEndDate} onSelect={setFilterEndDate} initialFocus disabled={(date) => filterStartDate && date < filterStartDate} />
               </PopoverContent>
             </Popover>
           </FormItem>
@@ -625,7 +651,7 @@ export default function ReceiptsPage() {
         </CardContent>
       </Card>
 
-      {Dialog && isUploadDialogOpen && (
+      { (
         <Dialog open={isUploadDialogOpen} onOpenChange={(isOpen) => {
             if ((isSaving || isParsingReceipt) && isOpen) return;
             setIsUploadDialogOpen(isOpen);
@@ -646,8 +672,8 @@ export default function ReceiptsPage() {
                 <FormItem>
                   <FormLabel>Receipt Image</FormLabel>
                   <div className="flex flex-col sm:flex-row items-center gap-2">
-                      {CameraDialog && (
-                        <Button type="button" variant="outline" onClick={() => { setHasCameraPermission(null); setIsCameraDialogOpen(true);}} className="w-full sm:w-auto">
+                      {(
+                        <Button type="button" variant="outline" onClick={() => { setHasCameraPermission(null); setIsPreviewCapture(false); setIsCameraDialogOpen(true);}} className="w-full sm:w-auto">
                             <Camera className="mr-2 h-4 w-4"/> Capture with Camera
                         </Button>
                       )}
@@ -802,7 +828,7 @@ export default function ReceiptsPage() {
         </Dialog>
       )}
 
-      {CameraDialog && isCameraDialogOpen && (
+      { (
         <CameraDialog open={isCameraDialogOpen} onOpenChange={(open) => {
             if (!open && videoRef.current?.srcObject) {
               const stream = videoRef.current.srcObject as MediaStream;
@@ -811,6 +837,7 @@ export default function ReceiptsPage() {
               setHasCameraPermission(null); 
             }
             setIsCameraDialogOpen(open);
+            if (!open) setIsPreviewCapture(false); // Reset preview if dialog closed
         }}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
@@ -830,7 +857,7 @@ export default function ReceiptsPage() {
               <Image src={capturedImageDataUri} alt="Captured receipt" width={400} height={300} className="rounded-md object-contain mx-auto border" data-ai-hint="receipt scan" />
             )}
             
-            <DialogFooter className="sm:justify-between">
+            <DialogFooter className="sm:justify-between mt-2">
               {!isPreviewCapture ? (
                 <>
                   <DialogClose asChild><Button type="button" variant="outline">Cancel</Button></DialogClose>
@@ -838,7 +865,7 @@ export default function ReceiptsPage() {
                 </>
               ) : (
                 <>
-                  <Button type="button" variant="outline" onClick={() => {setIsPreviewCapture(false); setCapturedImageDataUri(null); setFileNameForForm(null);}}>Retake</Button>
+                  <Button type="button" variant="outline" onClick={() => {setIsPreviewCapture(false); setCapturedImageDataUri(null); setFileNameForForm(null); setHasCameraPermission(null); /* Trigger re-request */}}>Retake</Button>
                   <Button type="button" onClick={handleUseCapturedImage}>Use This Image</Button>
                 </>
               )}
@@ -847,7 +874,7 @@ export default function ReceiptsPage() {
         </CameraDialog>
       )}
 
-      {Dialog && isTaxAdviceDialogOpen && (
+      { (
         <Dialog open={isTaxAdviceDialogOpen} onOpenChange={setIsTaxAdviceDialogOpen}>
           <DialogContent className="sm:max-w-lg">
               <DialogHeader>
@@ -905,7 +932,7 @@ export default function ReceiptsPage() {
           <CardTitle>Expenses Summary</CardTitle>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
+          {isLoading && filteredReceipts.length === 0 ? (
              <div className="flex justify-center items-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-primary" data-ai-hint="loading icon"/>
               <p className="ml-2">Loading summary...</p>
@@ -915,7 +942,7 @@ export default function ReceiptsPage() {
           ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <h4 className="font-semibold mb-2">By Cost Type:</h4>
+              <h4 className="font-semibold mb-2">By Cost Type (Filtered):</h4>
               {Object.entries(expensesByCostType).map(([type, amount]) => (
                 (amount ?? 0) > 0 && (
                   <div key={type} className="flex justify-between text-sm py-1 border-b last:border-b-0">
@@ -927,7 +954,7 @@ export default function ReceiptsPage() {
                {Object.values(expensesByCostType).every(val => (val ?? 0) === 0) && filteredReceipts.length > 0 && <p className="text-xs text-muted-foreground">No expenses for selected filters in these cost types.</p>}
                {filteredReceipts.length === 0 && <p className="text-xs text-muted-foreground">No expenses to summarize.</p>}
             </div>
-            <div className="flex flex-col justify-end items-end">
+            <div className="flex flex-col justify-end items-end pt-4 md:pt-0">
               <div className="text-lg font-semibold flex items-center">
                 <DollarSign className="mr-1 h-5 w-5 text-green-600" data-ai-hint="money cost"/>
                 Total (Filtered): ${totalExpenses.toFixed(2)}
@@ -953,6 +980,7 @@ export default function ReceiptsPage() {
               <p className="ml-2">Loading receipts...</p>
             </div>
           ) : filteredReceipts.length > 0 ? (
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -969,32 +997,35 @@ export default function ReceiptsPage() {
                 {filteredReceipts.map((receipt) => (
                   <TableRow key={receipt.id}>
                     <TableCell className="font-medium">{receipt.vendor}</TableCell>
-                    <TableCell>{receipt.date ? format(new Date(receipt.date as any), 'PP') : 'N/A'}</TableCell>
+                    <TableCell>{receipt.date ? (isValid(new Date(receipt.date as any)) ? format(new Date(receipt.date as any), 'PP') : 'N/A'}</TableCell>
                     <TableCell className="text-right">${receipt.totalAmount.toFixed(2)}</TableCell>
                     <TableCell>{receipt.costType}</TableCell>
                     <TableCell className="text-xs">
-                        {receipt.assignedToEventId && <div>Event: {receipt.assignedToEventId}</div>}
-                        {receipt.assignedToMenuId && <div>Menu: {receipt.assignedToMenuId}</div>}
+                        {receipt.assignedToEventId && <div>Event: {receipt.assignedToEventId.substring(0,8)}...</div>}
+                        {receipt.assignedToMenuId && <div>Menu: {receipt.assignedToMenuId.substring(0,8)}...</div>}
                     </TableCell>
-                    <TableCell className="text-xs text-muted-foreground truncate max-w-[200px]">
-                      {receipt.fileName && <div className="font-medium text-foreground">{receipt.fileName}</div>}
+                    <TableCell className="text-xs text-muted-foreground truncate max-w-[150px] sm:max-w-[200px]">
+                      {receipt.fileName && <div className="font-medium text-foreground">{receipt.fileName.length > 20 ? receipt.fileName.substring(0,17) + '...' : receipt.fileName}</div>}
                       {receipt.imageUrl && <a href={receipt.imageUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline">(View Image)</a>}
-                      {receipt.notes && <div className="italic">{receipt.notes}</div>}
+                      {receipt.notes && <div className="italic">{receipt.notes.length > 30 ? receipt.notes.substring(0,27) + '...' : receipt.notes}</div>}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="icon" onClick={() => openUploadDialog(receipt)} className="mr-1" disabled={isSaving || isParsingReceipt}>
-                        <Edit3 className="h-4 w-4" />
-                        <span className="sr-only">Edit</span>
-                      </Button>
-                      <Button variant="ghost" size="icon" onClick={() => handleDeleteReceipt(receipt.id)} className="text-destructive hover:text-destructive" disabled={isSaving || isParsingReceipt}>
-                        <Trash2 className="h-4 w-4" />
-                        <span className="sr-only">Delete</span>
-                      </Button>
+                      <div className="flex justify-end space-x-1">
+                        <Button variant="ghost" size="icon" onClick={() => openUploadDialog(receipt)} className="mr-1" disabled={isSaving || isParsingReceipt}>
+                          <Edit3 className="h-4 w-4" />
+                          <span className="sr-only">Edit</span>
+                        </Button>
+                        <Button variant="ghost" size="icon" onClick={() => handleDeleteReceipt(receipt.id)} className="text-destructive hover:text-destructive" disabled={isSaving || isParsingReceipt}>
+                          <Trash2 className="h-4 w-4" />
+                          <span className="sr-only">Delete</span>
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
+            </div>
           ) : (
             <p className="text-muted-foreground text-center py-8">
                 {allReceipts.length === 0 ? "No receipts uploaded yet. Start by adding your first expense!" : "No receipts match the current filters. Try adjusting or clearing them."}
@@ -1015,7 +1046,7 @@ export default function ReceiptsPage() {
                 <strong>Invoice Generation:</strong> Upon event completion and confirmation, invoices will be automatically generated for both you and the customer, accessible through your respective dashboards.
             </p>
              <p>
-                <strong>AI Cost Insights:</strong> We're working on AI tools to provide deeper insights into your spending patterns, helping you optimize menu pricing and purchasing. (Placeholder: A button "Get AI Insights on Event Costs" could appear here when an event is selected/filtered).
+                <strong>AI Cost Insights:</strong> We're working on AI tools to provide deeper insights into your spending patterns, helping you optimize menu pricing and purchasing.
             </p>
         </CardContent>
       </Card>
@@ -1025,14 +1056,14 @@ export default function ReceiptsPage() {
         <AlertTitle>Payout &amp; Financial Information</AlertTitle>
         <AlertDescription>
           <ul className="list-disc list-inside text-xs space-y-1">
-            <li><strong>Initial Fund Distribution:</strong> Upon customer booking confirmation, 46% of the event cost is released to the chef and 4% to FindAChef immediately (simulated, requires backend Stripe Connect).</li>
+            <li><strong>Initial Fund Distribution:</strong> Upon customer booking confirmation and payment, 46% of the event cost is released to the chef and 4% to FindAChef immediately (requires backend Stripe Connect integration).</li>
             <li><strong>Escrow &amp; Final Release:</strong> The remaining 50% is held. This portion is released to the chef after the event is confirmed complete by the customer (e.g., via QR code scan at the event, requires backend).</li>
-            <li><strong>Public Ticketed Events:</strong> For events you host and sell tickets for via The Chef's Wall, payouts are generally scheduled 7 days *before* the event date to assist with upfront costs (subject to terms, backend logic).</li>
+            <li><strong>Public Ticketed Events:</strong> For events you host and sell tickets for via The Chef's Wall, payouts are generally scheduled 7 days *before* the event date to assist with upfront costs (subject to terms, requires backend logic).</li>
             <li><strong>Cancellations by Chef:</strong> If a chef cancels an event, a full refund is issued to the customer. Admin will be notified to assist and manage chef accountability, which may include penalties if a replacement cannot be found.</li>
             <li><strong>Cancellations by Customer:</strong>
-                <ul>
+                <ul className="list-['-_'] list-inside ml-4">
                     <li>If a customer cancels more than 20 days before the event, a 50% refund is typically processed.</li>
-                    <li>If a customer cancels less than 20 days before the event, a 20% refund is processed. In this case, 15% of the total event cost goes to the chef and 15% to FindAChef.</li>
+                    <li>If a customer cancels less than 20 days before the event, a 20% refund is processed. In this case, 15% of the total event cost may go to the chef and 15% to FindAChef (subject to terms).</li>
                     <li>Refer to the full <a href="/terms#cancellation" className="underline hover:text-primary">Terms of Service</a> for complete cancellation policy details.</li>
                 </ul>
             </li>
@@ -1042,12 +1073,11 @@ export default function ReceiptsPage() {
       </Alert>
 
       <div className="flex justify-end mt-6">
-        <Button onClick={handleExport} variant="outline" disabled={filteredReceipts.length === 0}>
+        <Button onClick={handleExport} variant="outline" disabled={filteredReceipts.length === 0 || isLoading}>
           <Download className="mr-2 h-5 w-5" /> Export Filtered Data (CSV)
         </Button>
       </div>
     </div>
   );
 }
-
     

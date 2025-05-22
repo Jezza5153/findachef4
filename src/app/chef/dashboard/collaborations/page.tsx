@@ -6,12 +6,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import type { ChefProfile, CollaborationRequest } from '@/types';
+import type { ChefProfile } from '@/types';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { doc, updateDoc, arrayUnion, arrayRemove, serverTimestamp, getDoc, collection, query, where, getDocs, Unsubscribe, onSnapshot } from 'firebase/firestore';
+import { doc, updateDoc, arrayUnion, arrayRemove, serverTimestamp, getDoc, Unsubscribe, onSnapshot } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
-import { Users, UserPlus, UserMinus, Check, X, Send, Loader2, CombineIcon } from 'lucide-react';
+import { UserPlus, UserMinus, Check, X, Send, Loader2, CombineIcon } from 'lucide-react';
 import Link from 'next/link';
 
 export default function ChefCollaborationsPage() {
@@ -25,17 +25,15 @@ export default function ChefCollaborationsPage() {
   const [isLoadingIncoming, setIsLoadingIncoming] = useState(true);
   const [isLoadingOutgoing, setIsLoadingOutgoing] = useState(true);
   const [isLoadingCollaborators, setIsLoadingCollaborators] = useState(true);
-  const [isProcessing, setIsProcessing] = useState<string | null>(null); // Stores ID of chef being processed
+  const [isProcessing, setIsProcessing] = useState<string | null>(null);
 
   const currentChefProfile = userProfile as ChefProfile | null;
 
   const fetchProfileByIds = useCallback(async (ids: string[]): Promise<ChefProfile[]> => {
     if (!ids || ids.length === 0) return [];
     const profiles: ChefProfile[] = [];
-    // Firestore 'in' queries are limited to 10 elements. If more, batch or fetch individually.
-    // For simplicity here, fetching individually. Batching would be better for performance.
     for (const id of ids) {
-      if (id === user?.uid) continue; // Don't fetch own profile for these lists
+      if (id === user?.uid) continue; 
       try {
         const docRef = doc(db, "users", id);
         const docSnap = await getDoc(docRef);
@@ -52,7 +50,7 @@ export default function ChefCollaborationsPage() {
   }, [user?.uid]);
 
   useEffect(() => {
-    if (!currentChefProfile) {
+    if (!user || !currentChefProfile) {
       setIsLoadingIncoming(false);
       setIsLoadingOutgoing(false);
       setIsLoadingCollaborators(false);
@@ -65,7 +63,7 @@ export default function ChefCollaborationsPage() {
     let unsubscribeProfile: Unsubscribe | undefined;
 
     const setupListeners = () => {
-      if (!user) return;
+      if (!user) return; // Should be caught by outer if, but defensive
       const userDocRef = doc(db, "users", user.uid);
 
       unsubscribeProfile = onSnapshot(userDocRef, async (docSnap) => {
@@ -76,19 +74,19 @@ export default function ChefCollaborationsPage() {
           fetchProfileByIds(updatedProfile.incomingCollaborationRequests || []).then(data => {
             setIncomingRequests(data);
             setIsLoadingIncoming(false);
-          });
+          }).catch(() => setIsLoadingIncoming(false));
 
           setIsLoadingOutgoing(true);
           fetchProfileByIds(updatedProfile.outgoingCollaborationRequests || []).then(data => {
             setOutgoingRequests(data);
             setIsLoadingOutgoing(false);
-          });
+          }).catch(() => setIsLoadingOutgoing(false));
 
           setIsLoadingCollaborators(true);
           fetchProfileByIds(updatedProfile.collaboratorIds || []).then(data => {
             setCollaborators(data);
             setIsLoadingCollaborators(false);
-          });
+          }).catch(() => setIsLoadingCollaborators(false));
         } else {
           setIsLoadingIncoming(false);
           setIsLoadingOutgoing(false);
@@ -107,48 +105,58 @@ export default function ChefCollaborationsPage() {
 
     return () => {
       if (unsubscribeProfile) {
+        console.log("CollaborationsPage: Unsubscribing from profile listener.");
         unsubscribeProfile();
       }
     };
-  }, [user, currentChefProfile, fetchProfileByIds, toast]);
+  }, [user, currentChefProfile?.id, fetchProfileByIds, toast]); // Added currentChefProfile.id to deps if profile structure itself might change
 
 
   const handleRespondToRequest = async (targetChefId: string, action: 'accept' | 'decline') => {
-    if (!user || !currentChefProfile) return;
+    if (!user || !currentChefProfile) {
+        toast({title: "Error", description: "User not authenticated.", variant: "destructive"});
+        return;
+    }
     setIsProcessing(targetChefId);
 
     const currentUserDocRef = doc(db, "users", user.uid);
     const targetUserDocRef = doc(db, "users", targetChefId);
 
     try {
+      // Update current user's document
       await updateDoc(currentUserDocRef, {
         incomingCollaborationRequests: arrayRemove(targetChefId),
-        collaboratorIds: action === 'accept' ? arrayUnion(targetChefId) : arrayRemove(targetChefId),
+        collaboratorIds: action === 'accept' ? arrayUnion(targetChefId) : arrayRemove(targetChefId), // Only add if accepting
         updatedAt: serverTimestamp()
       });
 
-      // This part should ideally be a Cloud Function for atomicity and security
+      // Conceptually update target user's document (ideally a Cloud Function)
+      // This client-side write to another user's doc will likely fail due to security rules.
+      // It's here to represent the full intended logic.
       await updateDoc(targetUserDocRef, {
         outgoingCollaborationRequests: arrayRemove(user.uid),
-        collaboratorIds: action === 'accept' ? arrayUnion(user.uid) : arrayRemove(user.uid),
+        collaboratorIds: action === 'accept' ? arrayUnion(user.uid) : arrayRemove(targetChefId), // Only add if accepting
         updatedAt: serverTimestamp()
-      }).catch(e => console.warn("Could not update target chef's collaboration list (expected if no direct write permission):", e));
+      }).catch(e => console.warn("Client-side attempt to update target chef's collaboration list failed (expected if no direct write permission or CF not used):", e.message));
 
 
       toast({
         title: `Request ${action === 'accept' ? 'Accepted' : 'Declined'}`,
         description: `You ${action === 'accept' ? 'are now collaborators with' : 'have declined the request from'} the chef.`,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error(`Error ${action}ing collaboration request:`, error);
-      toast({ title: "Error", description: `Could not ${action} request.`, variant: "destructive" });
+      toast({ title: "Error", description: `Could not ${action} request. ${error.message}`, variant: "destructive" });
     } finally {
       setIsProcessing(null);
     }
   };
 
   const handleCancelOutgoingRequest = async (targetChefId: string) => {
-    if (!user || !currentChefProfile) return;
+    if (!user || !currentChefProfile) {
+        toast({title: "Error", description: "User not authenticated.", variant: "destructive"});
+        return;
+    }
     setIsProcessing(targetChefId);
 
     const currentUserDocRef = doc(db, "users", user.uid);
@@ -158,24 +166,27 @@ export default function ChefCollaborationsPage() {
         outgoingCollaborationRequests: arrayRemove(targetChefId),
         updatedAt: serverTimestamp()
       });
-      // This part should ideally be a Cloud Function
+      // Conceptually update target user's document (ideally a Cloud Function)
       await updateDoc(targetUserDocRef, {
         incomingCollaborationRequests: arrayRemove(user.uid),
         updatedAt: serverTimestamp()
-      }).catch(e => console.warn("Could not update target chef's incoming requests (expected if no direct write permission):", e));
+      }).catch(e => console.warn("Client-side attempt to update target chef's incoming requests failed (expected if no direct write permission or CF not used):", e.message));
       
       toast({ title: "Request Cancelled", description: "Your collaboration request has been cancelled." });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error cancelling outgoing request:", error);
-      toast({ title: "Error", description: "Could not cancel request.", variant: "destructive" });
+      toast({ title: "Error", description: `Could not cancel request. ${error.message}`, variant: "destructive" });
     } finally {
       setIsProcessing(null);
     }
   };
 
   const handleRemoveCollaborator = async (targetChefId: string) => {
-    if (!user || !currentChefProfile) return;
-    if (!window.confirm("Are you sure you want to remove this collaborator? This will affect both profiles.")) return;
+    if (!user || !currentChefProfile) {
+        toast({title: "Error", description: "User not authenticated.", variant: "destructive"});
+        return;
+    }
+    if (!window.confirm("Are you sure you want to remove this collaborator? This will remove the collaboration for both chefs.")) return;
 
     setIsProcessing(targetChefId);
     const currentUserDocRef = doc(db, "users", user.uid);
@@ -186,16 +197,16 @@ export default function ChefCollaborationsPage() {
         collaboratorIds: arrayRemove(targetChefId),
         updatedAt: serverTimestamp()
       });
-       // This part should ideally be a Cloud Function
+       // Conceptually update target user's document (ideally a Cloud Function)
       await updateDoc(targetUserDocRef, {
         collaboratorIds: arrayRemove(user.uid),
         updatedAt: serverTimestamp()
-      }).catch(e => console.warn("Could not update target chef's collaborator list (expected if no direct write permission):", e));
+      }).catch(e => console.warn("Client-side attempt to update target chef's collaborator list failed (expected if no direct write permission or CF not used):", e.message));
 
       toast({ title: "Collaborator Removed", description: "The chef has been removed from your collaborators." });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error removing collaborator:", error);
-      toast({ title: "Error", description: "Could not remove collaborator.", variant: "destructive" });
+      toast({ title: "Error", description: `Could not remove collaborator. ${error.message}`, variant: "destructive" });
     } finally {
       setIsProcessing(null);
     }
@@ -205,7 +216,7 @@ export default function ChefCollaborationsPage() {
     <Card key={chef.id} className="shadow-md">
       <CardContent className="pt-6 flex items-center space-x-4">
         <Avatar className="h-16 w-16">
-          <AvatarImage src={chef.profilePictureUrl} alt={chef.name} data-ai-hint="chef portrait"/>
+          <AvatarImage src={chef.profilePictureUrl || undefined} alt={chef.name} data-ai-hint="chef portrait"/>
           <AvatarFallback>{chef.name?.substring(0, 2).toUpperCase() || 'CH'}</AvatarFallback>
         </Avatar>
         <div className="flex-1">
@@ -238,7 +249,7 @@ export default function ChefCollaborationsPage() {
     </Card>
   );
 
-  if (!currentChefProfile?.hasCompletedFirstCoOp) {
+  if (!currentChefProfile?.hasCompletedFirstCoOp && !currentChefProfile?.isAdmin) { // Allow admins to see this page
     return (
       <div className="text-center py-10">
         <CombineIcon className="mx-auto h-12 w-12 text-muted-foreground" data-ai-hint="collaboration icon"/>
@@ -254,9 +265,11 @@ export default function ChefCollaborationsPage() {
     );
   }
 
+  const isLoadingAny = isLoadingIncoming || isLoadingOutgoing || isLoadingCollaborators;
+
   return (
     <div className="space-y-8">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-center gap-2">
         <h1 className="text-3xl font-bold flex items-center"><CombineIcon className="mr-3 h-8 w-8 text-primary" data-ai-hint="collaboration users"/> Manage Collaborations</h1>
         <Button asChild variant="outline">
           <Link href="/chef/dashboard/chefs"><UserPlus className="mr-2 h-4 w-4"/> Find Chefs to Collaborate</Link>
@@ -309,12 +322,11 @@ export default function ChefCollaborationsPage() {
               {collaborators.map(chef => renderChefCard(chef, 'collaborator'))}
             </div>
           ) : (
-            <p className="text-muted-foreground text-center py-4">You have no collaborators yet.</p>
+            <p className="text-muted-foreground text-center py-4">You have no collaborators yet. Use the "Find Chefs" button to send requests!</p>
           )}
         </CardContent>
       </Card>
     </div>
   );
 }
-
     

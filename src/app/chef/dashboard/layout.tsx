@@ -29,7 +29,7 @@ const chefNavItems: NavItem[] = [
   { href: '/chef/dashboard/menus', label: 'Menus', icon: <NotebookText /> },
   { href: '/chef/dashboard/shopping-list', label: 'Shopping List', icon: <ShoppingBag /> },
   { href: '/chef/dashboard/chefs', label: 'Chef Directory', icon: <Users2 /> },
-  { href: '/chef/dashboard/collaborations', label: 'Collaborations', icon: <CombineIcon /> }, // Updated icon
+  { href: '/chef/dashboard/collaborations', label: 'Collaborations', icon: <CombineIcon /> },
   { href: '/chef/dashboard/receipts', label: 'Receipts & Costs', icon: <FileText /> },
 ];
 
@@ -42,7 +42,7 @@ export default function ChefDashboardLayout({
   const { toast } = useToast();
   const { user, userProfile, loading: authLoading, isChef, isChefApproved, profileLoading } = useAuth();
   
-  const isLoading = authLoading || profileLoading; // Combined loading state
+  const isLoading = authLoading || profileLoading; 
 
   useEffect(() => {
     console.log("ChefDashboardLayout: isLoading:", isLoading, "user:", !!user, "isChef:", isChef, "isChefApproved:", isChefApproved);
@@ -52,7 +52,6 @@ export default function ChefDashboardLayout({
 
     if (!user) {
       console.log("ChefDashboardLayout: No user, redirecting to login.");
-      // router.push('/login?redirect=/chef/dashboard'); // Using window.location to ensure full context reload
       window.location.href = ('/login?redirect=/chef/dashboard');
       return;
     }
@@ -64,33 +63,31 @@ export default function ChefDashboardLayout({
           variant: 'destructive',
       });
       console.log("ChefDashboardLayout: Not a chef, redirecting to login.");
-      // router.push('/login');
       window.location.href = ('/login');
       return;
     }
     
-  }, [user, isLoading, isChef, isChefApproved, router, toast]); // isChefApproved added to deps
+  }, [user, isLoading, isChef, isChefApproved, router, toast]);
 
   if (isLoading) {
     return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex h-screen items-center justify-center bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" data-ai-hint="loading spinner" />
-        <p className="ml-3 text-lg">Loading Chef Dashboard...</p>
+        <p className="ml-3 text-lg text-foreground">Loading Chef Dashboard...</p>
       </div>
     );
   }
   
-  if (!user || !isChef) { // This check handles the case after loading but before potential redirection effect runs
+  if (!user || !isChef) { 
      return (
-      <div className="flex h-screen items-center justify-center">
+      <div className="flex h-screen items-center justify-center bg-background">
         <Loader2 className="h-12 w-12 animate-spin text-primary" />
-        <p className="ml-3 text-lg">Verifying chef access...</p>
+        <p className="ml-3 text-lg text-foreground">Verifying chef access...</p>
       </div>
     );
   }
 
-  // Check for chef approval after confirming user is a chef and not loading
-  if (!isChefApproved) { 
+  if (!isChefApproved && !(userProfile?.isAdmin)) { // Allow admin to bypass approval for viewing
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background p-4">
         <Card className="w-full max-w-md text-center shadow-lg">
@@ -112,9 +109,9 @@ export default function ChefDashboardLayout({
                 try {
                   await signOut(auth);
                   toast({ title: "Logged Out", description: "You have been logged out." });
-                } catch (error) {
+                } catch (error: any) {
                   console.error("Error signing out:", error);
-                  toast({ title: "Logout Error", description: "Could not log out.", variant: "destructive"});
+                  toast({ title: "Logout Error", description: `Could not log out: ${error.message}`, variant: "destructive"});
                 }
                 router.push('/login'); 
              }}>
@@ -126,7 +123,6 @@ export default function ChefDashboardLayout({
     );
   }
 
-  // If user is logged in, is a chef, and is approved, render the dashboard
   return (
     <DashboardLayout 
       navItems={chefNavItems}
@@ -135,5 +131,4 @@ export default function ChefDashboardLayout({
     </DashboardLayout>
   );
 }
-
     
