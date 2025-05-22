@@ -1972,6 +1972,9 @@ video {
 .pt-8 {
   padding-top: 2rem;
 }
+.pb-1 {
+  padding-bottom: 0.25rem;
+}
 .text-left {
   text-align: left;
 }
@@ -2604,6 +2607,10 @@ video {
   background-color: hsl(var(--sidebar-accent));
 }
 
+.hover\:bg-accent\/50:hover {
+  background-color: hsl(var(--accent) / 0.5);
+}
+
 .hover\:text-accent-foreground:hover {
   color: hsl(var(--accent-foreground));
 }
@@ -2820,6 +2827,18 @@ video {
 
 .has-\[\[data-variant\=inset\]\]\:bg-sidebar:has([data-variant=inset]) {
   background-color: hsl(var(--sidebar-background));
+}
+
+.has-\[\:checked\]\:bg-accent:has(:checked) {
+  background-color: hsl(var(--accent));
+}
+
+.has-\[\:checked\]\:text-accent-foreground:has(:checked) {
+  color: hsl(var(--accent-foreground));
+}
+
+.has-\[\:checked\]\:text-accent-foreground\/80:has(:checked) {
+  color: hsl(var(--accent-foreground) / 0.8);
 }
 
 .group\/menu-item:has([data-sidebar=menu-action]) .group-has-\[\[data-sidebar\=menu-action\]\]\/menu-item\:pr-8 {

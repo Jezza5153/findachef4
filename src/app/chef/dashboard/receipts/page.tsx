@@ -44,7 +44,10 @@ import { collection, addDoc, doc, updateDoc, deleteDoc, query, serverTimestamp, 
 import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject, StorageReference } from 'firebase/storage';
 import dynamic from 'next/dynamic';
 
-const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false, loading: () => <div className="p-4 text-center"><Loader2 className="h-6 w-6 animate-spin inline-block"/> Loading Dialog...</div> });
+const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { 
+  ssr: false, 
+  loading: () => <div className="p-4 text-center"><Loader2 className="h-6 w-6 animate-spin inline-block"/> Loading Dialog...</div> 
+});
 const DialogContent = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogContent), { ssr: false });
 const DialogHeader = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogHeader), { ssr: false });
 const DialogTitle = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogTitle), { ssr: false });
@@ -52,7 +55,10 @@ const DialogFooter = dynamic(() => import('@/components/ui/dialog').then(mod => 
 const DialogClose = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogClose), { ssr: false });
 const ShadDialogDescription = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogDescription), { ssr: false });
 
-const CameraDialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false, loading: () => <div className="p-4 text-center"><Loader2 className="h-6 w-6 animate-spin inline-block"/> Loading Camera...</div> });
+const CameraDialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { 
+  ssr: false, 
+  loading: () => <div className="p-4 text-center"><Loader2 className="h-6 w-6 animate-spin inline-block"/> Loading Camera...</div> 
+});
 
 
 const costTypes: CostType[] = ['Ingredient', 'Equipment', 'Tax', 'BAS', 'Travel', 'Other'];
@@ -126,14 +132,13 @@ export default function ReceiptsPage() {
   });
 
   useEffect(() => {
-    if (authLoading) {
-        setIsLoadingData(true);
+    if (authLoading || !user) {
+        setIsLoadingData(false);
+        if(!authLoading && !user) {
+          // Redirection handled by layout
+          setAllReceipts([]);
+        }
         return;
-    }
-    if (!user) {
-      setIsLoadingData(false);
-      setAllReceipts([]);
-      return;
     }
 
     setIsLoadingData(true);
@@ -147,7 +152,7 @@ export default function ReceiptsPage() {
         if (receiptDate instanceof Timestamp) receiptDate = receiptDate.toDate();
         else if (receiptDate && typeof receiptDate.seconds === 'number') receiptDate = new Timestamp(receiptDate.seconds, receiptDate.nanoseconds).toDate();
         else if (typeof receiptDate === 'string') receiptDate = parseISO(receiptDate);
-        else if (!(receiptDate instanceof Date)) receiptDate = new Date(); // Fallback
+        else if (!(receiptDate instanceof Date)) receiptDate = new Date(); 
 
         return {
           id: docSnap.id,
@@ -160,7 +165,7 @@ export default function ReceiptsPage() {
           notes: data.notes as string | undefined,
           imageUrl: data.imageUrl as string | undefined,
           fileName: data.fileName as string | undefined,
-          date: isValid(receiptDate) ? receiptDate : new Date(), // Ensure valid date
+          date: isValid(receiptDate) ? receiptDate : new Date(), 
           createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
           updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
         } as Receipt;
@@ -169,14 +174,16 @@ export default function ReceiptsPage() {
       setIsLoadingData(false);
     }, (error) => {
       console.error("ReceiptsPage: Error fetching receipts:", error);
-      toast({ title: "Error Fetching Receipts", description: "Could not fetch your receipts. Please try again.", variant: "destructive" });
+      toast({ title: "Error Fetching Receipts", description: "Could not fetch your receipts.", variant: "destructive" });
       setIsLoadingData(false);
       setAllReceipts([]);
     });
     
     return () => {
+      if (unsubscribe) {
         console.log("ReceiptsPage: Unsubscribing from receipts listener.");
         unsubscribe();
+      }
     };
   }, [user, authLoading, toast]);
 
@@ -210,7 +217,7 @@ export default function ReceiptsPage() {
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
       }
-      if (videoRef.current) {
+      if (videoRef.current) { // Ensure videoRef.current is not null before accessing srcObject
         videoRef.current.srcObject = null;
       }
     };
@@ -241,7 +248,7 @@ export default function ReceiptsPage() {
     if (fileInputRef.current) fileInputRef.current.value = "";
 
     if (receiptToEdit) {
-      let dateToSet = new Date(); // Default
+      let dateToSet = new Date(); 
       if (receiptToEdit.date) {
           const parsedDate = receiptToEdit.date instanceof Timestamp 
                              ? receiptToEdit.date.toDate() 
@@ -441,22 +448,19 @@ export default function ReceiptsPage() {
         });
       }
 
-      const receiptDataToSave: Partial<Omit<Receipt, 'id' | 'createdAt' | 'updatedAt'>> & { chefId: string; updatedAt: any } = {
+      const receiptDataToSave: Omit<Receipt, 'id' | 'createdAt' | 'updatedAt'> = {
         ...data,
         chefId: user.uid,
         date: Timestamp.fromDate(data.date),
         imageUrl: imageUrlToSave,
         fileName: originalFileName,
-        updatedAt: serverTimestamp(),
       };
       
-      delete (receiptDataToSave as any).id; // Ensure ID is not part of the data payload for set/update
-
       if (editingReceipt) {
-        await updateDoc(receiptDocRef, receiptDataToSave);
+        await updateDoc(receiptDocRef, {...receiptDataToSave, updatedAt: serverTimestamp()});
         toast({ title: 'Receipt Updated', description: `Receipt from "${data.vendor}" has been updated.` });
       } else {
-        await setDoc(receiptDocRef, { ...receiptDataToSave, createdAt: serverTimestamp() }); // No need to pass id explicitly if docRef is created with ID
+        await setDoc(receiptDocRef, { ...receiptDataToSave, createdAt: serverTimestamp(), updatedAt: serverTimestamp() }); 
         toast({ title: 'Receipt Added', description: `Receipt from "${data.vendor}" has been added.` });
       }
       
@@ -504,14 +508,14 @@ export default function ReceiptsPage() {
       toast({ title: 'Receipt Deleted', description: `Receipt from "${receiptToDelete?.vendor}" removed.`, variant: 'destructive' });
     } catch (error: any) {
       console.error("ReceiptsPage: Error deleting receipt:", error);
-      toast({ title: "Delete Error", description: `Could not delete receipt. ${error.message}`, variant: "destructive" });
+      toast({ title: "Delete Error", description: `Could not delete receipt: ${error.message}`, variant: "destructive" });
     } finally {
       setIsSaving(false);
     }
   };
   
   const totalExpenses = useMemo(() => {
-    return filteredReceipts.reduce((sum, receipt) => sum + receipt.totalAmount, 0);
+    return filteredReceipts.reduce((sum, receipt) => sum + (Number(receipt.totalAmount) || 0), 0);
   }, [filteredReceipts]);
 
   const expensesByCostType = useMemo(() => {
@@ -519,7 +523,7 @@ export default function ReceiptsPage() {
     costTypes.forEach(type => summary[type] = 0); 
     filteredReceipts.forEach(receipt => {
       if (costTypes.includes(receipt.costType)) {
-         summary[receipt.costType] = (summary[receipt.costType] || 0) + receipt.totalAmount;
+         summary[receipt.costType] = (summary[receipt.costType] || 0) + (Number(receipt.totalAmount) || 0);
       }
     });
     return summary;
@@ -544,7 +548,7 @@ export default function ReceiptsPage() {
         return [
         `"${(receipt.vendor || '').replace(/"/g, '""')}"`,
         formattedDate,
-        receipt.totalAmount.toFixed(2),
+        (Number(receipt.totalAmount) || 0).toFixed(2),
         `"${(receipt.costType || '').replace(/"/g, '""')}"`,
         `"${(receipt.assignedToEventId || '').replace(/"/g, '""')}"`,
         `"${(receipt.assignedToMenuId || '').replace(/"/g, '""')}"`,
@@ -609,9 +613,8 @@ export default function ReceiptsPage() {
   
   if (!user) {
      return (
-        <div className="text-center py-10">
-            <InfoIcon className="mx-auto h-12 w-12 text-muted-foreground"/>
-            <p className="mt-4 text-muted-foreground">Please log in to manage your receipts.</p>
+        <div className="text-center py-10 text-muted-foreground">
+            Please log in to manage your receipts.
         </div>
     );
   }
@@ -703,7 +706,7 @@ export default function ReceiptsPage() {
               setFileNameForForm(null);
               setIsPreviewCapture(false);
               if (fileInputRef.current) fileInputRef.current.value = "";
-              form.reset(); // Reset form when dialog closes
+              form.reset(); 
               setEditingReceipt(null);
           }
         }}>
@@ -979,7 +982,7 @@ export default function ReceiptsPage() {
           <CardTitle>Expenses Summary</CardTitle>
         </CardHeader>
         <CardContent>
-          {(authLoading || isLoadingData) && filteredReceipts.length === 0 && !allReceipts.length ? (
+          {(authLoading || (isLoadingData && filteredReceipts.length === 0 && allReceipts.length === 0) ) ? (
              <div className="flex justify-center items-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-primary" data-ai-hint="loading icon"/>
               <p className="ml-2">Loading summary...</p>
@@ -999,7 +1002,7 @@ export default function ReceiptsPage() {
                 )
               ))}
                {Object.values(expensesByCostType).every(val => (val ?? 0) === 0) && filteredReceipts.length > 0 && <p className="text-xs text-muted-foreground">No expenses for selected filters in these cost types.</p>}
-               {filteredReceipts.length === 0 && allReceipts.length === 0 && <p className="text-xs text-muted-foreground">No expenses to summarize.</p>}
+               {filteredReceipts.length === 0 && allReceipts.length === 0 && !isLoadingData && <p className="text-xs text-muted-foreground">No expenses to summarize.</p>}
             </div>
             <div className="flex flex-col justify-end items-end pt-4 md:pt-0">
               <div className="text-lg font-semibold flex items-center">
@@ -1021,7 +1024,7 @@ export default function ReceiptsPage() {
           <CardTitle>Uploaded Receipts</CardTitle>
         </CardHeader>
         <CardContent>
-          {(authLoading || isLoadingData) && allReceipts.length === 0 ? (
+          {(authLoading || (isLoadingData && allReceipts.length === 0)) ? (
              <div className="flex justify-center items-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-primary" data-ai-hint="loading data"/>
               <p className="ml-2">Loading receipts...</p>
@@ -1045,7 +1048,7 @@ export default function ReceiptsPage() {
                   <TableRow key={receipt.id}>
                     <TableCell className="font-medium">{receipt.vendor}</TableCell>
                     <TableCell>{receipt.date ? (isValid(new Date(receipt.date as any)) ? format(new Date(receipt.date as any), 'PP') : 'N/A') : 'N/A'}</TableCell>
-                    <TableCell className="text-right">${receipt.totalAmount.toFixed(2)}</TableCell>
+                    <TableCell className="text-right">${(Number(receipt.totalAmount) || 0).toFixed(2)}</TableCell>
                     <TableCell>{receipt.costType}</TableCell>
                     <TableCell className="text-xs">
                         {receipt.assignedToEventId && <div>Event: {receipt.assignedToEventId.substring(0,8)}...</div>}
@@ -1113,7 +1116,7 @@ export default function ReceiptsPage() {
                 <ul className="list-['-_'] list-inside ml-4">
                     <li>If a customer cancels more than 20 days before the event, a 50% refund is typically processed.</li>
                     <li>If a customer cancels less than 20 days before the event, a 20% refund is processed. In this case, 15% of the total event cost may go to the chef and 15% to FindAChef (subject to terms).</li>
-                    <li>Refer to the full <a href="/terms" className="underline hover:text-primary">Terms of Service</a> for complete cancellation policy details.</li>
+                    <li>Refer to the full <Link href="/terms" className="underline hover:text-primary">Terms of Service</Link> for complete cancellation policy details.</li>
                 </ul>
             </li>
             <li>Always ensure all receipts for an event are uploaded promptly for accurate cost tracking and potential tax purposes.</li>
@@ -1122,11 +1125,10 @@ export default function ReceiptsPage() {
       </Alert>
 
       <div className="flex justify-end mt-6">
-        <Button onClick={handleExport} variant="outline" disabled={filteredReceipts.length === 0 || isLoadingData}>
+        <Button onClick={handleExport} variant="outline" disabled={filteredReceipts.length === 0 || isLoadingData || isSaving}>
           <Download className="mr-2 h-5 w-5" /> Export Filtered Data (CSV)
         </Button>
       </div>
     </div>
   );
 }
-    

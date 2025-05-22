@@ -19,7 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import type { ChefWallEvent, CalendarEvent, AppUserProfileContext, ChefProfile } from '@/types';
+import type { ChefWallEvent, CalendarEvent, ChefProfile, AppUserProfileContext } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
 import { PlusCircle, Edit3, Trash2, LayoutGrid, Users, CalendarClock, DollarSign, MapPin, Globe, Lock, AlertCircle, ChefHat, Loader2 } from 'lucide-react';
@@ -32,7 +32,10 @@ import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject, 
 import { format, parseISO, isValid, formatISO } from 'date-fns';
 import dynamic from 'next/dynamic';
 
-const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false, loading: () => <div className="p-4 text-center"><Loader2 className="h-6 w-6 animate-spin inline-block"/> Loading Dialog...</div> });
+const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { 
+  ssr: false, 
+  loading: () => <div className="p-4 text-center"><Loader2 className="h-6 w-6 animate-spin inline-block"/> Loading Dialog...</div> 
+});
 const DialogContent = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogContent), { ssr: false });
 const DialogHeader = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogHeader), { ssr: false });
 const DialogTitle = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogTitle), { ssr: false });
@@ -97,14 +100,12 @@ export default function ChefWallPage() {
   });
 
   useEffect(() => {
-    if (authLoading) {
-      setIsLoadingData(true);
-      return;
-    }
-    if (!user) {
+    if (authLoading || !user) {
       setIsLoadingData(false);
-      setWallEvents([]);
-      // Redirection logic should be handled by the layout
+      if (!authLoading && !user) {
+        // Redirection handled by layout
+        setWallEvents([]);
+      }
       return;
     }
 
@@ -137,14 +138,16 @@ export default function ChefWallPage() {
       setIsLoadingData(false);
     }, (error) => {
       console.error("ChefWallPage: Error fetching wall events:", error);
-      toast({ title: "Error Fetching Events", description: "Could not fetch your event posts. Please try again later.", variant: "destructive" });
+      toast({ title: "Error Fetching Events", description: "Could not fetch your event posts.", variant: "destructive" });
       setIsLoadingData(false);
       setWallEvents([]);
     });
  
     return () => {
-      console.log("ChefWallPage: Unsubscribing from wall events listener.");
-      unsubscribe();
+      if (unsubscribe) {
+        console.log("ChefWallPage: Unsubscribing from wall events listener.");
+        unsubscribe();
+      }
     };
   }, [user, authLoading, toast]);
 
@@ -194,6 +197,7 @@ export default function ChefWallPage() {
 
     try {
       if (eventImageFile) {
+        // Attempt to delete old image if editing and new image is provided
         if (editingEvent?.imageUrl && editingEvent.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
             const oldImageRef: StorageReference = storageRef(storage, editingEvent.imageUrl);
@@ -205,7 +209,7 @@ export default function ChefWallPage() {
           }
         }
         
-        const fileExtension = eventImageFile.name.split('.').pop() || 'jpg';
+        const fileExtension = eventImageFile.name.split('.').pop()?.toLowerCase() || 'jpg';
         const imagePath = `users/${user.uid}/chefWallEvents/${eventIdForPath}/eventImage.${fileExtension}`;
         const imageStorageRefInstance = storageRef(storage, imagePath);
         
@@ -233,7 +237,7 @@ export default function ChefWallPage() {
         });
       }
 
-      const finalEventData: Omit<ChefWallEvent, 'id' | 'createdAt' | 'updatedAt'> & { chefId: string, chefName: string, chefAvatarUrl?: string, updatedAt: any, createdAt?: any, id?: string } = {
+      const finalEventData: Omit<ChefWallEvent, 'id' | 'createdAt' | 'updatedAt'> = {
         title: data.title,
         description: data.description,
         maxPax: data.maxPax,
@@ -246,12 +250,12 @@ export default function ChefWallPage() {
         dataAiHint: data.dataAiHint,
         isPublic: data.isPublic,
         chefId: user.uid,
-        chefName: userProfile.name || user.displayName || "Chef",
-        chefAvatarUrl: userProfile.profilePictureUrl || user.photoURL || undefined,
-        updatedAt: serverTimestamp(),
+        chefName: (userProfile as AppUserProfileContext).name || user.displayName || "Chef",
+        chefAvatarUrl: (userProfile as AppUserProfileContext).profilePictureUrl || user.photoURL || undefined,
       };
       
       const calendarEventData: Partial<CalendarEvent> = {
+        id: eventIdForPath, // Ensure ID is consistent
         title: finalEventData.title,
         date: Timestamp.fromDate(eventDate),
         location: finalEventData.location,
@@ -263,7 +267,6 @@ export default function ChefWallPage() {
         status: 'WallEvent', 
         chefId: user.uid,
         isWallEvent: true,
-        updatedAt: serverTimestamp(),
       };
 
       const batch = writeBatch(db);
@@ -271,14 +274,12 @@ export default function ChefWallPage() {
       const calendarEventDocRef = doc(db, `users/${user.uid}/calendarEvents`, eventIdForPath);
 
       if (editingEvent) {
-        batch.update(eventDocRef, finalEventData);
-        batch.set(calendarEventDocRef, { ...calendarEventData, id: eventIdForPath }, { merge: true });
+        batch.update(eventDocRef, {...finalEventData, updatedAt: serverTimestamp()});
+        batch.set(calendarEventDocRef, { ...calendarEventData, updatedAt: serverTimestamp() }, { merge: true });
         toast({ title: 'Event Post Updated', description: `"${finalEventData.title}" has been updated.` });
       } else {
-        finalEventData.createdAt = serverTimestamp();
-        calendarEventData.createdAt = serverTimestamp();
-        batch.set(eventDocRef, {...finalEventData, id: eventDocRef.id}); // Use eventIdForPath for new doc
-        batch.set(calendarEventDocRef, { ...calendarEventData, id: eventIdForPath });
+        batch.set(eventDocRef, {...finalEventData, createdAt: serverTimestamp(), updatedAt: serverTimestamp()});
+        batch.set(calendarEventDocRef, { ...calendarEventData, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
         toast({ title: 'Event Post Created', description: `"${finalEventData.title}" has been created.` });
       }
       
@@ -310,7 +311,7 @@ export default function ChefWallPage() {
       toast({title: "Date Error", description: "Event has an invalid date, using current date.", variant: "destructive"})
     }
     
-    const localDateTimeString = formatISO(eventDate).substring(0, 16);
+    const localDateTimeString = formatISO(eventDate).substring(0, 16); // YYYY-MM-DDTHH:MM
     
     form.reset({
       title: eventToEdit.title,
@@ -367,17 +368,19 @@ export default function ChefWallPage() {
       toast({ title: 'Event Post Deleted', description: `"${eventToDelete?.title}" has been deleted.`, variant: 'destructive' });
     } catch (error: any) {
       console.error("ChefWallPage: Error deleting event post:", error);
-      toast({ title: "Delete Error", description: `Could not delete event post. ${error.message}`, variant: "destructive" });
+      toast({ title: "Delete Error", description: `Could not delete event post: ${error.message}`, variant: "destructive" });
     } finally {
       setIsSaving(false);
     }
   };
   
   const openNewEventDialog = () => {
+    if (!user) return;
     const now = new Date();
-    const localNow = new Date(now.getTime() - (now.getTimezoneOffset() * 60000));
-    localNow.setHours(localNow.getHours() + 1); 
-    const defaultDateTime = localNow.toISOString().slice(0,16); 
+    // Adjust for local timezone and set default time (e.g., 1 hour from now)
+    const localTimeNow = new Date(now.getTime() - (now.getTimezoneOffset() * 60000));
+    localTimeNow.setHours(localTimeNow.getHours() + 1, 0, 0, 0); // Set to next hour, 0 minutes/seconds
+    const defaultDateTime = localTimeNow.toISOString().slice(0,16); 
 
     form.reset({
       title: '',
@@ -402,7 +405,12 @@ export default function ChefWallPage() {
     if (!dateTimeString) return "Date TBD";
     try {
       const date = parseISO(dateTimeString); 
-      if (!isValid(date)) return "Invalid Date";
+      if (!isValid(date)) {
+        // Try to parse if it's already a common display format (less likely for storage)
+        const altDate = new Date(dateTimeString);
+        if (isValid(altDate)) return format(altDate, "MMM d, yyyy 'at' h:mm a");
+        return "Invalid Date";
+      }
       return format(date, "MMM d, yyyy 'at' h:mm a");
     } catch (e) {
       console.warn("ChefWallPage: Could not format date for display:", dateTimeString, e);
@@ -415,18 +423,15 @@ export default function ChefWallPage() {
     return (
       <div className="flex justify-center items-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" data-ai-hint="loading spinner"/> 
-        <p className="ml-2">Loading event posts...</p>
+        <p className="ml-2">Loading your event posts...</p>
       </div>
     );
   }
 
   if (!user) {
-    // This case should ideally be handled by the DashboardLayout redirecting to login.
-    // If it reaches here, it's an unexpected state, but good to have a fallback.
     return (
-        <div className="text-center py-10">
-            <InfoIcon className="mx-auto h-12 w-12 text-muted-foreground"/>
-            <p className="mt-4 text-muted-foreground">Please log in to manage your event posts.</p>
+        <div className="text-center py-10 text-muted-foreground">
+            Please log in to manage your event posts on The Chef's Wall.
         </div>
     );
   }
@@ -713,7 +718,7 @@ export default function ChefWallPage() {
           ))}
         </div>
       ) : (
-        !isLoadingData && ( // Only show if not loading and no events
+        !isLoadingData && ( 
             <Card className="text-center py-12 border-dashed">
                 <CardHeader>
                     <LayoutGrid className="mx-auto h-12 w-12 text-muted-foreground mb-3" data-ai-hint="grid empty" />
@@ -731,4 +736,3 @@ export default function ChefWallPage() {
     </div>
   );
 }
-    

@@ -23,7 +23,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { MenuCard } from '@/components/menu-card';
 import type { Menu, Option, ShoppingListItem, MenuIngredient, AppUserProfileContext, ChefProfile } from '@/types';
 import { useToast } from '@/hooks/use-toast';
-import { PlusCircle, Edit, Trash2, NotebookText, Eye, EyeOff, ShoppingCart, AlertCircle, Sparkles, UploadCloud, Loader2, PackagePlus, PackageMinus, Calculator, InfoIcon } from 'lucide-react'; // Added InfoIcon
+import { PlusCircle, Edit, Trash2, NotebookText, Eye, EyeOff, ShoppingCart, AlertCircle, Sparkles, UploadCloud, Loader2, PackagePlus, PackageMinus, Calculator, InfoIcon } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
@@ -34,7 +34,10 @@ import { assistMenuItem, type MenuItemAssistInput } from '@/ai/flows/menu-item-a
 import { v4 as uuidv4 } from 'uuid';
 import dynamic from 'next/dynamic';
 
-const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { ssr: false, loading: () => <div className="p-4 text-center"><Loader2 className="h-6 w-6 animate-spin inline-block"/> Loading Dialog...</div> });
+const Dialog = dynamic(() => import('@/components/ui/dialog').then(mod => mod.Dialog), { 
+  ssr: false, 
+  loading: () => <div className="p-4 text-center"><Loader2 className="h-6 w-6 animate-spin inline-block"/> Loading Dialog...</div> 
+});
 const DialogContent = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogContent), { ssr: false });
 const DialogHeader = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogHeader), { ssr: false });
 const DialogTitle = dynamic(() => import('@/components/ui/dialog').then(mod => mod.DialogTitle), { ssr: false });
@@ -135,13 +138,12 @@ export default function MenuManagementPage() {
 
 
   useEffect(() => {
-    if (authLoading) {
-      setIsLoadingData(true);
-      return;
-    }
-    if (!user) {
+    if (authLoading || !user) {
       setIsLoadingData(false);
-      setMenus([]);
+      if(!authLoading && !user) {
+        // Redirection handled by layout
+        setMenus([]);
+      }
       return;
     }
 
@@ -163,14 +165,16 @@ export default function MenuManagementPage() {
       setIsLoadingData(false);
     }, (error) => {
       console.error("MenuManagementPage: Error fetching menus:", error);
-      toast({ title: "Error Fetching Menus", description: "Could not fetch your menus. Please try again later.", variant: "destructive" });
+      toast({ title: "Error Fetching Menus", description: "Could not fetch your menus.", variant: "destructive" });
       setIsLoadingData(false);
       setMenus([]);
     });
     
     return () => {
-      console.log("MenuManagementPage: Unsubscribing from menus listener.");
-      unsubscribe();
+      if (unsubscribe) {
+        console.log("MenuManagementPage: Unsubscribing from menus listener.");
+        unsubscribe();
+      }
     };
   }, [user, authLoading, toast]);
 
@@ -209,6 +213,7 @@ export default function MenuManagementPage() {
 
     try {
       if (menuImageFile) {
+        // Attempt to delete old image if editing and new image is provided
         if (editingMenu?.imageUrl && editingMenu.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
             const oldImageRef: StorageReference = storageRef(storage, editingMenu.imageUrl);
@@ -220,7 +225,7 @@ export default function MenuManagementPage() {
           }
         }
 
-        const fileExtension = menuImageFile.name.split('.').pop() || 'jpg';
+        const fileExtension = menuImageFile.name.split('.').pop()?.toLowerCase() || 'jpg';
         const imagePath = `users/${user.uid}/menus/${menuIdForPath}/image.${fileExtension}`;
         const imageStorageRefInstance = storageRef(storage, imagePath);
 
@@ -258,20 +263,20 @@ export default function MenuManagementPage() {
       const paxForCalc = Math.max(1, Number(data.pax) || 1);
       const costPerHeadFromIngredients = totalIngredientCost / paxForCalc;
 
-      const menuDataToSave: Partial<Menu> & { chefId: string; chefName: string; updatedAt: any; createdAt?: any; id?: string; } = { // Use Partial<Menu>
+      const menuDataToSave: Omit<Menu, 'id' | 'createdAt' | 'updatedAt' | 'adminStatus'> & { chefId: string; chefName: string; chefProfilePictureUrl?: string; adminStatus: Menu['adminStatus']; updatedAt: any; createdAt?: any;} = {
         title: data.title,
         description: data.description,
         cuisine: data.cuisine,
         pricePerHead: data.pricePerHead,
         pax: data.pax,
-        costPrice: data.costPrice,
+        costPrice: data.costPrice, // This is the chef's final determined cost price per head
         dietaryInfo: data.dietaryInfo || [],
         isPublic: data.isPublic,
         imageUrl: imageUrlToSave,
         dataAiHint: data.dataAiHint,
         chefId: user.uid,
-        chefName: userProfile.name || user.displayName || "Chef",
-        chefProfilePictureUrl: userProfile.profilePictureUrl || user.photoURL || undefined,
+        chefName: (userProfile as AppUserProfileContext).name || user.displayName || "Chef",
+        chefProfilePictureUrl: (userProfile as AppUserProfileContext).profilePictureUrl || user.photoURL || undefined,
         menuIngredients: finalMenuIngredients,
         calculatedTotalIngredientCost: totalIngredientCost,
         calculatedCostPricePerHead: costPerHeadFromIngredients,
@@ -279,16 +284,13 @@ export default function MenuManagementPage() {
         updatedAt: serverTimestamp(),
       };
       
-      delete menuDataToSave.id; // Firestore handles ID for new docs, or uses existing for update
-
       if (editingMenu) {
         const menuDocRef = doc(db, "menus", editingMenu.id);
         await updateDoc(menuDocRef, menuDataToSave);
         toast({ title: 'Menu Updated', description: `"${data.title}" has been successfully updated.` });
       } else {
-        menuDataToSave.createdAt = serverTimestamp();
-        const newMenuDocRef = doc(db, "menus", menuIdForPath); // Use pre-generated ID for path consistency
-        await setDoc(newMenuDocRef, menuDataToSave); // Use setDoc with the ID for new menu
+        const newMenuDocRef = doc(db, "menus", menuIdForPath); 
+        await setDoc(newMenuDocRef, {...menuDataToSave, createdAt: serverTimestamp()});
         toast({ title: 'Menu Created', description: `"${data.title}" has been successfully created.` });
       }
       
@@ -360,7 +362,7 @@ export default function MenuManagementPage() {
       toast({ title: 'Menu Deleted', description: `"${menuToDelete?.title}" has been deleted.`, variant: 'destructive' });
     } catch (error: any) { 
       console.error("MenuManagementPage: Error deleting menu:", error);
-      toast({ title: "Delete Error", description: `Could not delete menu. ${error.message}`, variant: "destructive" });
+      toast({ title: "Delete Error", description: `Could not delete menu: ${error.message}`, variant: "destructive" });
     } finally {
       setIsSaving(false);
     }
@@ -382,13 +384,17 @@ export default function MenuManagementPage() {
         const shoppingListCollectionRef = collection(db, `users/${user.uid}/shoppingListItems`);
         
         menu.menuIngredients.forEach(ing => {
+            if (!ing.name || !ing.quantity || !ing.unit) {
+                console.warn("Skipping ingredient due to missing data:", ing);
+                return; // Skip if essential data is missing
+            }
             const newItemRef = doc(shoppingListCollectionRef); 
             const newItemData: Omit<ShoppingListItem, 'id' | 'createdAt' | 'updatedAt'> = {
                 chefId: user.uid,
                 name: ing.name,
-                quantity: ing.quantity, 
+                quantity: Number(ing.quantity) || 1, 
                 unit: ing.unit, 
-                estimatedCost: ing.costPerUnit, 
+                estimatedCost: Number(ing.costPerUnit) || 0, 
                 notes: `For menu: ${menu.title}. ${ing.notes || ''}`.trim(),
                 purchased: false,
                 menuId: menu.id,
@@ -405,7 +411,7 @@ export default function MenuManagementPage() {
         console.error("MenuManagementPage: Error adding to shopping list:", error);
         toast({
             title: 'Error',
-            description: `Could not add items to shopping list. ${error.message}`,
+            description: `Could not add items to shopping list: ${error.message}`,
             variant: 'destructive',
         });
     } finally {
@@ -415,6 +421,7 @@ export default function MenuManagementPage() {
 
 
   const openNewMenuDialog = () => {
+    if (!user) return;
     form.reset({
       title: '',
       description: '',
@@ -484,16 +491,15 @@ export default function MenuManagementPage() {
     return (
       <div className="flex justify-center items-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" data-ai-hint="loading spinner"/> 
-        <p className="ml-2">Loading menus...</p>
+        <p className="ml-2">Loading your menus...</p>
       </div>
     );
   }
   
   if (!user) {
      return (
-        <div className="text-center py-10">
-            <InfoIcon className="mx-auto h-12 w-12 text-muted-foreground"/>
-            <p className="mt-4 text-muted-foreground">Please log in to manage your menus.</p>
+        <div className="text-center py-10 text-muted-foreground">
+            Please log in to manage your menus.
         </div>
     );
   }
@@ -832,7 +838,7 @@ export default function MenuManagementPage() {
           ))}
         </div>
       ) : (
-        !isLoadingData && ( // Only show if not loading and no menus
+        !isLoadingData && ( 
             <Card className="text-center py-12 border-dashed">
                 <CardHeader>
                     <NotebookText className="mx-auto h-12 w-12 text-muted-foreground mb-3" data-ai-hint="notebook empty" />
@@ -850,4 +856,3 @@ export default function MenuManagementPage() {
     </div>
   );
 }
-    
