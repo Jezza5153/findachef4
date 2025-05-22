@@ -19,16 +19,16 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import type { ChefWallEvent, CalendarEvent, AppUserProfileContext } from '@/types';
+import type { ChefWallEvent, CalendarEvent, AppUserProfileContext, ChefProfile } from '@/types';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
-import { PlusCircle, Edit3, Trash2, LayoutGrid, Users, CalendarClock, DollarSign, MapPin, Globe, Lock, AlertCircle, ChefHat, Loader2, InfoIcon, UploadCloud } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, LayoutGrid, Users, CalendarClock, DollarSign, MapPin, Globe, Lock, AlertCircle, ChefHat, Loader2 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
-import { collection, addDoc, getDoc, doc, updateDoc, deleteDoc, query, where, serverTimestamp, Timestamp, setDoc, onSnapshot, orderBy, Unsubscribe, writeBatch } from 'firebase/firestore';
-import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
+import { collection, addDoc, doc, updateDoc, deleteDoc, query, where, serverTimestamp, Timestamp, setDoc, onSnapshot, orderBy, Unsubscribe, writeBatch, getDoc } from 'firebase/firestore';
+import { ref as storageRef, uploadBytesResumable, getDownloadURL, deleteObject, StorageReference } from 'firebase/storage';
 import { format, parseISO, isValid, formatISO } from 'date-fns';
 import dynamic from 'next/dynamic';
 
@@ -67,9 +67,9 @@ const wallEventFormSchema = z.object({
 type WallEventFormValues = z.infer<typeof wallEventFormSchema>;
 
 export default function ChefWallPage() {
-  const { user, userProfile, isChefSubscribed } = useAuth();
+  const { user, userProfile, isChefSubscribed, loading: authLoading } = useAuth();
   const [wallEvents, setWallEvents] = useState<ChefWallEvent[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingData, setIsLoadingData] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isPostDialogOpen, setIsPostDialogOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<ChefWallEvent | null>(null);
@@ -97,53 +97,56 @@ export default function ChefWallPage() {
   });
 
   useEffect(() => {
-    let unsubscribe: Unsubscribe | undefined;
-    if (user) {
-      setIsLoading(true);
-      const eventsCollectionRef = collection(db, "chefWallEvents");
-      const q = query(eventsCollectionRef, where("chefId", "==", user.uid), orderBy("createdAt", "desc"));
-      
-      
-        unsubscribe = onSnapshot(q, (querySnapshot) => {
-          const fetchedEvents = querySnapshot.docs.map(docSnap => {
-            const data = docSnap.data();
-            let eventDateTimeStr = data.eventDateTime;
-            if (eventDateTimeStr instanceof Timestamp) {
-              eventDateTimeStr = eventDateTimeStr.toDate().toISOString();
-            } else if (eventDateTimeStr && typeof eventDateTimeStr.seconds === 'number' && typeof eventDateTimeStr.nanoseconds === 'number') {
-               eventDateTimeStr = new Timestamp(eventDateTimeStr.seconds, eventDateTimeStr.nanoseconds).toDate().toISOString();
-            } else if (typeof eventDateTimeStr !== 'string' || !isValid(parseISO(eventDateTimeStr))) {
-                console.warn("Invalid eventDateTime format from Firestore:", eventDateTimeStr, "for event ID:", docSnap.id);
-                eventDateTimeStr = new Date().toISOString(); 
-            }
-            
-            return { 
-              id: docSnap.id, 
-              ...data,
-              eventDateTime: eventDateTimeStr,
-              createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
-              updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
-            } as ChefWallEvent;
-          });
-          setWallEvents(fetchedEvents);
-          setIsLoading(false);
-        }, (error) => {
-          console.error("Error fetching wall events:", error);
-          toast({ title: "Error", description: "Could not fetch your event posts.", variant: "destructive" });
-          setIsLoading(false);
-        });
-     
-    } else {
-      setIsLoading(false);
+    if (authLoading) {
+      setIsLoadingData(true);
+      return;
+    }
+    if (!user) {
+      setIsLoadingData(false);
       setWallEvents([]);
+      // Redirection logic should be handled by the layout
+      return;
     }
 
+    setIsLoadingData(true);
+    const eventsCollectionRef = collection(db, "chefWallEvents");
+    const q = query(eventsCollectionRef, where("chefId", "==", user.uid), orderBy("createdAt", "desc"));
+    
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      const fetchedEvents = querySnapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        let eventDateTimeStr = data.eventDateTime;
+        if (eventDateTimeStr instanceof Timestamp) {
+          eventDateTimeStr = eventDateTimeStr.toDate().toISOString();
+        } else if (eventDateTimeStr && typeof eventDateTimeStr.seconds === 'number' && typeof eventDateTimeStr.nanoseconds === 'number') {
+            eventDateTimeStr = new Timestamp(eventDateTimeStr.seconds, eventDateTimeStr.nanoseconds).toDate().toISOString();
+        } else if (typeof eventDateTimeStr !== 'string' || !isValid(parseISO(eventDateTimeStr))) {
+            console.warn("ChefWallPage: Invalid eventDateTime format from Firestore:", eventDateTimeStr, "for event ID:", docSnap.id);
+            eventDateTimeStr = new Date().toISOString(); 
+        }
+        
+        return { 
+          id: docSnap.id, 
+          ...data,
+          eventDateTime: eventDateTimeStr,
+          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
+        } as ChefWallEvent;
+      });
+      setWallEvents(fetchedEvents);
+      setIsLoadingData(false);
+    }, (error) => {
+      console.error("ChefWallPage: Error fetching wall events:", error);
+      toast({ title: "Error Fetching Events", description: "Could not fetch your event posts. Please try again later.", variant: "destructive" });
+      setIsLoadingData(false);
+      setWallEvents([]);
+    });
+ 
     return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
+      console.log("ChefWallPage: Unsubscribing from wall events listener.");
+      unsubscribe();
     };
-  }, [user, toast]);
+  }, [user, authLoading, toast]);
 
   const handleEventImageFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -165,52 +168,42 @@ export default function ChefWallPage() {
   const onSubmitEventPost = async (data: WallEventFormValues) => {
     if (!user || !userProfile) {
       toast({ title: "Authentication Error", description: "You must be logged in.", variant: "destructive" });
+      setIsSaving(false);
       return;
     }
-    if (data.isPublic && !isChefSubscribed && !(userProfile as AppUserProfileContext).isAdmin) {
+     if (data.isPublic && !isChefSubscribed && !(userProfile as ChefProfile)?.isAdmin) {
         toast({title: "Subscription Required", description: "An active subscription is needed to publish events publicly.", variant: "destructive"});
+        setIsSaving(false);
         return;
     }
     setIsSaving(true);
 
-    // --- Start Date Validation ---
-    // Moved date parsing here to ensure validity before proceeding with image upload/Firestore ops
-    // This also ensures editingEvent.eventDateTime is only accessed if editingEvent exists.
     let eventDate: Date;
-
     try {
-      eventDate = new Date(data.eventDateTime); // HTML datetime-local input provides ISO string
+      eventDate = new Date(data.eventDateTime);
       if (!isValid(eventDate)) throw new Error("Invalid date format from input.");
     } catch (e) {
-      console.error("Invalid date provided:", data.eventDateTime, e);
+      console.error("ChefWallPage: Invalid date provided:", data.eventDateTime, e);
       toast({ title: "Invalid Date", description: "Please ensure the event date and time are valid.", variant: "destructive" });
       setIsSaving(false);
       return;
     }
     
-    // --- End Date Validation ---
-
     let imageUrlToSave = editingEvent?.imageUrl || '';
     const eventIdForPath = editingEvent?.id || doc(collection(db, 'chefWallEvents')).id;
 
     try {
-      // --- Start Image Upload Logic ---
       if (eventImageFile) {
-
-        // --- Start Old Image Deletion ---
-        // Wrap old image deletion in try/catch as it's not critical if it fails
-        // Delete old image if editing and new image provided
         if (editingEvent?.imageUrl && editingEvent.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
-            const oldImageRef = storageRef(storage, editingEvent.imageUrl);
+            const oldImageRef: StorageReference = storageRef(storage, editingEvent.imageUrl);
             await deleteObject(oldImageRef);
-          } catch (e: any) {
-            if (e.code !== 'storage/object-not-found') {
-              console.warn("ChefWallPage: Could not delete old event image during update:", e.message);
+          } catch (deleteError: any) {
+            if (deleteError.code !== 'storage/object-not-found') {
+              console.warn("ChefWallPage: Could not delete old event image during update:", deleteError.message);
             }
           }
         }
-        // --- End Old Image Deletion ---
         
         const fileExtension = eventImageFile.name.split('.').pop() || 'jpg';
         const imagePath = `users/${user.uid}/chefWallEvents/${eventIdForPath}/eventImage.${fileExtension}`;
@@ -223,27 +216,28 @@ export default function ChefWallPage() {
           uploadTask.on('state_changed', null,
             (error) => { 
               console.error("ChefWallPage: Event image upload error:", error);
+              toast({ title: "Image Upload Failed", description: error.message, variant: "destructive" });
               reject(error); 
             },
             async () => {
               try {
                 imageUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
                 resolve();
-              } catch (getUrlError) {
+              } catch (getUrlError: any) {
                 console.error("ChefWallPage: Error getting download URL for event image:", getUrlError);
+                toast({ title: "Image URL Error", description: getUrlError.message, variant: "destructive" });
                 reject(getUrlError);
               }
             }
           );
         });
-        // --- End Image Upload Logic ---
       }
 
-      const finalEventData: Omit<ChefWallEvent, 'id' | 'createdAt' | 'updatedAt'> & { chefId: string, chefName: string, chefAvatarUrl?: string, updatedAt: any, createdAt?: any } = {
+      const finalEventData: Omit<ChefWallEvent, 'id' | 'createdAt' | 'updatedAt'> & { chefId: string, chefName: string, chefAvatarUrl?: string, updatedAt: any, createdAt?: any, id?: string } = {
         title: data.title,
         description: data.description,
         maxPax: data.maxPax,
-        eventDateTime: eventDate.toISOString(), // Store as ISO string
+        eventDateTime: eventDate.toISOString(),
         location: data.location,
         pricePerPerson: data.pricePerPerson,
         chefsInvolved: data.chefsInvolved?.split(',').map(s => s.trim()).filter(s => s) || [],
@@ -252,12 +246,12 @@ export default function ChefWallPage() {
         dataAiHint: data.dataAiHint,
         isPublic: data.isPublic,
         chefId: user.uid,
-        chefName: (userProfile as AppUserProfileContext).name || user.displayName || "Chef",
-        chefAvatarUrl: (userProfile as AppUserProfileContext).profilePictureUrl || user.photoURL || undefined,
+        chefName: userProfile.name || user.displayName || "Chef",
+        chefAvatarUrl: userProfile.profilePictureUrl || user.photoURL || undefined,
         updatedAt: serverTimestamp(),
       };
       
-      const calendarEventData: Partial<CalendarEvent> = { // Use Partial as some fields might only be on update
+      const calendarEventData: Partial<CalendarEvent> = {
         title: finalEventData.title,
         date: Timestamp.fromDate(eventDate),
         location: finalEventData.location,
@@ -272,25 +266,23 @@ export default function ChefWallPage() {
         updatedAt: serverTimestamp(),
       };
 
-      // --- Start Firestore Batch Write ---
       const batch = writeBatch(db);
       const eventDocRef = doc(db, "chefWallEvents", eventIdForPath);
       const calendarEventDocRef = doc(db, `users/${user.uid}/calendarEvents`, eventIdForPath);
 
       if (editingEvent) {
         batch.update(eventDocRef, finalEventData);
-        batch.set(calendarEventDocRef, { ...calendarEventData, id: eventIdForPath }, { merge: true }); // Merge to update or create
+        batch.set(calendarEventDocRef, { ...calendarEventData, id: eventIdForPath }, { merge: true });
         toast({ title: 'Event Post Updated', description: `"${finalEventData.title}" has been updated.` });
       } else {
         finalEventData.createdAt = serverTimestamp();
         calendarEventData.createdAt = serverTimestamp();
-        batch.set(eventDocRef, {...finalEventData, id: eventDocRef.id});
+        batch.set(eventDocRef, {...finalEventData, id: eventDocRef.id}); // Use eventIdForPath for new doc
         batch.set(calendarEventDocRef, { ...calendarEventData, id: eventIdForPath });
         toast({ title: 'Event Post Created', description: `"${finalEventData.title}" has been created.` });
       }
       
-      await batch.commit(); // Commit the batch write (Firestore ops)
-      // --- End Firestore Batch Write ---
+      await batch.commit();
       
       form.reset();
       setEditingEvent(null);
@@ -299,7 +291,7 @@ export default function ChefWallPage() {
       setEventImagePreview(null);
 
     } catch (error: any) {
-      console.error('Error saving wall event:', error);
+      console.error('ChefWallPage: Error saving wall event:', error);
       toast({ title: 'Save Failed', description: `Could not save event post. ${error.message}`, variant: 'destructive' });
     } finally {
       setIsSaving(false);
@@ -310,15 +302,14 @@ export default function ChefWallPage() {
     setEditingEvent(eventToEdit);
     let eventDate;
     try {
-      eventDate = parseISO(eventToEdit.eventDateTime); // Parse ISO string from Firestore
+      eventDate = parseISO(eventToEdit.eventDateTime);
       if (!isValid(eventDate)) throw new Error("Invalid date from data");
     } catch (e) {
-      console.error("Error parsing eventDateTime for editing:", eventToEdit.eventDateTime, e);
+      console.error("ChefWallPage: Error parsing eventDateTime for editing:", eventToEdit.eventDateTime, e);
       eventDate = new Date(); 
       toast({title: "Date Error", description: "Event has an invalid date, using current date.", variant: "destructive"})
     }
     
-    // Format for datetime-local input: YYYY-MM-DDTHH:mm
     const localDateTimeString = formatISO(eventDate).substring(0, 16);
     
     form.reset({
@@ -350,49 +341,43 @@ export default function ChefWallPage() {
         return;
     }
 
-    if (window.confirm(`Are you sure you want to delete the event post "${eventToDelete?.title}"? This will also remove it from your calendar.`)) {
-      setIsSaving(true);
-      // --- Start Deletion Logic ---
-      try {
-        const batch = writeBatch(db);
-        const wallEventDocRef = doc(db, "chefWallEvents", eventIdToDelete);
-        batch.delete(wallEventDocRef);
-        
-        const calendarEventDocRef = doc(db, `users/${user.uid}/calendarEvents`, eventIdToDelete);
-        batch.delete(calendarEventDocRef);
+    if (!window.confirm(`Are you sure you want to delete the event post "${eventToDelete?.title}"? This will also remove it from your calendar.`)) return;
 
-        // --- Start Image Deletion ---
-        // Delete image from Storage if it exists
-        if (eventToDelete.imageUrl && eventToDelete.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
-          try {
-            const imageRefToDelete = storageRef(storage, eventToDelete.imageUrl);
-            await deleteObject(imageRefToDelete);
-          } catch (e: any) {
-            if (e.code !== 'storage/object-not-found') {
-              console.warn("ChefWallPage: Could not delete event image from storage during event deletion:", e.message);
-            }
+    setIsSaving(true);
+    try {
+      const batch = writeBatch(db);
+      const wallEventDocRef = doc(db, "chefWallEvents", eventIdToDelete);
+      batch.delete(wallEventDocRef);
+      
+      const calendarEventDocRef = doc(db, `users/${user.uid}/calendarEvents`, eventIdToDelete);
+      batch.delete(calendarEventDocRef);
+
+      if (eventToDelete.imageUrl && eventToDelete.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
+        try {
+          const imageRefToDelete = storageRef(storage, eventToDelete.imageUrl);
+          await deleteObject(imageRefToDelete);
+        } catch (e: any) {
+          if (e.code !== 'storage/object-not-found') {
+            console.warn("ChefWallPage: Could not delete event image from storage during event deletion:", e.message);
           }
         }
-        // --- End Image Deletion ---
-        
-        await batch.commit();
-        toast({ title: 'Event Post Deleted', description: `"${eventToDelete?.title}" has been deleted.`, variant: 'destructive' });
-      } catch (error: any) {
-        console.error("Error deleting event post:", error);
-        toast({ title: "Delete Error", description: `Could not delete event post. ${error.message}`, variant: "destructive" });
-      } finally {
-        setIsSaving(false);
-        // --- End Deletion Logic ---
       }
+      
+      await batch.commit();
+      toast({ title: 'Event Post Deleted', description: `"${eventToDelete?.title}" has been deleted.`, variant: 'destructive' });
+    } catch (error: any) {
+      console.error("ChefWallPage: Error deleting event post:", error);
+      toast({ title: "Delete Error", description: `Could not delete event post. ${error.message}`, variant: "destructive" });
+    } finally {
+      setIsSaving(false);
     }
   };
   
   const openNewEventDialog = () => {
     const now = new Date();
-    // Default to one hour in the future, adjust for local timezone offset for datetime-local input
     const localNow = new Date(now.getTime() - (now.getTimezoneOffset() * 60000));
     localNow.setHours(localNow.getHours() + 1); 
-    const defaultDateTime = localNow.toISOString().slice(0,16); // YYYY-MM-DDTHH:mm
+    const defaultDateTime = localNow.toISOString().slice(0,16); 
 
     form.reset({
       title: '',
@@ -420,15 +405,32 @@ export default function ChefWallPage() {
       if (!isValid(date)) return "Invalid Date";
       return format(date, "MMM d, yyyy 'at' h:mm a");
     } catch (e) {
-      console.warn("Could not format date for display:", dateTimeString, e);
+      console.warn("ChefWallPage: Could not format date for display:", dateTimeString, e);
       return String(dateTimeString); 
     }
   }, []);
 
 
-  if (isLoading) {
-    return <div className="flex justify-center items-center h-64"><Loader2 className="h-8 w-8 animate-spin text-primary" data-ai-hint="loading spinner"/> Loading event posts...</div>;
+  if (authLoading || isLoadingData) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" data-ai-hint="loading spinner"/> 
+        <p className="ml-2">Loading event posts...</p>
+      </div>
+    );
   }
+
+  if (!user) {
+    // This case should ideally be handled by the DashboardLayout redirecting to login.
+    // If it reaches here, it's an unexpected state, but good to have a fallback.
+    return (
+        <div className="text-center py-10">
+            <InfoIcon className="mx-auto h-12 w-12 text-muted-foreground"/>
+            <p className="mt-4 text-muted-foreground">Please log in to manage your event posts.</p>
+        </div>
+    );
+  }
+
 
   return (
     <div className="space-y-8">
@@ -465,7 +467,7 @@ export default function ChefWallPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Event Title</FormLabel>
-                      <FormControl><Input placeholder="e.g., Pop-Up Dinner Series" {...field} /></FormControl>
+                      <FormControl><Input placeholder="e.g., Pop-Up Dinner Series" {...field} disabled={isSaving} /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -476,7 +478,7 @@ export default function ChefWallPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Event Description</FormLabel>
-                      <FormControl><Textarea placeholder="Detailed description of the event experience..." {...field} className="min-h-[100px]" /></FormControl>
+                      <FormControl><Textarea placeholder="Detailed description of the event experience..." {...field} className="min-h-[100px]" disabled={isSaving} /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -488,7 +490,7 @@ export default function ChefWallPage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Maximum PAX (Guests)</FormLabel>
-                        <FormControl><Input type="number" placeholder="e.g., 25" {...field} /></FormControl>
+                        <FormControl><Input type="number" placeholder="e.g., 25" {...field} disabled={isSaving} /></FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -499,7 +501,7 @@ export default function ChefWallPage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Price per Person ($)</FormLabel>
-                        <FormControl><Input type="number" step="0.01" placeholder="e.g., 95.00" {...field} /></FormControl>
+                        <FormControl><Input type="number" step="0.01" placeholder="e.g., 95.00" {...field} disabled={isSaving} /></FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -511,7 +513,7 @@ export default function ChefWallPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Event Date & Time</FormLabel>
-                      <FormControl><Input type="datetime-local" {...field} /></FormControl>
+                      <FormControl><Input type="datetime-local" {...field} disabled={isSaving} /></FormControl>
                       <FormDescription>Be specific. Must be a future date.</FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -523,7 +525,7 @@ export default function ChefWallPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Location</FormLabel>
-                      <FormControl><Input placeholder="e.g., My Studio, City Park, Client's Address (TBD)" {...field} /></FormControl>
+                      <FormControl><Input placeholder="e.g., My Studio, City Park, Client's Address (TBD)" {...field} disabled={isSaving} /></FormControl>
                       <FormDescription>Specify address or general location.</FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -532,7 +534,7 @@ export default function ChefWallPage() {
                  <FormField
                   control={form.control}
                   name="eventImageFile"
-                  render={({ fieldState }) => ( // field prop not needed for direct file input handling
+                  render={({ fieldState }) => ( 
                     <FormItem>
                       <FormLabel>Event Image (Optional)</FormLabel>
                       <FormControl>
@@ -541,6 +543,7 @@ export default function ChefWallPage() {
                           accept="image/jpeg,image/png,image/webp"
                           onChange={handleEventImageFileChange} 
                           className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
+                          disabled={isSaving}
                         />
                       </FormControl>
                       {eventImagePreview && (
@@ -549,7 +552,7 @@ export default function ChefWallPage() {
                         </div>
                       )}
                       <FormDescription>A captivating image for your event (max 2MB, JPG/PNG/WEBP).</FormDescription>
-                      <FormMessage />
+                      {fieldState.error && <FormMessage>{fieldState.error.message}</FormMessage>}
                     </FormItem>
                   )}
                 />
@@ -559,7 +562,7 @@ export default function ChefWallPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Image Description Hint (for AI)</FormLabel>
-                      <FormControl><Input placeholder="e.g., outdoor cooking, fine dining" {...field} /></FormControl>
+                      <FormControl><Input placeholder="e.g., outdoor cooking, fine dining" {...field} disabled={isSaving} /></FormControl>
                       <FormDescription>One or two keywords to help AI understand image content (max 2 words).</FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -571,7 +574,7 @@ export default function ChefWallPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Other Chefs Involved (Optional)</FormLabel>
-                      <FormControl><Input placeholder="e.g., Chef Jane Doe, Chef John Smith" {...field} /></FormControl>
+                      <FormControl><Input placeholder="e.g., Chef Jane Doe, Chef John Smith" {...field} disabled={isSaving} /></FormControl>
                       <FormDescription>Comma-separated names. This can include team members or collaborators from your alliance.</FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -583,7 +586,7 @@ export default function ChefWallPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Tags / Keywords (Optional)</FormLabel>
-                      <FormControl><Input placeholder="e.g., Fine Dining, Vegan, Wine Pairing, Casual" {...field} /></FormControl>
+                      <FormControl><Input placeholder="e.g., Fine Dining, Vegan, Wine Pairing, Casual" {...field} disabled={isSaving} /></FormControl>
                       <FormDescription>Comma-separated tags to help people find your event.</FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -598,8 +601,7 @@ export default function ChefWallPage() {
                         <FormLabel className="text-base">Event Visibility</FormLabel>
                         <FormDescription>
                           {field.value ? "Public: Visible to all customers on the Customer Wall." : "Private: Invite-only or for your records."}
-                          {(!isChefSubscribed && field.value && !(userProfile as AppUserProfileContext)?.isAdmin) && " Public visibility requires an active subscription."}
-                          {(!isChefSubscribed && !field.value && !(userProfile as AppUserProfileContext)?.isAdmin) && " Publishing public events requires an active subscription."}
+                          {(!isChefSubscribed && field.value && !(userProfile as ChefProfile)?.isAdmin) && " Public visibility requires an active subscription."}
                         </FormDescription>
                       </div>
                        <TooltipProvider>
@@ -609,17 +611,17 @@ export default function ChefWallPage() {
                               <Switch
                                 checked={field.value}
                                 onCheckedChange={(checked) => {
-                                  if (checked && !isChefSubscribed && !(userProfile as AppUserProfileContext)?.isAdmin) {
+                                  if (checked && !isChefSubscribed && !(userProfile as ChefProfile)?.isAdmin) {
                                     toast({ title: "Subscription Required", description: "You need an active subscription to make events public.", variant: "destructive"});
                                     return; 
                                   }
                                   field.onChange(checked);
                                 }}
-                                disabled={isSaving || (field.value && !isChefSubscribed && !(userProfile as AppUserProfileContext)?.isAdmin)} 
+                                disabled={isSaving || (field.value && !isChefSubscribed && !(userProfile as ChefProfile)?.isAdmin && !field.value) } 
                               />
                             </FormControl>
                           </TooltipTrigger>
-                          {(!isChefSubscribed && !(userProfile as AppUserProfileContext)?.isAdmin) && (
+                          {(!isChefSubscribed && !(userProfile as ChefProfile)?.isAdmin) && (
                             <TooltipContent>
                               <p className="flex items-center"><AlertCircle className="mr-2 h-4 w-4" />Subscription required to make event public.</p>
                             </TooltipContent>
@@ -633,7 +635,7 @@ export default function ChefWallPage() {
                   <DialogClose asChild>
                       <Button type="button" variant="outline" disabled={isSaving}>Cancel</Button>
                   </DialogClose>
-                  <Button type="submit" disabled={isSaving || (form.getValues('isPublic') && !isChefSubscribed && !(userProfile as AppUserProfileContext)?.isAdmin)}>
+                  <Button type="submit" disabled={isSaving || (form.getValues('isPublic') && !isChefSubscribed && !(userProfile as ChefProfile)?.isAdmin)}>
                     {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (editingEvent ? 'Save Changes' : 'Create Event Post')}
                   </Button>
                 </DialogFooter>
@@ -662,7 +664,7 @@ export default function ChefWallPage() {
                   <LayoutGrid className="h-16 w-16 opacity-50" data-ai-hint="event placeholder" />
                 </div>
               )}
-              <CardHeader>
+              <CardHeader className="pb-2 pt-4">
                 <div className="flex justify-between items-start">
                     <CardTitle className="text-xl">{event.title}</CardTitle>
                     <Badge variant={event.isPublic ? "default" : "secondary"} className="text-xs">
@@ -676,8 +678,8 @@ export default function ChefWallPage() {
                   </CardDescription>
                 }
               </CardHeader>
-              <CardContent className="space-y-3 text-sm flex-grow">
-                <p className="line-clamp-3">{event.description}</p>
+              <CardContent className="space-y-2 text-sm flex-grow pt-2">
+                <p className="line-clamp-3 text-foreground/80">{event.description}</p>
                 <div className="flex items-center"><CalendarClock className="mr-2 h-4 w-4 text-primary" data-ai-hint="calendar clock"/> {formatEventDateTimeForDisplay(event.eventDateTime)}</div>
                 <div className="flex items-center"><MapPin className="mr-2 h-4 w-4 text-primary" data-ai-hint="map pin location"/> {event.location}</div>
                 <div className="flex items-center"><DollarSign className="mr-2 h-4 w-4 text-green-600" data-ai-hint="dollar sign money"/> ${event.pricePerPerson.toFixed(2)}/person</div>
@@ -692,7 +694,7 @@ export default function ChefWallPage() {
                   </div>
                 )}
                 {event.tags && event.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-2">
+                  <div className="flex flex-wrap gap-1 mt-1">
                     {event.tags.map(tag => <Badge key={tag} variant="outline" className="text-xs">{tag}</Badge>)}
                   </div>
                 )}
@@ -711,7 +713,7 @@ export default function ChefWallPage() {
           ))}
         </div>
       ) : (
-        !isLoading && (
+        !isLoadingData && ( // Only show if not loading and no events
             <Card className="text-center py-12 border-dashed">
                 <CardHeader>
                     <LayoutGrid className="mx-auto h-12 w-12 text-muted-foreground mb-3" data-ai-hint="grid empty" />

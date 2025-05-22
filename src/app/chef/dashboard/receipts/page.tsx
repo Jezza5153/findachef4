@@ -78,9 +78,9 @@ const taxAdviceFormSchema = z.object({
 type TaxAdviceFormValues = z.infer<typeof taxAdviceFormSchema>;
 
 export default function ReceiptsPage() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const [allReceipts, setAllReceipts] = useState<Receipt[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingData, setIsLoadingData] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [editingReceipt, setEditingReceipt] = useState<Receipt | null>(null);
@@ -126,57 +126,59 @@ export default function ReceiptsPage() {
   });
 
   useEffect(() => {
-    let unsubscribe: Unsubscribe | undefined;
-    if (user) {
-      setIsLoading(true);
-      const receiptsCollectionRef = collection(db, "users", user.uid, "receipts");
-      const q = query(receiptsCollectionRef, orderBy("date", "desc"));
-      
-      try {
-        unsubscribe = onSnapshot(q, (querySnapshot) => {
-          const fetchedReceipts = querySnapshot.docs.map(docSnap => {
-            const data = docSnap.data();
-            return {
-              // Explicitly cast data types from Firestore
-              id: docSnap.id,
-              ...data,
-              vendor: data.vendor as string,
-              totalAmount: typeof data.totalAmount === 'number' ? data.totalAmount : parseFloat(data.totalAmount || '0'), // Handle potential string numbers
-              costType: data.costType as CostType,
-              assignedToEventId: data.assignedToEventId as string | undefined,
-              assignedToMenuId: data.assignedToMenuId as string | undefined,
-              notes: data.notes as string | undefined,
-              imageUrl: data.imageUrl as string | undefined,
-              fileName: data.fileName as string | undefined,
-              date: data.date instanceof Timestamp ? data.date.toDate() : (data.date ? fromUnixTime(data.date.seconds) : new Date()), // Handle Timestamp or potentially legacy formats
-              createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? fromUnixTime(data.createdAt.seconds) : undefined),
-              updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? fromUnixTime(data.updatedAt.seconds) : undefined),
-            } as Receipt;
-
-          });
-          setAllReceipts(fetchedReceipts);
-          setIsLoading(false);
-        }, (error) => {
-          console.error("Error fetching receipts:", error);
-          toast({ title: "Error", description: "Could not fetch your receipts.", variant: "destructive" });
-          setIsLoading(false);
-        });
-      } catch (e) {
-        console.error("Error setting up receipts listener:", e);
-        toast({title: "Setup Error", description: "Failed to initialize receipt tracking.", variant: "destructive"});
-        setIsLoading(false);
-      }
-    } else {
-      setIsLoading(false);
-      setAllReceipts([]);
+    if (authLoading) {
+        setIsLoadingData(true);
+        return;
     }
+    if (!user) {
+      setIsLoadingData(false);
+      setAllReceipts([]);
+      return;
+    }
+
+    setIsLoadingData(true);
+    const receiptsCollectionRef = collection(db, "users", user.uid, "receipts");
+    const q = query(receiptsCollectionRef, orderBy("date", "desc"));
+    
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      const fetchedReceipts = querySnapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        let receiptDate = data.date;
+        if (receiptDate instanceof Timestamp) receiptDate = receiptDate.toDate();
+        else if (receiptDate && typeof receiptDate.seconds === 'number') receiptDate = new Timestamp(receiptDate.seconds, receiptDate.nanoseconds).toDate();
+        else if (typeof receiptDate === 'string') receiptDate = parseISO(receiptDate);
+        else if (!(receiptDate instanceof Date)) receiptDate = new Date(); // Fallback
+
+        return {
+          id: docSnap.id,
+          ...data,
+          vendor: data.vendor as string,
+          totalAmount: typeof data.totalAmount === 'number' ? data.totalAmount : parseFloat(data.totalAmount || '0'),
+          costType: data.costType as CostType,
+          assignedToEventId: data.assignedToEventId as string | undefined,
+          assignedToMenuId: data.assignedToMenuId as string | undefined,
+          notes: data.notes as string | undefined,
+          imageUrl: data.imageUrl as string | undefined,
+          fileName: data.fileName as string | undefined,
+          date: isValid(receiptDate) ? receiptDate : new Date(), // Ensure valid date
+          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
+        } as Receipt;
+      });
+      setAllReceipts(fetchedReceipts);
+      setIsLoadingData(false);
+    }, (error) => {
+      console.error("ReceiptsPage: Error fetching receipts:", error);
+      toast({ title: "Error Fetching Receipts", description: "Could not fetch your receipts. Please try again.", variant: "destructive" });
+      setIsLoadingData(false);
+      setAllReceipts([]);
+    });
     
     return () => {
-      if (unsubscribe) {
+        console.log("ReceiptsPage: Unsubscribing from receipts listener.");
         unsubscribe();
-      }
     };
-  }, [user, toast]);
+  }, [user, authLoading, toast]);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -187,9 +189,10 @@ export default function ReceiptsPage() {
           setHasCameraPermission(true);
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
+            await videoRef.current.play().catch(playError => console.warn("ReceiptsPage: Video play interrupted or failed:", playError));
           }
         } catch (error) {
-          console.error('Error accessing camera:', error);
+          console.error('ReceiptsPage: Error accessing camera:', error);
           setHasCameraPermission(false);
           toast({
             variant: 'destructive',
@@ -216,8 +219,9 @@ export default function ReceiptsPage() {
   const filteredReceipts = useMemo(() => {
     return allReceipts.filter(receipt => {
       const matchesCostType = filterCostType === 'all' || receipt.costType === filterCostType;
+      
       let receiptDate = receipt.date;
-      if (!(receiptDate instanceof Date) && receiptDate) { // Ensure receiptDate is not undefined
+      if (!(receiptDate instanceof Date) && receiptDate) {
           receiptDate = new Date(receiptDate as any);
       }
       if (!isValid(receiptDate)) return false; 
@@ -233,16 +237,16 @@ export default function ReceiptsPage() {
     setEditingReceipt(receiptToEdit);
     setCapturedImageDataUri(receiptToEdit?.imageUrl || null);
     setFileNameForForm(receiptToEdit?.fileName || null);
-    // Reset camera preview state when opening upload dialog
     setIsPreviewCapture(false); 
-    // If editing and there's an image, clear the file input state so user must re-upload or capture
     if (fileInputRef.current) fileInputRef.current.value = "";
 
     if (receiptToEdit) {
-      let dateToSet = new Date();
+      let dateToSet = new Date(); // Default
       if (receiptToEdit.date) {
-          if (receiptToEdit.date instanceof Timestamp) dateToSet = receiptToEdit.date.toDate();
-          else if (receiptToEdit.date instanceof Date && isValid(receiptToSet)) dateToSet = receiptToEdit.date; // Check if it's already a valid Date object
+          const parsedDate = receiptToEdit.date instanceof Timestamp 
+                             ? receiptToEdit.date.toDate() 
+                             : new Date(receiptToEdit.date as any);
+          if (isValid(parsedDate)) dateToSet = parsedDate;
       }
       form.reset({
         vendor: receiptToEdit.vendor,
@@ -324,20 +328,20 @@ export default function ReceiptsPage() {
         if (result.vendor) form.setValue('vendor', result.vendor);
         if (result.date) {
             try {
-            let parsedDate = parseISO(result.date); // Expects YYYY-MM-DD
-            if (!isValid(parsedDate)) { // Fallback for other common formats if parseISO fails
-                parsedDate = new Date(result.date.replace(/-/g, '/')); 
+              let parsedDate = parseISO(result.date); 
+              if (!isValid(parsedDate)) { 
+                  parsedDate = new Date(result.date.replace(/-/g, '/')); 
+              }
+              if (isValid(parsedDate)) {
+                  form.setValue('date', parsedDate);
+              } else {
+                  console.warn("ReceiptsPage: AI returned unparsable date format:", result.date);
+                  toast({ title: "AI Autofill", description: "Could not parse date from AI. Please set manually.", variant: "default" });
+              }
+            } catch (e) { 
+                  console.warn("ReceiptsPage: Error processing date from AI:", result.date, e);
+                  toast({ title: "AI Autofill", description: "Error processing date from AI. Please set manually.", variant: "default" });
             }
-            if (isValid(parsedDate)) {
-                 form.setValue('date', parsedDate);
-            } else {
-                console.warn("AI returned unparsable date format for receipt:", result.date);
-                toast({ title: "AI Autofill", description: "Could not parse date from AI. Please set manually.", variant: "default" });
-            }
-           } catch (e) { 
-                console.warn("Error processing date from AI for receipt:", result.date, e);
-                toast({ title: "AI Autofill", description: "Error processing date from AI. Please set manually.", variant: "default" });
-           }
         }
         if (result.totalAmount !== undefined && result.totalAmount !== null) form.setValue('totalAmount', result.totalAmount);
         if (result.suggestedCostType) form.setValue('costType', result.suggestedCostType);
@@ -346,10 +350,12 @@ export default function ReceiptsPage() {
         toast({ title: "AI Autofill", description: "Could not extract all information. Please fill manually.", variant: "default" });
       }
     } catch (error: any) {
-      console.error("Error parsing receipt with AI:", error);
+      console.error("ReceiptsPage: Error parsing receipt with AI:", error);
       let errorMsg = `Failed to process receipt with AI. ${error.message}`;
       if (error.message && error.message.toLowerCase().includes('api key not valid')) {
         errorMsg = "AI Service Error: Invalid API Key for receipt parsing.";
+      } else if (error.message && error.message.toLowerCase().includes('quota')) {
+        errorMsg = "AI Service Error: Quota exceeded. Please try again later.";
       }
       toast({ title: "AI Error", description: errorMsg, variant: "destructive" });
     } finally {
@@ -368,7 +374,7 @@ export default function ReceiptsPage() {
         }
         return new Blob([ab], { type: mimeString });
     } catch (e) {
-        console.error("Error converting data URI to Blob:", e);
+        console.error("ReceiptsPage: Error converting data URI to Blob:", e);
         toast({title: "Image Error", description: "Could not process captured image.", variant: "destructive"});
         return null;
     }
@@ -377,10 +383,12 @@ export default function ReceiptsPage() {
   const onSubmitReceipt = async (data: ReceiptFormValues) => {
     if (!user) {
       toast({ title: "Error", description: "You must be logged in.", variant: "destructive" });
+      setIsSaving(false);
       return;
     }
     if (!capturedImageDataUri && !editingReceipt?.imageUrl) {
       toast({ title: "Image Required", description: "Please capture or upload a receipt image.", variant: "destructive" });
+      setIsSaving(false);
       return;
     }
     setIsSaving(true);
@@ -388,20 +396,18 @@ export default function ReceiptsPage() {
     const originalFileName = fileNameForForm || (editingReceipt?.fileName) || `receipt_${Date.now()}.jpg`;
 
     try {
-      // Generate a new ID upfront if not editing, so the image path is stable
       const receiptIdForPath = editingReceipt?.id || doc(collection(db, `users/${user.uid}/receipts`)).id;
       const receiptDocRef = doc(db, "users", user.uid, "receipts", receiptIdForPath);
 
 
       if (capturedImageDataUri && (!editingReceipt || capturedImageDataUri !== editingReceipt.imageUrl)) {
-        // Delete old image if editing and new image provided
         if (editingReceipt?.imageUrl && editingReceipt.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
           try {
              const oldImageRef: StorageReference = storageRef(storage, editingReceipt.imageUrl);
             await deleteObject(oldImageRef);
-          } catch (e: any) { 
-            if (e.code !== 'storage/object-not-found') {
-                console.warn("ReceiptsPage: Could not delete old receipt image during update:", e.message);
+          } catch (deleteError: any) { 
+            if (deleteError.code !== 'storage/object-not-found') {
+                console.warn("ReceiptsPage: Could not delete old receipt image during update:", deleteError.message);
             }
           }
         }
@@ -409,24 +415,25 @@ export default function ReceiptsPage() {
         const blob = dataURIToBlob(capturedImageDataUri);
         if (!blob) throw new Error("Failed to convert image data for upload.");
 
-        // Sanitize filename for storage path
         const imagePath = `users/${user.uid}/receipts/${receiptIdForPath}/${originalFileName.replace(/[^a-zA-Z0-9_.-]/g, '_')}`;
         const imageStorageRefInstance = storageRef(storage, imagePath);
         
         const uploadTask = uploadBytesResumable(imageStorageRefInstance, blob);
         await new Promise<void>((resolve, reject) => {
           uploadTask.on('state_changed', 
-            (snapshot) => { /* Optional: track progress */ }, 
+            null,
             (error) => { 
-              console.error("Receipt image upload error:", error); 
+              console.error("ReceiptsPage: Receipt image upload error:", error); 
+              toast({ title: "Image Upload Failed", description: error.message, variant: "destructive" });
               reject(error); 
             },
             async () => {
               try {
                 imageUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
                 resolve();
-              } catch (getUrlError) {
-                console.error("Error getting download URL for receipt image:", getUrlError);
+              } catch (getUrlError: any) {
+                console.error("ReceiptsPage: Error getting download URL for receipt image:", getUrlError);
+                toast({ title: "Image URL Error", description: getUrlError.message, variant: "destructive" });
                 reject(getUrlError);
               }
             }
@@ -442,12 +449,14 @@ export default function ReceiptsPage() {
         fileName: originalFileName,
         updatedAt: serverTimestamp(),
       };
+      
+      delete (receiptDataToSave as any).id; // Ensure ID is not part of the data payload for set/update
 
       if (editingReceipt) {
         await updateDoc(receiptDocRef, receiptDataToSave);
         toast({ title: 'Receipt Updated', description: `Receipt from "${data.vendor}" has been updated.` });
       } else {
-        await setDoc(receiptDocRef, { ...receiptDataToSave, id: receiptDocRef.id, createdAt: serverTimestamp() });
+        await setDoc(receiptDocRef, { ...receiptDataToSave, createdAt: serverTimestamp() }); // No need to pass id explicitly if docRef is created with ID
         toast({ title: 'Receipt Added', description: `Receipt from "${data.vendor}" has been added.` });
       }
       
@@ -459,7 +468,7 @@ export default function ReceiptsPage() {
       if (fileInputRef.current) fileInputRef.current.value = ""; 
 
     } catch (error: any) {
-      console.error('Error saving receipt:', error);
+      console.error('ReceiptsPage: Error saving receipt:', error);
       toast({ title: 'Save Failed', description: `Could not save receipt. ${error.message}`, variant: 'destructive' });
     } finally {
       setIsSaving(false);
@@ -477,28 +486,27 @@ export default function ReceiptsPage() {
         return;
     }
 
-    if (window.confirm(`Are you sure you want to delete the receipt from "${receiptToDelete?.vendor}"?`)) {
-      setIsSaving(true);
-      try {
-        // Delete image from Storage if it exists
-        if (receiptToDelete.imageUrl && receiptToDelete.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
-          try {
-            const imageRefToDelete: StorageReference = storageRef(storage, receiptToDelete.imageUrl);
-            await deleteObject(imageRefToDelete);
-          } catch (e: any) {
-            if (e.code !== 'storage/object-not-found') {
-                console.warn("ReceiptsPage: Could not delete receipt image from storage during receipt deletion:", e.message);
-            }
+    if (!window.confirm(`Are you sure you want to delete the receipt from "${receiptToDelete?.vendor}"?`)) return;
+    
+    setIsSaving(true);
+    try {
+      if (receiptToDelete.imageUrl && receiptToDelete.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
+        try {
+          const imageRefToDelete: StorageReference = storageRef(storage, receiptToDelete.imageUrl);
+          await deleteObject(imageRefToDelete);
+        } catch (e: any) {
+          if (e.code !== 'storage/object-not-found') {
+              console.warn("ReceiptsPage: Could not delete receipt image from storage during receipt deletion:", e.message);
           }
         }
-        await deleteDoc(doc(db, "users", user.uid, "receipts", receiptId));
-        toast({ title: 'Receipt Deleted', description: `Receipt from "${receiptToDelete?.vendor}" removed.`, variant: 'destructive' });
-      } catch (error: any) {
-        console.error("Error deleting receipt:", error);
-        toast({ title: "Delete Error", description: `Could not delete receipt. ${error.message}`, variant: "destructive" });
-      } finally {
-        setIsSaving(false);
       }
+      await deleteDoc(doc(db, "users", user.uid, "receipts", receiptId));
+      toast({ title: 'Receipt Deleted', description: `Receipt from "${receiptToDelete?.vendor}" removed.`, variant: 'destructive' });
+    } catch (error: any) {
+      console.error("ReceiptsPage: Error deleting receipt:", error);
+      toast({ title: "Delete Error", description: `Could not delete receipt. ${error.message}`, variant: "destructive" });
+    } finally {
+      setIsSaving(false);
     }
   };
   
@@ -510,7 +518,7 @@ export default function ReceiptsPage() {
     const summary: { [key in CostType]?: number } = {};
     costTypes.forEach(type => summary[type] = 0); 
     filteredReceipts.forEach(receipt => {
-      if (costTypes.includes(receipt.costType)) { // Ensure costType is valid
+      if (costTypes.includes(receipt.costType)) {
          summary[receipt.costType] = (summary[receipt.costType] || 0) + receipt.totalAmount;
       }
     });
@@ -570,10 +578,12 @@ export default function ReceiptsPage() {
         const response = await getTaxAdvice(data);
         setTaxAdviceResponse(response);
     } catch (error: any) {
-        console.error("Error getting tax advice:", error);
+        console.error("ReceiptsPage: Error getting tax advice:", error);
         let errorMsg = `Failed to get tax advice. ${error.message}`;
         if (error.message && error.message.toLowerCase().includes('api key not valid')) {
           errorMsg = "AI Service Error: Invalid API Key for tax advice.";
+        } else if (error.message && error.message.toLowerCase().includes('quota')) {
+          errorMsg = "AI Service Error: Quota exceeded. Please try again later.";
         }
         toast({ title: "AI Error", description: errorMsg, variant: "destructive" });
         setTaxAdviceResponse({ advice: "Could not retrieve advice at this time.", disclaimer: "Please try again later."});
@@ -588,7 +598,7 @@ export default function ReceiptsPage() {
     setFilterEndDate(undefined);
   };
 
-  if (isLoading && (!user || allReceipts.length === 0)) { 
+  if (authLoading || isLoadingData) { 
     return (
       <div className="flex justify-center items-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" data-ai-hint="loading spinner"/>
@@ -596,6 +606,16 @@ export default function ReceiptsPage() {
       </div>
     );
   }
+  
+  if (!user) {
+     return (
+        <div className="text-center py-10">
+            <InfoIcon className="mx-auto h-12 w-12 text-muted-foreground"/>
+            <p className="mt-4 text-muted-foreground">Please log in to manage your receipts.</p>
+        </div>
+    );
+  }
+
 
   return (
     <div className="space-y-8">
@@ -607,8 +627,8 @@ export default function ReceiptsPage() {
             <Button onClick={() => openUploadDialog()} disabled={isSaving || isParsingReceipt}>
                 <PlusCircle className="mr-2 h-5 w-5" /> Add New Receipt
             </Button>
-            {Dialog && ( // Conditionally render tax advice button
-              <Button variant="outline" onClick={() => { taxForm.reset(); setTaxAdviceResponse(null); setIsTaxAdviceDialogOpen(true);}}>
+            {Dialog && ( 
+              <Button variant="outline" onClick={() => { taxForm.reset(); setTaxAdviceResponse(null); setIsTaxAdviceDialogOpen(true);}} disabled={isSaving || isParsingReceipt || isFetchingTaxAdvice}>
                   <MessageCircleQuestion className="mr-2 h-5 w-5" /> Get Tax Advice
               </Button>
             )}
@@ -683,6 +703,8 @@ export default function ReceiptsPage() {
               setFileNameForForm(null);
               setIsPreviewCapture(false);
               if (fileInputRef.current) fileInputRef.current.value = "";
+              form.reset(); // Reset form when dialog closes
+              setEditingReceipt(null);
           }
         }}>
           <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -696,7 +718,7 @@ export default function ReceiptsPage() {
                   <FormLabel>Receipt Image</FormLabel>
                   <div className="flex flex-col sm:flex-row items-center gap-2">
                       {CameraDialog && (
-                        <Button type="button" variant="outline" onClick={() => { setHasCameraPermission(null); setIsPreviewCapture(false); setIsCameraDialogOpen(true);}} className="w-full sm:w-auto">
+                        <Button type="button" variant="outline" onClick={() => { setHasCameraPermission(null); setIsPreviewCapture(false); setIsCameraDialogOpen(true);}} className="w-full sm:w-auto" disabled={isSaving || isParsingReceipt}>
                             <Camera className="mr-2 h-4 w-4"/> Capture with Camera
                         </Button>
                       )}
@@ -708,6 +730,7 @@ export default function ReceiptsPage() {
                           className="w-full sm:flex-1"
                           onChange={handleFileSelected}
                           ref={fileInputRef}
+                          disabled={isSaving || isParsingReceipt}
                         />
                   </div>
                    {capturedImageDataUri && (
@@ -734,7 +757,7 @@ export default function ReceiptsPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Vendor Name</FormLabel>
-                      <FormControl><Input placeholder="e.g., Fresh Produce Market" {...field} /></FormControl>
+                      <FormControl><Input placeholder="e.g., Fresh Produce Market" {...field} disabled={isSaving || isParsingReceipt} /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -752,6 +775,7 @@ export default function ReceiptsPage() {
                               <Button
                                 variant={'outline'}
                                 className={cn('w-full pl-3 text-left font-normal', !field.value && 'text-muted-foreground')}
+                                disabled={isSaving || isParsingReceipt}
                               >
                                 {field.value ? format(field.value, 'PPP') : <span>Pick a date</span>}
                                 <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
@@ -772,7 +796,7 @@ export default function ReceiptsPage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Total Amount ($)</FormLabel>
-                        <FormControl><Input type="number" step="0.01" placeholder="e.g., 45.99" {...field} /></FormControl>
+                        <FormControl><Input type="number" step="0.01" placeholder="e.g., 45.99" {...field} disabled={isSaving || isParsingReceipt} /></FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -784,7 +808,7 @@ export default function ReceiptsPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Cost Type</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value} disabled={isSaving || isParsingReceipt}>
                         <FormControl>
                           <SelectTrigger>
                             <SelectValue placeholder="Select a cost type" />
@@ -807,7 +831,7 @@ export default function ReceiptsPage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Assign to Event ID (Optional)</FormLabel>
-                        <FormControl><Input placeholder="e.g., event123" {...field} /></FormControl>
+                        <FormControl><Input placeholder="e.g., event123" {...field} disabled={isSaving || isParsingReceipt} /></FormControl>
                         <FormDescription>Link this expense to a specific event.</FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -819,7 +843,7 @@ export default function ReceiptsPage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Assign to Menu ID (Optional)</FormLabel>
-                        <FormControl><Input placeholder="e.g., menu456" {...field} /></FormControl>
+                        <FormControl><Input placeholder="e.g., menu456" {...field} disabled={isSaving || isParsingReceipt} /></FormControl>
                         <FormDescription>Link this expense to a specific menu.</FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -832,7 +856,7 @@ export default function ReceiptsPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Notes (Optional)</FormLabel>
-                      <FormControl><Textarea placeholder="e.g., Specific items, reason for expense" {...field} /></FormControl>
+                      <FormControl><Textarea placeholder="e.g., Specific items, reason for expense" {...field} disabled={isSaving || isParsingReceipt} /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -912,7 +936,7 @@ export default function ReceiptsPage() {
                           render={({ field }) => (
                               <FormItem>
                                   <FormLabel>Your Country/Region</FormLabel>
-                                  <FormControl><Input placeholder="e.g., Australia, California, UK" {...field} /></FormControl>
+                                  <FormControl><Input placeholder="e.g., Australia, California, UK" {...field} disabled={isFetchingTaxAdvice} /></FormControl>
                                   <FormMessage />
                               </FormItem>
                           )}
@@ -923,7 +947,7 @@ export default function ReceiptsPage() {
                           render={({ field }) => (
                               <FormItem>
                                   <FormLabel>Your Tax Question</FormLabel>
-                                  <FormControl><Textarea placeholder="e.g., What are common tax deductions for private chefs?" {...field} /></FormControl>
+                                  <FormControl><Textarea placeholder="e.g., What are common tax deductions for private chefs?" {...field} disabled={isFetchingTaxAdvice} /></FormControl>
                                   <FormMessage />
                               </FormItem>
                           )}
@@ -955,7 +979,7 @@ export default function ReceiptsPage() {
           <CardTitle>Expenses Summary</CardTitle>
         </CardHeader>
         <CardContent>
-          {isLoading && filteredReceipts.length === 0 ? (
+          {(authLoading || isLoadingData) && filteredReceipts.length === 0 && !allReceipts.length ? (
              <div className="flex justify-center items-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-primary" data-ai-hint="loading icon"/>
               <p className="ml-2">Loading summary...</p>
@@ -975,7 +999,7 @@ export default function ReceiptsPage() {
                 )
               ))}
                {Object.values(expensesByCostType).every(val => (val ?? 0) === 0) && filteredReceipts.length > 0 && <p className="text-xs text-muted-foreground">No expenses for selected filters in these cost types.</p>}
-               {filteredReceipts.length === 0 && <p className="text-xs text-muted-foreground">No expenses to summarize.</p>}
+               {filteredReceipts.length === 0 && allReceipts.length === 0 && <p className="text-xs text-muted-foreground">No expenses to summarize.</p>}
             </div>
             <div className="flex flex-col justify-end items-end pt-4 md:pt-0">
               <div className="text-lg font-semibold flex items-center">
@@ -997,7 +1021,7 @@ export default function ReceiptsPage() {
           <CardTitle>Uploaded Receipts</CardTitle>
         </CardHeader>
         <CardContent>
-          {isLoading && allReceipts.length === 0 ? (
+          {(authLoading || isLoadingData) && allReceipts.length === 0 ? (
              <div className="flex justify-center items-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-primary" data-ai-hint="loading data"/>
               <p className="ml-2">Loading receipts...</p>
@@ -1026,11 +1050,13 @@ export default function ReceiptsPage() {
                     <TableCell className="text-xs">
                         {receipt.assignedToEventId && <div>Event: {receipt.assignedToEventId.substring(0,8)}...</div>}
                         {receipt.assignedToMenuId && <div>Menu: {receipt.assignedToMenuId.substring(0,8)}...</div>}
+                        {(!receipt.assignedToEventId && !receipt.assignedToMenuId) && <span className="text-xs text-muted-foreground/70">N/A</span>}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground truncate max-w-[150px] sm:max-w-[200px]">
                       {receipt.fileName && <div className="font-medium text-foreground">{receipt.fileName.length > 20 ? receipt.fileName.substring(0,17) + '...' : receipt.fileName}</div>}
                       {receipt.imageUrl && <a href={receipt.imageUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 hover:underline">(View Image)</a>}
                       {receipt.notes && <div className="italic">{receipt.notes.length > 30 ? receipt.notes.substring(0,27) + '...' : receipt.notes}</div>}
+                      {(!receipt.fileName && !receipt.notes) && <span className="text-xs text-muted-foreground/70">N/A</span>}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end space-x-1">
@@ -1051,7 +1077,7 @@ export default function ReceiptsPage() {
             </div>
           ) : (
             <p className="text-muted-foreground text-center py-8">
-                {allReceipts.length === 0 ? "No receipts uploaded yet. Start by adding your first expense!" : "No receipts match the current filters. Try adjusting or clearing them."}
+                {allReceipts.length === 0 && !authLoading && !isLoadingData ? "No receipts uploaded yet. Start by adding your first expense!" : "No receipts match the current filters. Try adjusting or clearing them."}
             </p>
           )}
         </CardContent>
@@ -1087,7 +1113,7 @@ export default function ReceiptsPage() {
                 <ul className="list-['-_'] list-inside ml-4">
                     <li>If a customer cancels more than 20 days before the event, a 50% refund is typically processed.</li>
                     <li>If a customer cancels less than 20 days before the event, a 20% refund is processed. In this case, 15% of the total event cost may go to the chef and 15% to FindAChef (subject to terms).</li>
-                    <li>Refer to the full <Link href="/terms#cancellation" className="underline hover:text-primary">Terms of Service</Link> for complete cancellation policy details.</li>
+                    <li>Refer to the full <a href="/terms" className="underline hover:text-primary">Terms of Service</a> for complete cancellation policy details.</li>
                 </ul>
             </li>
             <li>Always ensure all receipts for an event are uploaded promptly for accurate cost tracking and potential tax purposes.</li>
@@ -1096,7 +1122,7 @@ export default function ReceiptsPage() {
       </Alert>
 
       <div className="flex justify-end mt-6">
-        <Button onClick={handleExport} variant="outline" disabled={filteredReceipts.length === 0 || isLoading}>
+        <Button onClick={handleExport} variant="outline" disabled={filteredReceipts.length === 0 || isLoadingData}>
           <Download className="mr-2 h-5 w-5" /> Export Filtered Data (CSV)
         </Button>
       </div>

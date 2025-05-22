@@ -21,9 +21,9 @@ import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { MenuCard } from '@/components/menu-card';
-import type { Menu, Option, ShoppingListItem, MenuIngredient, AppUserProfileContext } from '@/types';
+import type { Menu, Option, ShoppingListItem, MenuIngredient, AppUserProfileContext, ChefProfile } from '@/types';
 import { useToast } from '@/hooks/use-toast';
-import { PlusCircle, Edit, Trash2, NotebookText, Eye, EyeOff, ShoppingCart, AlertCircle, Sparkles, UploadCloud, Image as ImageIconLucide, Loader2, PackagePlus, PackageMinus, Calculator } from 'lucide-react';
+import { PlusCircle, Edit, Trash2, NotebookText, Eye, EyeOff, ShoppingCart, AlertCircle, Sparkles, UploadCloud, Loader2, PackagePlus, PackageMinus, Calculator, InfoIcon } from 'lucide-react'; // Added InfoIcon
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAuth } from '@/context/AuthContext';
 import { db, storage } from '@/lib/firebase';
@@ -81,9 +81,9 @@ type MenuFormValues = z.infer<typeof menuFormSchema>;
 
 
 export default function MenuManagementPage() {
-  const { user, userProfile, isChefSubscribed } = useAuth();
+  const { user, userProfile, isChefSubscribed, loading: authLoading } = useAuth();
   const [menus, setMenus] = useState<Menu[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingData, setIsLoadingData] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingMenu, setEditingMenu] = useState<Menu | null>(null);
@@ -135,46 +135,44 @@ export default function MenuManagementPage() {
 
 
   useEffect(() => {
-    let unsubscribe: Unsubscribe | undefined;
-    if (user) {
-      setIsLoading(true);
-      const menusCollectionRef = collection(db, "menus");
-      const q = query(menusCollectionRef, where("chefId", "==", user.uid), orderBy("createdAt", "desc"));
-      
-      try {
-        unsubscribe = onSnapshot(q, (querySnapshot) => {
-          const fetchedMenus = querySnapshot.docs.map(docSnap => {
-            const data = docSnap.data();
-             return { 
-              id: docSnap.id, 
-              ...data,
-              createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
-              updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
-            } as Menu;
-          });
-          setMenus(fetchedMenus);
-          setIsLoading(false);
-        }, (error) => {
-          console.error("Error fetching menus:", error);
-          toast({ title: "Error", description: "Could not fetch your menus.", variant: "destructive" });
-          setIsLoading(false);
-        });
-      } catch (e) {
-        console.error("Error setting up menu listener:", e);
-        toast({title: "Setup Error", description: "Failed to initialize menu tracking.", variant: "destructive"});
-        setIsLoading(false);
-      }
-    } else {
-      setIsLoading(false);
-      setMenus([]);
+    if (authLoading) {
+      setIsLoadingData(true);
+      return;
     }
+    if (!user) {
+      setIsLoadingData(false);
+      setMenus([]);
+      return;
+    }
+
+    setIsLoadingData(true);
+    const menusCollectionRef = collection(db, "menus");
+    const q = query(menusCollectionRef, where("chefId", "==", user.uid), orderBy("createdAt", "desc"));
+    
+    const unsubscribe = onSnapshot(q, (querySnapshot) => {
+      const fetchedMenus = querySnapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+          return { 
+          id: docSnap.id, 
+          ...data,
+          createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
+        } as Menu;
+      });
+      setMenus(fetchedMenus);
+      setIsLoadingData(false);
+    }, (error) => {
+      console.error("MenuManagementPage: Error fetching menus:", error);
+      toast({ title: "Error Fetching Menus", description: "Could not fetch your menus. Please try again later.", variant: "destructive" });
+      setIsLoadingData(false);
+      setMenus([]);
+    });
     
     return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
+      console.log("MenuManagementPage: Unsubscribing from menus listener.");
+      unsubscribe();
     };
-  }, [user, toast]);
+  }, [user, authLoading, toast]);
 
   const handleMenuImageFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -196,10 +194,12 @@ export default function MenuManagementPage() {
   const onSubmit = async (data: MenuFormValues) => {
     if (!user || !userProfile) {
       toast({ title: "Authentication Error", description: "You must be logged in to manage menus.", variant: "destructive" });
+      setIsSaving(false);
       return;
     }
-     if (data.isPublic && !isChefSubscribed && !(userProfile as AppUserProfileContext).isAdmin) {
+     if (data.isPublic && !isChefSubscribed && !(userProfile as ChefProfile)?.isAdmin) {
         toast({title: "Subscription Required", description: "An active subscription is needed to publish menus publicly.", variant: "destructive"});
+        setIsSaving(false);
         return;
     }
     setIsSaving(true);
@@ -213,10 +213,9 @@ export default function MenuManagementPage() {
           try {
             const oldImageRef: StorageReference = storageRef(storage, editingMenu.imageUrl);
             await deleteObject(oldImageRef);
-            console.log("MenuManagement: Deleted old menu image.");
-          } catch (e: any) {
-            if (e.code !== 'storage/object-not-found') {
-              console.warn("MenuManagement: Could not delete old menu image during update:", e.message);
+          } catch (deleteError: any) {
+            if (deleteError.code !== 'storage/object-not-found') {
+              console.warn("MenuManagementPage: Could not delete old menu image during update:", deleteError.message);
             }
           }
         }
@@ -232,24 +231,23 @@ export default function MenuManagementPage() {
           uploadTask.on('state_changed',
             null,
             (error) => {
-              console.error("Menu image upload error:", error);
-              toast({ title: "Upload Failed", description: `Image upload failed: ${error.message}`, variant: "destructive" });
+              console.error("MenuManagementPage: Menu image upload error:", error);
+              toast({ title: "Image Upload Failed", description: `Image upload failed: ${error.message}`, variant: "destructive" });
               reject(error);
             },
             async () => {
               try {
                 imageUrlToSave = await getDownloadURL(uploadTask.snapshot.ref);
-                console.log("MenuManagement: New image uploaded, URL:", imageUrlToSave);
                 resolve();
               } catch (getUrlError: any) {
-                console.error("Error getting download URL for menu image:", getUrlError);
-                toast({ title: "Upload Failed", description: `Failed to get image URL: ${getUrlError.message}`, variant: "destructive" });
+                console.error("MenuManagementPage: Error getting download URL for menu image:", getUrlError);
+                toast({ title: "Image URL Error", description: `Failed to get image URL: ${getUrlError.message}`, variant: "destructive" });
                 reject(getUrlError);
               }
             }
           );
         });
-      } // End of image upload block
+      }
 
       const finalMenuIngredients = data.menuIngredients?.map(ing => ({
         ...ing,
@@ -260,7 +258,7 @@ export default function MenuManagementPage() {
       const paxForCalc = Math.max(1, Number(data.pax) || 1);
       const costPerHeadFromIngredients = totalIngredientCost / paxForCalc;
 
-      const menuDataToSave: Omit<Menu, 'id' | 'createdAt' | 'updatedAt'> & { chefId: string; chefName: string; updatedAt: any; createdAt?: any; id?: string; } = {
+      const menuDataToSave: Partial<Menu> & { chefId: string; chefName: string; updatedAt: any; createdAt?: any; id?: string; } = { // Use Partial<Menu>
         title: data.title,
         description: data.description,
         cuisine: data.cuisine,
@@ -272,24 +270,25 @@ export default function MenuManagementPage() {
         imageUrl: imageUrlToSave,
         dataAiHint: data.dataAiHint,
         chefId: user.uid,
-        chefName: (userProfile as AppUserProfileContext).name || user.displayName || "Chef",
-        chefProfilePictureUrl: (userProfile as AppUserProfileContext).profilePictureUrl || user.photoURL || undefined,
+        chefName: userProfile.name || user.displayName || "Chef",
+        chefProfilePictureUrl: userProfile.profilePictureUrl || user.photoURL || undefined,
         menuIngredients: finalMenuIngredients,
         calculatedTotalIngredientCost: totalIngredientCost,
         calculatedCostPricePerHead: costPerHeadFromIngredients,
         adminStatus: editingMenu?.adminStatus || 'pending', 
         updatedAt: serverTimestamp(),
       };
+      
+      delete menuDataToSave.id; // Firestore handles ID for new docs, or uses existing for update
 
       if (editingMenu) {
         const menuDocRef = doc(db, "menus", editingMenu.id);
         await updateDoc(menuDocRef, menuDataToSave);
         toast({ title: 'Menu Updated', description: `"${data.title}" has been successfully updated.` });
       } else {
-        menuDataToSave.id = menuIdForPath;
         menuDataToSave.createdAt = serverTimestamp();
-        const newMenuDocRef = doc(db, "menus", menuIdForPath);
-        await setDoc(newMenuDocRef, menuDataToSave);
+        const newMenuDocRef = doc(db, "menus", menuIdForPath); // Use pre-generated ID for path consistency
+        await setDoc(newMenuDocRef, menuDataToSave); // Use setDoc with the ID for new menu
         toast({ title: 'Menu Created', description: `"${data.title}" has been successfully created.` });
       }
       
@@ -301,13 +300,12 @@ export default function MenuManagementPage() {
       replaceIngredients([]);
 
     } catch (error: any) {
-      console.error('Menu save operation failed:', error);
+      console.error('MenuManagementPage: Menu save operation failed:', error);
       toast({ title: 'Save Failed', description: `Could not save menu: ${error.message}`, variant: 'destructive' });
-      // Do not reset dialog on critical save failure, allow user to retry or copy data
     } finally {
       setIsSaving(false);
     }
-  }; // End of onSubmit function
+  }; 
 
   const handleEdit = (menuId: string) => {
     const menuToEdit = menus.find(menu => menu.id === menuId);
@@ -343,29 +341,28 @@ export default function MenuManagementPage() {
         return;
     }
 
-    if (window.confirm(`Are you sure you want to delete the menu "${menuToDelete?.title}"?`)) {
-      setIsSaving(true);
-      try {
-        if (menuToDelete.imageUrl && menuToDelete.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
-          try {
-            const imageRefToDelete: StorageReference = storageRef(storage, menuToDelete.imageUrl);
-            await deleteObject(imageRefToDelete);
-            console.log("MenuManagement: Deleted menu image from storage.");
-          } catch (e: any) {
-            if (e.code !== 'storage/object-not-found') {
-               console.warn("MenuManagement: Could not delete menu image from storage during menu deletion:", e.message);
-            }
+    if (!window.confirm(`Are you sure you want to delete the menu "${menuToDelete?.title}"?`)) return;
+    
+    setIsSaving(true);
+    try {
+      if (menuToDelete.imageUrl && menuToDelete.imageUrl.startsWith('https://firebasestorage.googleapis.com')) {
+        try {
+          const imageRefToDelete: StorageReference = storageRef(storage, menuToDelete.imageUrl);
+          await deleteObject(imageRefToDelete);
+        } catch (e: any) {
+          if (e.code !== 'storage/object-not-found') {
+              console.warn("MenuManagementPage: Could not delete menu image from storage during menu deletion:", e.message);
           }
         }
-
-        await deleteDoc(doc(db, "menus", menuId));
-        toast({ title: 'Menu Deleted', description: `"${menuToDelete?.title}" has been deleted.`, variant: 'destructive' });
-      } catch (error: any) { 
-        console.error("Error deleting menu:", error);
-        toast({ title: "Delete Error", description: `Could not delete menu. ${error.message}`, variant: "destructive" });
-      } finally {
-        setIsSaving(false);
       }
+
+      await deleteDoc(doc(db, "menus", menuId));
+      toast({ title: 'Menu Deleted', description: `"${menuToDelete?.title}" has been deleted.`, variant: 'destructive' });
+    } catch (error: any) { 
+      console.error("MenuManagementPage: Error deleting menu:", error);
+      toast({ title: "Delete Error", description: `Could not delete menu. ${error.message}`, variant: "destructive" });
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -405,7 +402,7 @@ export default function MenuManagementPage() {
             description: `Ingredients from "${menu.title}" added.`,
         });
     } catch (error: any) {
-        console.error("Error adding to shopping list:", error);
+        console.error("MenuManagementPage: Error adding to shopping list:", error);
         toast({
             title: 'Error',
             description: `Could not add items to shopping list. ${error.message}`,
@@ -469,10 +466,12 @@ export default function MenuManagementPage() {
         toast({ title: "AI Menu Assist", description: "Could not generate a suggestion at this time.", variant: "default" });
       }
     } catch (error: any) {
-      console.error("Error with AI Menu Assist:", error);
+      console.error("MenuManagementPage: Error with AI Menu Assist:", error);
       let errorMsg = `Failed to get AI suggestions. ${error.message}`;
       if (error.message && error.message.toLowerCase().includes('api key not valid')) {
         errorMsg = "AI Service Error: Invalid API Key for menu assist.";
+      } else if (error.message && error.message.toLowerCase().includes('quota')) {
+        errorMsg = "AI Service Error: Quota exceeded. Please try again later.";
       }
       toast({ title: "AI Error", description: errorMsg, variant: "destructive" });
     } finally {
@@ -481,9 +480,24 @@ export default function MenuManagementPage() {
   };
 
 
-  if (isLoading) {
-    return <div className="flex justify-center items-center h-64"><Loader2 className="h-8 w-8 animate-spin text-primary" data-ai-hint="loading spinner"/> Loading menus...</div>;
+  if (authLoading || isLoadingData) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" data-ai-hint="loading spinner"/> 
+        <p className="ml-2">Loading menus...</p>
+      </div>
+    );
   }
+  
+  if (!user) {
+     return (
+        <div className="text-center py-10">
+            <InfoIcon className="mx-auto h-12 w-12 text-muted-foreground"/>
+            <p className="mt-4 text-muted-foreground">Please log in to manage your menus.</p>
+        </div>
+    );
+  }
+
 
   return (
     <div className="space-y-8">
@@ -518,7 +532,7 @@ export default function MenuManagementPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Menu Title</FormLabel>
-                      <FormControl><Input placeholder="e.g., Summer BBQ Special" {...field} /></FormControl>
+                      <FormControl><Input placeholder="e.g., Summer BBQ Special" {...field} disabled={isSaving || isAiAssisting} /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -529,7 +543,7 @@ export default function MenuManagementPage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Cuisine Type</FormLabel>
-                        <FormControl><Input placeholder="e.g., Mexican, Thai, Fusion" {...field} /></FormControl>
+                        <FormControl><Input placeholder="e.g., Mexican, Thai, Fusion" {...field} disabled={isSaving || isAiAssisting} /></FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -540,7 +554,7 @@ export default function MenuManagementPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Description</FormLabel>
-                      <FormControl><Textarea placeholder="Detailed description of the menu..." {...field} className="min-h-[100px]" /></FormControl>
+                      <FormControl><Textarea placeholder="Detailed description of the menu..." {...field} className="min-h-[100px]" disabled={isSaving || isAiAssisting} /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -557,7 +571,7 @@ export default function MenuManagementPage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Sale Price per Head ($)</FormLabel>
-                        <FormControl><Input type="number" step="0.01" placeholder="75.00" {...field} /></FormControl>
+                        <FormControl><Input type="number" step="0.01" placeholder="75.00" {...field} disabled={isSaving || isAiAssisting} /></FormControl>
                          <FormDescription>The price customers will pay.</FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -569,7 +583,7 @@ export default function MenuManagementPage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Serves (PAX)</FormLabel>
-                        <FormControl><Input type="number" placeholder="e.g., 10" {...field} defaultValue={1} /></FormControl>
+                        <FormControl><Input type="number" placeholder="e.g., 10" {...field} defaultValue={1} disabled={isSaving || isAiAssisting} /></FormControl>
                         <FormDescription>Number of people this menu typically serves. Affects per-head cost calculation.</FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -588,6 +602,7 @@ export default function MenuManagementPage() {
                           accept="image/jpeg,image/png,image/webp"
                           onChange={handleMenuImageFileChange} 
                           className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20"
+                          disabled={isSaving || isAiAssisting}
                         />
                       </FormControl>
                       {menuImagePreview && (
@@ -606,7 +621,7 @@ export default function MenuManagementPage() {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Image Description Hint (for AI)</FormLabel>
-                      <FormControl><Input placeholder="e.g., italian food, pasta dish" {...field} /></FormControl>
+                      <FormControl><Input placeholder="e.g., italian food, pasta dish" {...field} disabled={isSaving || isAiAssisting} /></FormControl>
                       <FormDescription>One or two keywords to help AI understand the image content (max 2 words).</FormDescription>
                       <FormMessage />
                     </FormItem>
@@ -619,7 +634,7 @@ export default function MenuManagementPage() {
                     <Card key={field.id} className="p-4 space-y-3 bg-muted/30">
                       <div className="flex justify-between items-center">
                          <FormLabel>Ingredient {index + 1}</FormLabel>
-                         <Button type="button" variant="ghost" size="icon" onClick={() => removeIngredient(index)} className="text-destructive hover:text-destructive">
+                         <Button type="button" variant="ghost" size="icon" onClick={() => removeIngredient(index)} className="text-destructive hover:text-destructive" disabled={isSaving || isAiAssisting}>
                            <PackageMinus className="h-4 w-4" />
                          </Button>
                       </div>
@@ -630,7 +645,7 @@ export default function MenuManagementPage() {
                           render={({ field: f }) => (
                             <FormItem className="col-span-2 md:col-span-1">
                               <FormLabel className="text-xs">Name</FormLabel>
-                              <FormControl><Input placeholder="e.g., Flour" {...f} /></FormControl>
+                              <FormControl><Input placeholder="e.g., Flour" {...f} disabled={isSaving || isAiAssisting} /></FormControl>
                               <FormMessage />
                             </FormItem>
                           )}
@@ -641,7 +656,7 @@ export default function MenuManagementPage() {
                           render={({ field: f }) => (
                             <FormItem>
                               <FormLabel className="text-xs">Qty</FormLabel>
-                              <FormControl><Input type="number" step="0.01" placeholder="2.5" {...f} /></FormControl>
+                              <FormControl><Input type="number" step="0.01" placeholder="2.5" {...f} disabled={isSaving || isAiAssisting} /></FormControl>
                               <FormMessage />
                             </FormItem>
                           )}
@@ -652,7 +667,7 @@ export default function MenuManagementPage() {
                           render={({ field: f }) => (
                             <FormItem>
                               <FormLabel className="text-xs">Unit</FormLabel>
-                              <FormControl><Input placeholder="kg, pcs, L" {...f} /></FormControl>
+                              <FormControl><Input placeholder="kg, pcs, L" {...f} disabled={isSaving || isAiAssisting} /></FormControl>
                               <FormMessage />
                             </FormItem>
                           )}
@@ -663,7 +678,7 @@ export default function MenuManagementPage() {
                           render={({ field: f }) => (
                             <FormItem>
                               <FormLabel className="text-xs">Cost/Unit ($)</FormLabel>
-                              <FormControl><Input type="number" step="0.01" placeholder="5.99" {...f} /></FormControl>
+                              <FormControl><Input type="number" step="0.01" placeholder="5.99" {...f} disabled={isSaving || isAiAssisting} /></FormControl>
                               <FormMessage />
                             </FormItem>
                           )}
@@ -675,7 +690,7 @@ export default function MenuManagementPage() {
                           render={({ field: f }) => (
                             <FormItem>
                               <FormLabel className="text-xs">Notes (Optional)</FormLabel>
-                              <FormControl><Input placeholder="Brand, specific type" {...f} /></FormControl>
+                              <FormControl><Input placeholder="Brand, specific type" {...f} disabled={isSaving || isAiAssisting} /></FormControl>
                             </FormItem>
                           )}
                         />
@@ -684,7 +699,7 @@ export default function MenuManagementPage() {
                         </p>
                     </Card>
                   ))}
-                  <Button type="button" variant="outline" size="sm" onClick={() => appendIngredient({ id: uuidv4(), name: '', quantity: 1, unit: '', costPerUnit: 0, notes: '' })}>
+                  <Button type="button" variant="outline" size="sm" onClick={() => appendIngredient({ id: uuidv4(), name: '', quantity: 1, unit: '', costPerUnit: 0, notes: '' })} disabled={isSaving || isAiAssisting}>
                     <PackagePlus className="mr-2 h-4 w-4" /> Add Ingredient
                   </Button>
                   
@@ -698,7 +713,7 @@ export default function MenuManagementPage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Final Determined Cost Price per Head ($)</FormLabel>
-                        <FormControl><Input type="number" step="0.01" placeholder="30.00" {...field} value={field.value || 0} /></FormControl>
+                        <FormControl><Input type="number" step="0.01" placeholder="30.00" {...field} value={field.value || 0} disabled={isSaving || isAiAssisting} /></FormControl>
                         <FormDescription>Your internal cost per serving. You can use the calculated value above or enter your own.</FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -710,7 +725,7 @@ export default function MenuManagementPage() {
                       size="sm" 
                       className="p-0 h-auto"
                       onClick={() => form.setValue('costPrice', parseFloat(calculatedCostPricePerHead.toFixed(2)) )}
-                      disabled={(calculatedCostPricePerHead === 0 && calculatedTotalIngredientCost === 0) || isNaN(calculatedCostPricePerHead)}
+                      disabled={(calculatedCostPricePerHead === 0 && calculatedTotalIngredientCost === 0) || isNaN(calculatedCostPricePerHead) || isSaving || isAiAssisting}
                   >
                       Use Calculated Cost per Head
                   </Button>
@@ -738,6 +753,7 @@ export default function MenuManagementPage() {
                                           )
                                       );
                                   }}
+                                  disabled={isSaving || isAiAssisting}
                                   />
                               </FormControl>
                               <FormLabel className="font-normal">{option.label}</FormLabel>
@@ -757,8 +773,7 @@ export default function MenuManagementPage() {
                         <FormLabel className="text-base">Publish Menu</FormLabel>
                         <FormDescription>
                           Make this menu visible to customers on the public menu listings.
-                          {(!isChefSubscribed && field.value && !(userProfile as AppUserProfileContext)?.isAdmin) && " Public visibility requires an active subscription."}
-                          {(!isChefSubscribed && !field.value && !(userProfile as AppUserProfileContext)?.isAdmin) && " Publishing public menus requires an active subscription."}
+                          {(!isChefSubscribed && field.value && !(userProfile as ChefProfile)?.isAdmin) && " Public visibility requires an active subscription."}
                         </FormDescription>
                       </div>
                       <TooltipProvider>
@@ -768,17 +783,17 @@ export default function MenuManagementPage() {
                               <Switch
                                 checked={field.value}
                                 onCheckedChange={(checked) => {
-                                  if (checked && !isChefSubscribed && !(userProfile as AppUserProfileContext)?.isAdmin) {
+                                  if (checked && !isChefSubscribed && !(userProfile as ChefProfile)?.isAdmin) {
                                       toast({ title: "Subscription Required", description: "You need an active subscription to publish menus publicly.", variant: "destructive"});
                                       return; 
                                   }
                                   field.onChange(checked);
                                 }}
-                                disabled={isSaving || isAiAssisting || (field.value && !isChefSubscribed && !(userProfile as AppUserProfileContext)?.isAdmin && !field.value) } // Corrected disabled logic
+                                disabled={isSaving || isAiAssisting || (field.value && !isChefSubscribed && !(userProfile as ChefProfile)?.isAdmin && !field.value) }
                               />
                             </FormControl>
                           </TooltipTrigger>
-                          {(!isChefSubscribed && !(userProfile as AppUserProfileContext)?.isAdmin) && (
+                          {(!isChefSubscribed && !(userProfile as ChefProfile)?.isAdmin) && (
                             <TooltipContent>
                               <p className="flex items-center"><AlertCircle className="mr-2 h-4 w-4" />Subscription required to publish publicly.</p>
                             </TooltipContent>
@@ -792,7 +807,7 @@ export default function MenuManagementPage() {
                   <DialogClose asChild>
                       <Button type="button" variant="outline" disabled={isSaving || isAiAssisting}>Cancel</Button>
                   </DialogClose>
-                  <Button type="submit" disabled={isSaving || isAiAssisting || (form.getValues("isPublic") && !isChefSubscribed && !(userProfile as AppUserProfileContext)?.isAdmin) }>
+                  <Button type="submit" disabled={isSaving || isAiAssisting || (form.getValues("isPublic") && !isChefSubscribed && !(userProfile as ChefProfile)?.isAdmin) }>
                     {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : (editingMenu ? 'Save Changes' : 'Create Menu')}
                   </Button>
                 </DialogFooter>
@@ -817,7 +832,7 @@ export default function MenuManagementPage() {
           ))}
         </div>
       ) : (
-        !isLoading && (
+        !isLoadingData && ( // Only show if not loading and no menus
             <Card className="text-center py-12 border-dashed">
                 <CardHeader>
                     <NotebookText className="mx-auto h-12 w-12 text-muted-foreground mb-3" data-ai-hint="notebook empty" />
@@ -825,8 +840,8 @@ export default function MenuManagementPage() {
                 </CardHeader>
                 <CardContent>
                     <p className="text-muted-foreground mb-4">You haven't created any menus. Get started by adding your first one!</p>
-                    <Button onClick={openNewMenuDialog}>
-                    <PlusCircle className="mr-2 h-5 w-5" /> Create Your First Menu
+                    <Button onClick={openNewMenuDialog} disabled={isSaving || isAiAssisting}>
+                      <PlusCircle className="mr-2 h-5 w-5" /> Create Your First Menu
                     </Button>
                 </CardContent>
             </Card>
@@ -834,8 +849,5 @@ export default function MenuManagementPage() {
       )}
     </div>
   );
-
 }
-
-
     
