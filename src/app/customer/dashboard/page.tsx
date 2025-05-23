@@ -1,18 +1,17 @@
-
 'use client';
 
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { MenuCard } from '@/components/menu-card';
+import WallCard from '@/components/Wall/WallCard';
 import type { Menu, ChefProfile as ChefProfileType, ChefWallEvent, Booking } from '@/types';
-import { ArrowRight, CalendarCheck2, Send, UserCircle, Utensils, Search, Sparkles, CalendarSearch, Loader2 } from 'lucide-react';
+import { ArrowRight, CalendarCheck2, Send, Utensils, Search, Sparkles, CalendarSearch, Loader2 } from 'lucide-react';
 import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, query, where, limit, getDocs, orderBy, Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/context/AuthContext';
-import { format } from 'date-fns';
 
 export default function CustomerDashboardPage() {
   const [topMenus, setTopMenus] = useState<Menu[]>([]);
@@ -83,7 +82,7 @@ export default function CustomerDashboardPage() {
         setLoadingChefs(false);
       }
 
-      // Fetch Discover Chef Events
+      // Fetch Discover Chef Events (ONLY public chef wall events)
       setLoadingDiscoverEvents(true);
       try {
         const eventsQuery = query(
@@ -114,7 +113,7 @@ export default function CustomerDashboardPage() {
           const bookingsQuery = query(
             collection(db, "bookings"),
             where("customerId", "==", user.uid),
-            orderBy("eventDate", "desc"), // Show most recent or upcoming first
+            orderBy("eventDate", "desc"),
             limit(3)
           );
           const bookingsSnapshot = await getDocs(bookingsQuery);
@@ -130,7 +129,7 @@ export default function CustomerDashboardPage() {
           setMyBookedEvents(bookingsData);
         } catch (error) {
           console.error("Error fetching booked events: ", error);
-          setMyBookedEvents([]); // Set to empty on error
+          setMyBookedEvents([]);
         } finally {
           setLoadingBookedEvents(false);
         }
@@ -153,7 +152,6 @@ export default function CustomerDashboardPage() {
       return String(dateTimeInput);
     }
   };
-
 
   return (
     <div className="space-y-12">
@@ -244,7 +242,7 @@ export default function CustomerDashboardPage() {
         )}
       </section>
 
-      {/* Discover Chef-Hosted Events Section */}
+      {/* Discover Chef-Hosted Events Section (use WallCard!) */}
       <section>
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-semibold flex items-center"><CalendarSearch className="mr-3 h-7 w-7 text-primary"/>Discover Chef-Hosted Events</h2>
@@ -270,27 +268,9 @@ export default function CustomerDashboardPage() {
             </div>
         ) : discoverChefEvents.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {discoverChefEvents.map(event => (
-                <Card key={event.id} className="overflow-hidden shadow-md hover:shadow-lg transition-shadow group">
-                {event.imageUrl ? (
-                    <Image src={event.imageUrl} alt={event.title} width={600} height={300} className="w-full h-48 object-cover group-hover:scale-105 transition-transform" data-ai-hint={event.dataAiHint || "event food"} />
-                ) : (
-                    <div className="w-full h-48 bg-muted flex items-center justify-center text-muted-foreground">
-                        <CalendarSearch className="h-16 w-16 opacity-50" data-ai-hint="event placeholder" />
-                    </div>
-                )}
-                <CardContent className="p-4">
-                    <CardTitle className="text-lg mb-1">{event.title}</CardTitle>
-                    <p className="text-sm text-muted-foreground">{formatEventDateForDisplay(event.eventDateTime)}</p>
-                    <p className="text-xs text-muted-foreground">By: {event.chefName}</p>
-                </CardContent>
-                <CardFooter className="p-4 bg-muted/30">
-                    <Button variant="outline" className="w-full" asChild>
-                        <Link href={`/customer/wall#event-${event.id}`}>View Event Details</Link>
-                    </Button>
-                </CardFooter>
-                </Card>
-            ))}
+              {discoverChefEvents.map(event => (
+                <WallCard key={event.id} post={event} onDetails={() => window.location.href=`/customer/wall#event-${event.id}`} />
+              ))}
             </div>
         ) : (
              <Card className="md:col-span-2 lg:col-span-3 p-6 text-center items-center justify-center flex flex-col border-dashed hover:border-primary transition-colors">
