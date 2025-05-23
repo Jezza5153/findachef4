@@ -1,12 +1,12 @@
 
 'use client';
 
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Calendar } from '@/components/ui/calendar';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import type { CalendarEvent, ChefProfile, Booking } from '@/types';
-import { format, parseISO, isSameDay, startOfDay } from 'date-fns';
+import { format, parseISO, isSameDay, startOfDay, isValid } from 'date-fns';
 import { CalendarDays, Users, DollarSign, MapPin, Utensils, Info, Sun, ChefHat, AlertTriangle, CheckCircle, Clock, Ban, Loader2, InfoIcon, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -14,7 +14,7 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
-  AlertDialogDescription,
+  AlertDialogDescription as ShadAlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
@@ -25,11 +25,20 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
 import { doc, onSnapshot, updateDoc, Timestamp, collection, query, orderBy, serverTimestamp, writeBatch, getDoc } from 'firebase/firestore';
-import { Html5Qrcode } from 'html5-qrcode';
-import { BookingInvoiceDialog } from '@/components/booking-invoice-dialog';
+import dynamic from 'next/dynamic';
+
+const Html5Qrcode = dynamic(() => import('html5-qrcode').then(mod => mod.Html5Qrcode), { ssr: false, loading: () => <Loader2 className="h-4 w-4 animate-spin" /> });
+
+const BookingInvoiceDialog = dynamic(() =>
+  import('@/components/booking-invoice-dialog').then((mod) => mod.BookingInvoiceDialog),
+  { 
+    ssr: false,
+    loading: () => <div className="p-4 text-center"><Loader2 className="h-6 w-6 animate-spin inline-block"/> Loading invoice viewer...</div> 
+  }
+);
 
 export default function ChefCalendarPage() {
-  const { user, userProfile } = useAuth();
+  const { user, userProfile, authLoading } = useAuth();
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
   const [allEvents, setAllEvents] = useState<CalendarEvent[]>([]);
   const [blockedDates, setBlockedDates] = useState<Date[]>([]);
@@ -43,7 +52,7 @@ export default function ChefCalendarPage() {
   const [scannedBookingIdInput, setScannedBookingIdInput] = useState('');
   const [eventToComplete, setEventToComplete] = useState<CalendarEvent | null>(null);
   const qrCodeRegionRef = useRef<HTMLDivElement>(null);
-  const [html5QrCode, setHtml5QrCode] = useState<Html5Qrcode | null>(null);
+  const [html5QrCodeScanner, setHtml5QrCodeScanner] = useState<Html5Qrcode | null>(null);
   const [qrScannerError, setQrScannerError] = useState<string | null>(null);
 
   const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = useState(false);
@@ -52,80 +61,118 @@ export default function ChefCalendarPage() {
 
 
   useEffect(() => {
-    if (!user) {
+    if (authLoading || !user) {
       setIsLoadingCalendarData(false);
       setAllEvents([]);
       setBlockedDates([]);
       return;
     }
 
+    console.log("ChefCalendarPage: useEffect triggered for data fetching. User ID:", user.uid);
     setIsLoadingCalendarData(true);
     let unsubscribeUserProfile: (() => void) | undefined;
     let unsubscribeCalendarEvents: (() => void) | undefined;
+    let active = true; // To prevent state updates on unmounted component
 
-    const userDocRef = doc(db, "users", user.uid);
-    unsubscribeUserProfile = onSnapshot(userDocRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const userData = docSnap.data() as ChefProfile;
-        if (userData.blockedDates) {
-          setBlockedDates(userData.blockedDates.map(isoString => parseISO(isoString)));
-        } else {
+    const fetchData = async () => {
+      try {
+        // Fetch blocked dates from user profile
+        const userDocRef = doc(db, "users", user.uid);
+        unsubscribeUserProfile = onSnapshot(userDocRef, (docSnap) => {
+          if (!active) return;
+          console.log("ChefCalendarPage: User profile snapshot received.");
+          if (docSnap.exists()) {
+            const userData = docSnap.data() as ChefProfile;
+            if (userData.blockedDates) {
+              setBlockedDates(userData.blockedDates.map(isoString => {
+                const parsed = parseISO(isoString);
+                return isValid(parsed) ? parsed : new Date(0); // Fallback for invalid dates
+              }).filter(date => isValid(date) && date.getTime() !== new Date(0).getTime()));
+            } else {
+              setBlockedDates([]);
+            }
+          } else {
+            console.warn("ChefCalendarPage: User profile document not found.");
+            setBlockedDates([]);
+          }
+        }, (error) => {
+          if (!active) return;
+          console.error("ChefCalendarPage: Error fetching user profile for blocked dates:", error);
+          toast({ title: "Error", description: "Could not fetch blocked dates.", variant: "destructive" });
           setBlockedDates([]);
+        });
+
+        // Fetch calendar events
+        const eventsCollectionRef = collection(db, `users/${user.uid}/calendarEvents`);
+        const q = query(eventsCollectionRef, orderBy("date", "asc"));
+
+        unsubscribeCalendarEvents = onSnapshot(q, (querySnapshot) => {
+          if (!active) return;
+          console.log("ChefCalendarPage: Calendar events snapshot received. Docs count:", querySnapshot.docs.length);
+          const fetchedEvents = querySnapshot.docs.map(docSnap => {
+            const data = docSnap.data();
+            let eventDate = data.date;
+            if (eventDate instanceof Timestamp) eventDate = eventDate.toDate();
+            else if (eventDate && typeof eventDate.seconds === 'number') eventDate = new Timestamp(eventDate.seconds, eventDate.nanoseconds).toDate();
+            else if (typeof eventDate === 'string') eventDate = parseISO(eventDate);
+            else if (!(eventDate instanceof Date) || !isValid(eventDate)) {
+                console.warn("ChefCalendarPage: Invalid event date format, using current date as fallback:", data.date);
+                eventDate = new Date();
+            }
+
+            return {
+              id: docSnap.id,
+              ...data,
+              date: eventDate,
+              createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+              updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
+            } as CalendarEvent;
+          });
+          setAllEvents(fetchedEvents);
+        }, (error) => {
+          if (!active) return;
+          console.error("ChefCalendarPage: Error fetching calendar events:", error);
+          toast({ title: "Error", description: "Could not fetch calendar events.", variant: "destructive" });
+          setAllEvents([]);
+        });
+
+      } catch (error) {
+        if (!active) return;
+        console.error("ChefCalendarPage: Error in outer fetchData try-catch:", error);
+        toast({ title: "Data Loading Error", description: "Failed to initialize data listeners.", variant: "destructive" });
+      } finally {
+        if (active) {
+          // It's tricky to set loading to false here reliably with two async listeners.
+          // Better to set it false when both have fired at least once or errored.
+          // For simplicity, let's set a timeout or check after both listeners are attached.
+          // A more robust way involves Promise.all or counters if initial fetch is not onSnapshot.
+          // With onSnapshot, loading means "waiting for first snapshot"
+          setTimeout(() => { // Allow time for snapshots to potentially arrive
+            if (active) setIsLoadingCalendarData(false);
+          }, 1500); // Adjust timeout as needed, or use a more sophisticated loading strategy
         }
-      }
-    }, (error) => {
-      console.error("Error fetching user profile for blocked dates:", error);
-      toast({ title: "Error", description: "Could not fetch blocked dates.", variant: "destructive" });
-    });
-
-    const eventsCollectionRef = collection(db, `users/${user.uid}/calendarEvents`);
-    const q = query(eventsCollectionRef, orderBy("date", "asc"));
-
-    unsubscribeCalendarEvents = onSnapshot(q, (querySnapshot) => {
-      const fetchedEvents = querySnapshot.docs.map(docSnap => {
-        const data = docSnap.data();
-        let eventDate = data.date;
-        if (eventDate instanceof Timestamp) {
-          eventDate = eventDate.toDate();
-        } else if (typeof eventDate === 'string') {
-          eventDate = parseISO(eventDate);
-        } else if (eventDate && typeof eventDate.toDate === 'function') {
-          eventDate = eventDate.toDate();
-        } else if (!(eventDate instanceof Date)) {
-          eventDate = new Date();
-        }
-
-        return {
-          id: docSnap.id,
-          ...data,
-          date: eventDate,
-          createdAt: data.createdAt ? (data.createdAt instanceof Timestamp ? data.createdAt.toDate() : new Date(data.createdAt as any)) : undefined,
-          updatedAt: data.updatedAt ? (data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : new Date(data.updatedAt as any)) : undefined,
-        } as CalendarEvent;
-      });
-      setAllEvents(fetchedEvents);
-      setIsLoadingCalendarData(false);
-    }, (error) => {
-      console.error("Error fetching calendar events:", error);
-      toast({ title: "Error", description: "Could not fetch calendar events.", variant: "destructive" });
-      setIsLoadingCalendarData(false);
-    });
-
-    return () => {
-      if (unsubscribeUserProfile) unsubscribeUserProfile();
-      if (unsubscribeCalendarEvents) unsubscribeCalendarEvents();
-      if (html5QrCode && html5QrCode.isScanning) {
-        html5QrCode.stop().catch(err => console.error("Error stopping QR scanner on unmount:", err));
       }
     };
 
-  }, [user, toast, html5QrCode]);
+    fetchData();
+
+    return () => {
+      active = false;
+      console.log("ChefCalendarPage: useEffect cleanup. Unsubscribing listeners.");
+      if (unsubscribeUserProfile) unsubscribeUserProfile();
+      if (unsubscribeCalendarEvents) unsubscribeCalendarEvents();
+      if (html5QrCodeScanner && html5QrCodeScanner.isScanning) {
+        html5QrCodeScanner.stop().catch(err => console.warn("Error stopping QR scanner on unmount:", err));
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, authLoading, toast]); // html5QrCodeScanner removed from deps to avoid re-triggering on its state change
 
 
   useEffect(() => {
-    if (isScanQrDialogOpen && qrCodeRegionRef.current && !html5QrCode?.isScanning) {
-      const newHtml5QrCode = new Html5Qrcode("qr-reader");
-      setHtml5QrCode(newHtml5QrCode);
+    if (isScanQrDialogOpen && qrCodeRegionRef.current && !html5QrCodeScanner?.isScanning && Html5Qrcode) {
+      const newScanner = new Html5Qrcode("qr-reader");
+      setHtml5QrCodeScanner(newScanner);
       setQrScannerError(null);
 
       const qrCodeSuccessCallback = (decodedText: string, decodedResult: any) => {
@@ -135,113 +182,68 @@ export default function ChefCalendarPage() {
 
       const qrCodeErrorCallback = (errorMessage: string) => {
         // console.warn(`QR Code no longer in sight or error: ${errorMessage}`);
-        // We can ignore "QR code not found" as it's common
       };
-
-      newHtml5QrCode.start(
+      
+      newScanner.start(
         { facingMode: "environment" },
         { fps: 10, qrbox: { width: 250, height: 250 } },
         qrCodeSuccessCallback,
         qrCodeErrorCallback
       ).catch(err => {
         console.error("Unable to start QR scanning.", err);
-        setQrScannerError("Failed to start camera. Please check permissions and try again.");
+        setQrScannerError("Failed to start camera. Please check permissions and try again, or use manual ID entry.");
         toast({
           title: "QR Scan Error",
           description: "Could not start QR scanner. Ensure camera permissions are granted.",
           variant: "destructive"
         });
       });
-    } else if (!isScanQrDialogOpen && html5QrCode && html5QrCode.isScanning) {
-      html5QrCode.stop().catch(err => console.error("Error stopping QR scanner:", err));
+    } else if (!isScanQrDialogOpen && html5QrCodeScanner && html5QrCodeScanner.isScanning) {
+      html5QrCodeScanner.stop().catch(err => console.error("Error stopping QR scanner:", err));
     }
-  }, [isScanQrDialogOpen, html5QrCode]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isScanQrDialogOpen]); // html5QrCodeScanner removed from deps
 
 
-  const stopQrScannerAndProcess = (decodedBookingId: string) => {
-    if (html5QrCode && html5QrCode.isScanning) {
-      html5QrCode.stop().catch(err => console.error("Error stopping QR scanner after scan:", err));
+  const stopQrScannerAndProcess = useCallback((decodedBookingId: string) => {
+    if (html5QrCodeScanner && html5QrCodeScanner.isScanning) {
+      html5QrCodeScanner.stop().catch(err => console.warn("Error stopping QR scanner after scan:", err));
     }
     setIsScanQrDialogOpen(false);
 
-    if (eventToComplete && decodedBookingId === eventToComplete.id) {
+    if (eventToComplete && decodedBookingId === eventToComplete.bookingId) { // Compare with bookingId
       handleProcessCompletion(eventToComplete);
+    } else if (eventToComplete && decodedBookingId === eventToComplete.id && !eventToComplete.bookingId) { // Fallback for older events or wall events not yet having bookingId prop
+        console.warn("Comparing decodedBookingId with eventToComplete.id as bookingId is missing on event.");
+        handleProcessCompletion(eventToComplete);
     } else {
       toast({
         title: "QR Code Mismatch",
-        description: "The scanned QR code does not match the selected event's Booking ID. Please try again.",
+        description: "The scanned QR code does not match the selected event's Booking ID. Please try again or use manual entry.",
         variant: "destructive",
         duration: 7000,
       });
     }
     setEventToComplete(null);
-  };
+  }, [html5QrCodeScanner, eventToComplete, toast]); // Removed handleProcessCompletion from deps to avoid cycle, it's stable
 
 
-  const eventsForSelectedDate = useMemo(() => {
-    if (!selectedDate) return [];
-    return allEvents.filter(event => isSameDay(event.date, selectedDate));
-  }, [selectedDate, allEvents]);
-
-  const isDateBlocked = useMemo(() => {
-    if (!selectedDate) return false;
-    const checkDate = startOfDay(selectedDate);
-    return blockedDates.some(blockedDate => isSameDay(blockedDate, checkDate));
-  }, [selectedDate, blockedDates]);
-
-  const getStatusBadgeVariant = (status: CalendarEvent['status']) => {
-    switch (status) {
-      case 'Confirmed': return 'default';
-      case 'Pending': return 'secondary';
-      case 'Cancelled': return 'destructive';
-      case 'WallEvent': return 'outline';
-      case 'Completed': return 'secondary';
-      default: return 'outline';
-    }
-  };
-
-  const getStatusIcon = (status: CalendarEvent['status']) => {
-    switch (status) {
-      case 'Confirmed': return <CheckCircle className="h-4 w-4 mr-1.5 text-green-600" />;
-      case 'Pending': return <Clock className="h-4 w-4 mr-1.5 text-yellow-600" />;
-      case 'Cancelled': return <AlertTriangle className="h-4 w-4 mr-1.5 text-red-600" />;
-      case 'WallEvent': return <InfoIcon className="h-4 w-4 mr-1.5 text-blue-500" />;
-      case 'Completed': return <CheckCircle className="h-4 w-4 mr-1.5 text-green-700" />;
-      default: return <Info className="h-4 w-4 mr-1.5" />;
-    }
-  };
-
-  const handleGoogleCalendarSync = () => {
-    toast({
-        title: "Google Calendar Sync (Placeholder)",
-        description: "This feature is a placeholder. Real integration requires backend setup and Google API integration.",
-    });
-  };
-
-  const openScanQrDialog = (event: CalendarEvent) => {
-    if (html5QrCode && html5QrCode.isScanning) {
-      html5QrCode.stop().catch(err => console.error("Error stopping QR scanner before new scan:", err));
-    }
-    setEventToComplete(event);
-    setScannedBookingIdInput(''); // Clear previous input
-    setIsScanQrDialogOpen(true);
-  };
-
-  const handleProcessCompletion = async (calendarEvent: CalendarEvent) => {
-    if (!user || !calendarEvent) {
-      toast({ title: "Error", description: "Booking ID is required.", variant: "destructive" });
+  const handleProcessCompletion = useCallback(async (calendarEvent: CalendarEvent) => {
+    const bookingIdToUpdate = calendarEvent.bookingId || calendarEvent.id; // Prefer bookingId if available
+    if (!user || !bookingIdToUpdate) {
+      toast({ title: "Error", description: "Booking ID is required to complete the event.", variant: "destructive" });
       return;
     }
 
     setIsProcessingAction(true);
     toast({
         title: "Processing Event Completion...",
-        description: `Marking event ${calendarEvent.id.substring(0,6)}... as complete.`,
+        description: `Marking event for booking ${bookingIdToUpdate.substring(0,6)}... as complete.`,
     });
 
     try {
       const batch = writeBatch(db);
-      const bookingDocRef = doc(db, "bookings", calendarEvent.id);
+      const bookingDocRef = doc(db, "bookings", bookingIdToUpdate);
       batch.update(bookingDocRef, {
         status: 'completed',
         qrCodeScannedAt: serverTimestamp(),
@@ -258,7 +260,7 @@ export default function ChefCalendarPage() {
 
       toast({
           title: "Event Marked as Complete!",
-          description: `Event ${calendarEvent.id.substring(0,6)}... status updated. Final payout process initiated (simulated).`,
+          description: `Event for booking ${bookingIdToUpdate.substring(0,6)}... status updated. Final payout process initiated (simulated).`,
           duration: 7000,
       });
       setIsScanQrDialogOpen(false);
@@ -273,7 +275,64 @@ export default function ChefCalendarPage() {
     } finally {
       setIsProcessingAction(false);
     }
+  }, [user, toast]);
+
+  const eventsForSelectedDate = useMemo(() => {
+    if (!selectedDate) return [];
+    return allEvents.filter(event => event.date && isValid(new Date(event.date)) && isSameDay(new Date(event.date), selectedDate));
+  }, [selectedDate, allEvents]);
+
+  const isDateBlocked = useMemo(() => {
+    if (!selectedDate) return false;
+    const checkDate = startOfDay(selectedDate);
+    return blockedDates.some(blockedDate => isValid(blockedDate) && isSameDay(blockedDate, checkDate));
+  }, [selectedDate, blockedDates]);
+
+  const getStatusBadgeVariant = (status?: CalendarEvent['status']) => {
+    if(!status) return 'outline';
+    switch (status) {
+      case 'Confirmed': return 'default';
+      case 'Pending': return 'secondary';
+      case 'Cancelled': return 'destructive';
+      case 'WallEvent': return 'outline'; // Use a distinct style for WallEvents
+      case 'Completed': return 'secondary'; // Consider a more distinct "completed" style if needed
+      default: return 'outline';
+    }
   };
+
+  const getStatusIcon = (status?: CalendarEvent['status']) => {
+    if (!status) return <Info className="h-4 w-4 mr-1.5" />;
+    switch (status) {
+      case 'Confirmed': return <CheckCircle className="h-4 w-4 mr-1.5 text-green-600" />;
+      case 'Pending': return <Clock className="h-4 w-4 mr-1.5 text-yellow-600" />;
+      case 'Cancelled': return <AlertTriangle className="h-4 w-4 mr-1.5 text-red-600" />;
+      case 'WallEvent': return <InfoIcon className="h-4 w-4 mr-1.5 text-blue-500" />;
+      case 'Completed': return <CheckCircle className="h-4 w-4 mr-1.5 text-green-700" />; // Darker green for completed
+      default: return <Info className="h-4 w-4 mr-1.5" />;
+    }
+  };
+
+  const handleGoogleCalendarSync = () => {
+    toast({
+        title: "Google Calendar Sync (Placeholder)",
+        description: "This feature is a placeholder. Real integration requires backend setup and Google API integration.",
+    });
+  };
+
+  const openScanQrDialog = (event: CalendarEvent) => {
+    const bookingTargetId = event.bookingId || event.id;
+    if (!bookingTargetId) {
+        toast({title: "Error", description: "Event is missing a valid Booking ID.", variant: "destructive"});
+        return;
+    }
+    if (html5QrCodeScanner && html5QrCodeScanner.isScanning) {
+      html5QrCodeScanner.stop().catch(err => console.warn("Error stopping QR scanner before new scan:", err));
+    }
+    setEventToComplete(event); // Store the whole event object
+    setScannedBookingIdInput(''); 
+    setIsScanQrDialogOpen(true);
+  };
+
 
   const handleToggleBlockDate = async () => {
     if (!user || !selectedDate) {
@@ -282,18 +341,21 @@ export default function ChefCalendarPage() {
     }
     setIsProcessingAction(true);
     const dateToToggle = startOfDay(selectedDate);
-    const alreadyBlocked = blockedDates.some(d => isSameDay(d, dateToToggle));
+    const alreadyBlocked = blockedDates.some(d => isValid(d) && isSameDay(d, dateToToggle));
     let newBlockedDatesIso: string[];
 
     if (alreadyBlocked) {
       newBlockedDatesIso = blockedDates
-        .filter(d => !isSameDay(d, dateToToggle))
-        .map(d => d.toISOString().split('T')[0]);
+        .filter(d => isValid(d) && !isSameDay(d, dateToToggle))
+        .map(d => format(d, 'yyyy-MM-dd')); // Store as YYYY-MM-DD string
     } else {
       newBlockedDatesIso = [...blockedDates, dateToToggle]
-        .map(d => d.toISOString().split('T')[0])
+        .map(d => format(d, 'yyyy-MM-dd')) // Store as YYYY-MM-DD string
         .sort();
     }
+    // Remove duplicates that might arise from date format changes
+    newBlockedDatesIso = [...new Set(newBlockedDatesIso)];
+
 
     try {
       const userDocRef = doc(db, "users", user.uid);
@@ -316,15 +378,28 @@ export default function ChefCalendarPage() {
   };
 
   const handleViewBookingInvoice = async (calendarEvent: CalendarEvent) => {
+    const bookingIdForInvoice = calendarEvent.bookingId || calendarEvent.id;
+    if (!bookingIdForInvoice) {
+        toast({title: "Error", description: "Cannot view invoice. Event is missing a valid Booking ID.", variant: "destructive"});
+        return;
+    }
     setIsFetchingBookingForInvoice(true);
     setIsInvoiceDialogOpen(true);
-    setSelectedBookingForInvoice(null); // Clear previous
+    setSelectedBookingForInvoice(null); 
     try {
-      const bookingDocRef = doc(db, "bookings", calendarEvent.id);
+      const bookingDocRef = doc(db, "bookings", bookingIdForInvoice);
       const bookingSnap = await getDoc(bookingDocRef);
       if (bookingSnap.exists()) {
-        const bookingData = bookingSnap.data() as Omit<Booking, 'id'>;
-        setSelectedBookingForInvoice({ id: bookingSnap.id, ...bookingData } as Booking);
+        const data = bookingSnap.data();
+        const bookingData = { 
+            id: bookingSnap.id, 
+            ...data,
+            eventDate: data.eventDate instanceof Timestamp ? data.eventDate.toDate() : new Date(data.eventDate as any),
+            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : (data.createdAt ? new Date(data.createdAt as any) : undefined),
+            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : (data.updatedAt ? new Date(data.updatedAt as any) : undefined),
+            qrCodeScannedAt: data.qrCodeScannedAt instanceof Timestamp ? data.qrCodeScannedAt.toDate() : (data.qrCodeScannedAt ? new Date(data.qrCodeScannedAt as any) : undefined),
+        } as Booking;
+        setSelectedBookingForInvoice(bookingData);
       } else {
         toast({ title: "Error", description: "Booking details not found for this event.", variant: "destructive" });
         setIsInvoiceDialogOpen(false);
@@ -338,12 +413,11 @@ export default function ChefCalendarPage() {
     }
   };
 
-
-  if (isLoadingCalendarData) {
+  if (authLoading || isLoadingCalendarData) {
      return (
-      <div className="flex justify-center items-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" data-ai-hint="loading spinner" />
-        <p className="ml-2">Loading calendar data...</p>
+      <div className="flex justify-center items-center min-h-[calc(100vh-200px)]">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" data-ai-hint="loading spinner" />
+        <p className="ml-3 text-lg">Loading calendar data...</p>
       </div>
     );
   }
@@ -375,7 +449,7 @@ export default function ChefCalendarPage() {
               onSelect={setSelectedDate}
               className="rounded-md border"
               disabled={(date) => date < startOfDay(new Date(new Date().setDate(new Date().getDate() - 365))) || date > new Date(new Date().setDate(new Date().getDate() + 365*2))}
-              modifiers={{ blocked: blockedDates }}
+              modifiers={{ blocked: blockedDates.filter(d => isValid(d)) }}
               modifiersStyles={{
                 blocked: {
                   textDecoration: 'line-through',
@@ -386,7 +460,7 @@ export default function ChefCalendarPage() {
               }}
             />
             <Button onClick={handleToggleBlockDate} variant="outline" className="mt-4 w-full" disabled={isProcessingAction}>
-              {isProcessingAction && selectedDate && blockedDates.some(d => isSameDay(d, selectedDate)) ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Ban className="mr-2 h-4 w-4"/>}
+              {isProcessingAction && selectedDate && isDateBlocked ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Ban className="mr-2 h-4 w-4"/>}
               {isDateBlocked ? "Unblock Selected Date" : "Block Selected Date"}
             </Button>
              <p className="text-xs text-muted-foreground mt-2">Blocked dates will prevent new booking requests.</p>
@@ -395,7 +469,7 @@ export default function ChefCalendarPage() {
 
         <div className="lg:col-span-2 space-y-6">
           <h2 className="text-2xl font-semibold">
-            Events for: {selectedDate ? format(selectedDate, 'PPP') : 'No date selected'}
+            Events for: {selectedDate && isValid(selectedDate) ? format(selectedDate, 'PPP') : 'No date selected'}
             {selectedDate && isDateBlocked && <Badge variant="destructive" className="ml-2">Date Blocked</Badge>}
           </h2>
 
@@ -422,7 +496,7 @@ export default function ChefCalendarPage() {
                 <CardHeader>
                   <div className="flex justify-between items-start">
                     <CardTitle className="text-xl">{event.title}</CardTitle>
-                    <Badge variant={getStatusBadgeVariant(event.status)} className="flex items-center">
+                    <Badge variant={getStatusBadgeVariant(event.status)} className="flex items-center text-xs capitalize">
                       {getStatusIcon(event.status)}
                       {event.status === 'WallEvent' ? 'My Wall Event' : event.status}
                     </Badge>
@@ -437,7 +511,7 @@ export default function ChefCalendarPage() {
                     </div>
                     <div className="flex items-center text-muted-foreground">
                       <DollarSign className="h-4 w-4 mr-2 text-green-600" data-ai-hint="money dollar" />
-                      Price: <span className="font-medium text-foreground ml-1">${event.pricePerHead}/head</span>
+                      Price: <span className="font-medium text-foreground ml-1">${event.pricePerHead ? event.pricePerHead.toFixed(2) : 'N/A'}/head</span>
                     </div>
                     <div className="flex items-center text-muted-foreground col-span-full sm:col-span-1">
                       <Utensils className="h-4 w-4 mr-2 text-primary" data-ai-hint="cutlery food" />
@@ -462,7 +536,7 @@ export default function ChefCalendarPage() {
                     <div>
                       <h4 className="text-xs font-semibold text-muted-foreground mb-0.5 flex items-center"><ChefHat className="h-3 w-3 mr-1"/>Co-Chefs:</h4>
                       <div className="flex flex-wrap gap-2">
-                        {event.coChefs.map(chef => <Badge key={chef} variant="secondary">{chef}</Badge>)}
+                        {event.coChefs.map(chef => <Badge key={chef} variant="secondary" className="text-xs">{chef}</Badge>)}
                       </div>
                     </div>
                   )}
@@ -475,10 +549,10 @@ export default function ChefCalendarPage() {
                   )}
                 </CardContent>
                 <CardFooter className="flex flex-col items-start space-y-2 pt-4 border-t">
-                    {event.status === 'Confirmed' && !event.isWallEvent && (
+                    {event.status === 'Confirmed' && !event.isWallEvent && (event.bookingId || event.id) && (
                         <>
                             <p className="text-xs text-muted-foreground">
-                                <strong>Event Completion:</strong> Customer will provide a QR code with a Booking ID. Scan it to confirm completion and initiate the release of the remaining 50% of your funds.
+                                <strong>Event Completion:</strong> Customer will provide a QR code with Booking ID <span className="font-mono text-primary/80 text-[10px]">({(event.bookingId || event.id).substring(0,6)}...)</span>. Scan it or enter manually to confirm completion and initiate the release of the remaining 50% of your funds.
                             </p>
                             <Button
                                 variant="outline"
@@ -487,8 +561,8 @@ export default function ChefCalendarPage() {
                                 className="w-full sm:w-auto"
                                 disabled={isProcessingAction}
                             >
-                                {isProcessingAction ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-qr-code mr-2 h-4 w-4"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h.01"/><path d="M21 12v.01"/><path d="M12 21v-3a2 2 0 0 0-2-2H7"/><path d="M7 21h3a2 2 0 0 0 2-2v-3"/><path d="M16 7h3a2 2 0 0 1 2 2v3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>}
-                                Scan Customer QR / Complete Event
+                                {isProcessingAction && eventToComplete?.id === event.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-qr-code mr-2 h-4 w-4"><rect width="5" height="5" x="3" y="3" rx="1"/><rect width="5" height="5" x="16" y="3" rx="1"/><rect width="5" height="5" x="3" y="16" rx="1"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h.01"/><path d="M21 12v.01"/><path d="M12 21v-3a2 2 0 0 0-2-2H7"/><path d="M7 21h3a2 2 0 0 0 2-2v-3"/><path d="M16 7h3a2 2 0 0 1 2 2v3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>}
+                                Scan QR / Enter ID
                             </Button>
                         </>
                     )}
@@ -496,7 +570,7 @@ export default function ChefCalendarPage() {
                         <Button variant="outline" size="sm" onClick={() => openEventDetailsDialog(event)} className="flex-1 min-w-[150px]">
                           View Event Details
                         </Button>
-                        {(event.status === 'Confirmed' || event.status === 'Completed') && !event.isWallEvent && (
+                        {(event.status === 'Confirmed' || event.status === 'Completed') && !event.isWallEvent && (event.bookingId || event.id) && (
                             <Button variant="outline" size="sm" onClick={() => handleViewBookingInvoice(event)} className="flex-1 min-w-[150px]">
                                 <FileText className="mr-2 h-4 w-4" /> View Invoice
                             </Button>
@@ -540,12 +614,12 @@ export default function ChefCalendarPage() {
           </AlertDialogHeader>
             {selectedEventForDialog ? (
               <div className="space-y-3 text-sm max-h-[60vh] overflow-y-auto p-1">
-                <p><strong>Date:</strong> {selectedEventForDialog.date ? format(selectedEventForDialog.date, 'PPP p') : 'N/A'}</p>
-                <p><strong>Status:</strong> <Badge variant={getStatusBadgeVariant(selectedEventForDialog.status)}>{selectedEventForDialog.status === 'WallEvent' ? 'My Wall Event' : selectedEventForDialog.status}</Badge></p>
+                <p><strong>Date:</strong> {selectedEventForDialog.date && isValid(new Date(selectedEventForDialog.date)) ? format(new Date(selectedEventForDialog.date), 'PPP p') : 'N/A'}</p>
+                <p><strong>Status:</strong> <Badge variant={getStatusBadgeVariant(selectedEventForDialog.status)} className="text-xs capitalize">{selectedEventForDialog.status === 'WallEvent' ? 'My Wall Event' : selectedEventForDialog.status}</Badge></p>
                 {selectedEventForDialog.customerName && <p><strong>Customer:</strong> {selectedEventForDialog.customerName}</p>}
                 <p><strong>PAX:</strong> {selectedEventForDialog.pax}</p>
                 <p><strong>Menu:</strong> {selectedEventForDialog.menuName}</p>
-                <p><strong>Price:</strong> ${selectedEventForDialog.pricePerHead}/head</p>
+                <p><strong>Price:</strong> ${selectedEventForDialog.pricePerHead ? selectedEventForDialog.pricePerHead.toFixed(2) : 'N/A'}/head</p>
                 {selectedEventForDialog.location && <p><strong>Location:</strong> {selectedEventForDialog.location}</p>}
                 {selectedEventForDialog.notes && <p><strong>Notes:</strong> {selectedEventForDialog.notes}</p>}
                 {selectedEventForDialog.coChefs && selectedEventForDialog.coChefs.length > 0 && (
@@ -555,10 +629,10 @@ export default function ChefCalendarPage() {
                 {selectedEventForDialog.toolsNeeded && selectedEventForDialog.toolsNeeded.length > 0 && (
                      <p><strong>Tools Needed:</strong> {selectedEventForDialog.toolsNeeded.join(', ')}</p>
                 )}
-                 <p className="text-xs text-muted-foreground pt-2 border-t">Event ID: {selectedEventForDialog.id}</p>
+                 <p className="text-xs text-muted-foreground pt-2 border-t">Event ID: {selectedEventForDialog.id} {selectedEventForDialog.bookingId && `(Booking ID: ${selectedEventForDialog.bookingId})`}</p>
               </div>
             ) : (
-              <AlertDialogDescription>Loading event details...</AlertDialogDescription>
+              ShadAlertDialogDescription && <ShadAlertDialogDescription>Loading event details...</ShadAlertDialogDescription>
             )}
           <AlertDialogFooter>
             <AlertDialogCancel>Close</AlertDialogCancel>
@@ -569,34 +643,45 @@ export default function ChefCalendarPage() {
       <AlertDialog open={isScanQrDialogOpen} onOpenChange={setIsScanQrDialogOpen}>
         <AlertDialogContent className="sm:max-w-md">
           <AlertDialogHeader>
-            <AlertDialogTitle>Scan Customer QR Code</AlertDialogTitle>
-            <AlertDialogDescription>
-                Point the camera at the customer's QR code. The booking ID will be automatically detected.
-                Alternatively, if scanning fails, you can manually enter the Booking ID below.
-            </AlertDialogDescription>
+            <AlertDialogTitle>Scan Customer QR / Enter Booking ID</AlertDialogTitle>
+            {ShadAlertDialogDescription && 
+              <ShadAlertDialogDescription>
+                  Point camera at QR code or manually enter Booking ID <span className="font-mono text-xs text-primary/90">({eventToComplete?.bookingId?.substring(0,6) || eventToComplete?.id.substring(0,6)}...)</span>.
+              </ShadAlertDialogDescription>
+            }
           </AlertDialogHeader>
-          <div id="qr-reader" ref={qrCodeRegionRef} className="w-full aspect-square bg-muted rounded-md my-2">
-            {qrScannerError && <p className="text-destructive text-sm p-2">{qrScannerError}</p>}
-          </div>
+          {Html5Qrcode && <div id="qr-reader" ref={qrCodeRegionRef} className="w-full aspect-square bg-muted rounded-md my-2 border">
+            {qrScannerError && <p className="text-destructive text-sm p-2 text-center">{qrScannerError}</p>}
+            {!qrScannerError && <p className="text-muted-foreground text-sm p-2 text-center">Initializing camera... Grant permission if prompted.</p>}
+          </div>}
            <div className="space-y-2 mt-2">
             <Label htmlFor="bookingIdInputManual">Manual Booking ID Entry (if scan fails)</Label>
             <Input
               id="bookingIdInputManual"
-              placeholder="Enter Booking ID from customer"
+              placeholder="Enter Full Booking ID from customer"
               value={scannedBookingIdInput}
               onChange={(e) => setScannedBookingIdInput(e.target.value)}
+              disabled={isProcessingAction}
             />
           </div>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="mt-4">
             <AlertDialogCancel onClick={() => {
-              if (html5QrCode && html5QrCode.isScanning) {
-                html5QrCode.stop().catch(err => console.error("Error stopping scanner on cancel:", err));
+              if (html5QrCodeScanner && html5QrCodeScanner.isScanning) {
+                html5QrCodeScanner.stop().catch(err => console.warn("Error stopping scanner on cancel:", err));
               }
               setEventToComplete(null);
               setIsScanQrDialogOpen(false);
-            }}>Cancel</AlertDialogCancel>
+            }} disabled={isProcessingAction}>Cancel</AlertDialogCancel>
             <AlertDialogAction 
-                onClick={() => stopQrScannerAndProcess(scannedBookingIdInput)} 
+                onClick={() => {
+                    if (!eventToComplete) return;
+                    const bookingIdToVerify = eventToComplete.bookingId || eventToComplete.id;
+                    if (scannedBookingIdInput.trim() === bookingIdToVerify) {
+                        handleProcessCompletion(eventToComplete);
+                    } else {
+                        toast({title: "Booking ID Mismatch", description: "Manually entered ID does not match the event's Booking ID.", variant: "destructive"});
+                    }
+                }} 
                 disabled={isProcessingAction || !scannedBookingIdInput.trim()}
             >
               {isProcessingAction ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -606,12 +691,14 @@ export default function ChefCalendarPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <BookingInvoiceDialog 
-        isOpen={isInvoiceDialogOpen}
-        onOpenChange={setIsInvoiceDialogOpen}
-        booking={selectedBookingForInvoice}
-        customerName={selectedBookingForInvoice?.customerName || userProfile?.name || 'Customer'}
-      />
+      {BookingInvoiceDialog && 
+        <BookingInvoiceDialog 
+          isOpen={isInvoiceDialogOpen}
+          onOpenChange={setIsInvoiceDialogOpen}
+          booking={selectedBookingForInvoice}
+          customerName={selectedBookingForInvoice?.customerName || userProfile?.name || 'Customer'}
+        />
+      }
     </div>
   );
 }

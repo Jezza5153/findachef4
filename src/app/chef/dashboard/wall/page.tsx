@@ -134,6 +134,7 @@ export default function ChefWallPage() {
         } as ChefWallEvent;
       });
       setWallEvents(fetchedEvents);
+      setIsLoadingData(false); // Set loading to false on success
     }, (error) => {
       console.error("ChefWallPage: Error fetching wall events:", error);
       toast({ title: "Error Fetching Events", description: "Could not fetch your event posts. Please try refreshing.", variant: "destructive" });
@@ -144,7 +145,7 @@ export default function ChefWallPage() {
     // Cleanup function
     return () => {
       console.log("ChefWallPage: Cleaning up wall events listener.");
-      setIsLoadingData(false);
+      setIsLoadingData(false); // Keep this for component unmount
       if (unsubscribe) {
         console.log("ChefWallPage: Unsubscribing from wall events listener.");
         unsubscribe();

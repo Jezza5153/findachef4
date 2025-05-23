@@ -1,11 +1,9 @@
 
 import { initializeApp, getApps, type FirebaseApp } from 'firebase/app';
-import { getAuth } from "firebase/auth";
-import { getStorage } from "firebase/storage";
-import { getFirestore, Timestamp } from "firebase/firestore"; // Import Timestamp
+import { getAuth, type Auth } from "firebase/auth"; // Ensure Auth is typed
+import { getStorage, type FirebaseStorage } from "firebase/storage"; // Ensure FirebaseStorage is typed
+import { getFirestore, Timestamp, type Firestore } from "firebase/firestore"; // Ensure Firestore is typed
 
-// These are placeholders and should be overridden by your .env.local file
-// or Vercel environment variables.
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -16,48 +14,52 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
-let app: FirebaseApp;
-let authInstance: ReturnType<typeof getAuth>;
-let storageInstance: ReturnType<typeof getStorage>;
-let dbInstance: ReturnType<typeof getFirestore>;
+let app: FirebaseApp | undefined = undefined; // Initialize as undefined
+let authInstance: Auth | null = null;
+let storageInstance: FirebaseStorage | null = null;
+let dbInstance: Firestore | null = null;
 
-if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
-  console.error("CRITICAL FIREBASE CONFIG ERROR: NEXT_PUBLIC_FIREBASE_API_KEY or NEXT_PUBLIC_FIREBASE_PROJECT_ID is missing or undefined.");
-  console.error("This will cause Firebase services (Auth, Firestore, Storage) to fail.");
+// Check if all required config keys are present
+const requiredKeys: (keyof typeof firebaseConfig)[] = ['apiKey', 'authDomain', 'projectId', 'storageBucket', 'messagingSenderId', 'appId'];
+const missingKeys = requiredKeys.filter(key => !firebaseConfig[key]);
+
+if (missingKeys.length > 0) {
+  console.error("CRITICAL FIREBASE CONFIG ERROR: The following Firebase config keys are missing or undefined in your environment variables:", missingKeys.join(', '));
+  console.error("This will cause Firebase services (Auth, Firestore, Storage) to fail or not initialize.");
   console.error("Ensure these are correctly set in your .env.local file (for local development) AND in your Vercel project environment variables (for deployment).");
+} else {
+  console.log("Firebase Config OK: All required keys found.");
+  console.log("Firebase Initializing with Project ID:", firebaseConfig.projectId);
+  console.log("Firebase Using API Key (first 5 chars):", firebaseConfig.apiKey ? firebaseConfig.apiKey.substring(0, 5) + "..." : "API Key Not Found/Defined");
+
+  if (!getApps().length) {
+    try {
+      app = initializeApp(firebaseConfig);
+      console.log("Firebase app initialized successfully.");
+    } catch (e) {
+      console.error("Firebase initializeApp error:", e);
+      app = undefined; // Ensure app is undefined on error
+    }
+  } else {
+    app = getApps()[0];
+    console.log("Firebase app already initialized.");
+  }
 }
 
-console.log("Firebase Initializing with Project ID:", firebaseConfig.projectId || "MISSING/UNDEFINED");
-console.log("Firebase Using API Key (first 5 chars):", firebaseConfig.apiKey ? firebaseConfig.apiKey.substring(0,5) + "..." : "API Key Not Found/Defined");
-
-if (!getApps().length) {
+if (app) {
   try {
-    app = initializeApp(firebaseConfig);
-  } catch (e) {
-    console.error("Firebase initializeApp error:", e);
-    // In a real app, you might want to throw this error or handle it more gracefully
-    // For now, subsequent getAuth/getStorage/getFirestore calls will fail if app is undefined.
+    authInstance = getAuth(app);
+    storageInstance = getStorage(app);
+    dbInstance = getFirestore(app);
+    console.log("Firebase services (Auth, Storage, Firestore) initialized.");
+  } catch (serviceError) {
+    console.error("Error initializing Firebase services (Auth, Storage, Firestore):", serviceError);
+    authInstance = null;
+    storageInstance = null;
+    dbInstance = null;
   }
 } else {
-  app = getApps()[0];
+  console.error("Firebase app was not initialized. Other Firebase services (Auth, Storage, Firestore) will NOT be available.");
 }
 
-// Initialize other Firebase services only if app was successfully initialized
-// @ts-ignore app might be uninitialized if config is missing
-if (app && firebaseConfig.apiKey && firebaseConfig.projectId) { // Add check for apiKey and projectId
-  authInstance = getAuth(app);
-  storageInstance = getStorage(app);
-  dbInstance = getFirestore(app);
-} else {
-  console.error("Firebase app was not properly initialized due to missing configuration. Other Firebase services (Auth, Storage, Firestore) will NOT be available.");
-  // Assign null or throw an error to prevent undefined access later
-  // @ts-ignore
-  authInstance = null; 
-  // @ts-ignore
-  storageInstance = null;
-  // @ts-ignore
-  dbInstance = null;
-}
-
-// Exporting with new names to avoid conflict with the getAuth import
 export { app, authInstance as auth, storageInstance as storage, dbInstance as db, Timestamp };
