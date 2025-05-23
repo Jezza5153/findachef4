@@ -270,6 +270,30 @@
         "x-next-revalidate-tag-token"
       ]
     },
+    "/chef/dashboard/collaborations": {
+      "experimentalBypassFor": [
+        {
+          "type": "header",
+          "key": "Next-Action"
+        },
+        {
+          "type": "header",
+          "key": "content-type",
+          "value": "multipart/form-data;.*"
+        }
+      ],
+      "initialRevalidateSeconds": false,
+      "srcRoute": "/chef/dashboard/collaborations",
+      "dataRoute": "/chef/dashboard/collaborations.rsc",
+      "allowHeader": [
+        "host",
+        "x-matched-path",
+        "x-prerender-revalidate",
+        "x-prerender-revalidate-if-generated",
+        "x-next-revalidated-tags",
+        "x-next-revalidate-tag-token"
+      ]
+    },
     "/chef/dashboard/calendar": {
       "experimentalBypassFor": [
         {
@@ -318,7 +342,7 @@
         "x-next-revalidate-tag-token"
       ]
     },
-    "/chef/dashboard/collaborations": {
+    "/chef/dashboard": {
       "experimentalBypassFor": [
         {
           "type": "header",
@@ -331,8 +355,8 @@
         }
       ],
       "initialRevalidateSeconds": false,
-      "srcRoute": "/chef/dashboard/collaborations",
-      "dataRoute": "/chef/dashboard/collaborations.rsc",
+      "srcRoute": "/chef/dashboard",
+      "dataRoute": "/chef/dashboard.rsc",
       "allowHeader": [
         "host",
         "x-matched-path",
@@ -357,30 +381,6 @@
       "initialRevalidateSeconds": false,
       "srcRoute": "/chef/dashboard/menus",
       "dataRoute": "/chef/dashboard/menus.rsc",
-      "allowHeader": [
-        "host",
-        "x-matched-path",
-        "x-prerender-revalidate",
-        "x-prerender-revalidate-if-generated",
-        "x-next-revalidated-tags",
-        "x-next-revalidate-tag-token"
-      ]
-    },
-    "/chef/dashboard": {
-      "experimentalBypassFor": [
-        {
-          "type": "header",
-          "key": "Next-Action"
-        },
-        {
-          "type": "header",
-          "key": "content-type",
-          "value": "multipart/form-data;.*"
-        }
-      ],
-      "initialRevalidateSeconds": false,
-      "srcRoute": "/chef/dashboard",
-      "dataRoute": "/chef/dashboard.rsc",
       "allowHeader": [
         "host",
         "x-matched-path",
@@ -610,8 +610,8 @@
   "dynamicRoutes": {},
   "notFoundRoutes": [],
   "preview": {
-    "previewModeId": "43a68203ee97320967da7bb29ff5b1a5",
-    "previewModeSigningKey": "2dab5f27fe7fd0c8b301dffa66cbcaeb3364b00eb61a94b6cc3d047eb87c4756",
-    "previewModeEncryptionKey": "a7e6507d659fb8f49e0bd6fdc96f8f7bfea38d3aad2e8ddfabf8fb8581647dc2"
+    "previewModeId": "0bdc4a49450946205c2420147e976da3",
+    "previewModeSigningKey": "86c5c06d24b42191bc43bd9ffc195b694522238461cab95c87f60cc939897f6a",
+    "previewModeEncryptionKey": "9312ece59ace16be654e84052dcbd6fb20defb52d9f01c5a78bbbab273d02e32"
   }
 }

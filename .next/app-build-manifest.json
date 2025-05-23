@@ -217,7 +217,7 @@
       "static/chunks/4602-57cfb33bd15e6e1b.js",
       "static/chunks/9267-cde2740d632d2e82.js",
       "static/chunks/5845-e10c4faa5b9a987b.js",
-      "static/chunks/app/chef/dashboard/layout-48a609cbf6d996a4.js"
+      "static/chunks/app/chef/dashboard/layout-1e7d03d6eaafbfd0.js"
     ],
     "/chef/dashboard/calendar/page": [
       "static/chunks/webpack-4f991751f9ac3637.js",
@@ -238,6 +238,19 @@
       "static/chunks/8226-194a349c73bd4228.js",
       "static/chunks/app/chef/dashboard/calendar/page-21e662dc810889f5.js"
     ],
+    "/chef/dashboard/chefs/page": [
+      "static/chunks/webpack-4f991751f9ac3637.js",
+      "static/chunks/4bd1b696-fe271156a4671027.js",
+      "static/chunks/1684-83cdb082719a2d98.js",
+      "static/chunks/main-app-7ae61bd9d010cccc.js",
+      "static/chunks/9352-c5ce2d19c56f338c.js",
+      "static/chunks/5100-ee32378461bf9c84.js",
+      "static/chunks/1345-bf5f40a98d9e774c.js",
+      "static/chunks/5152-b1b71aa3be2729d8.js",
+      "static/chunks/8644-97dd56b29126c9de.js",
+      "static/chunks/8062-a527397596e325ac.js",
+      "static/chunks/app/chef/dashboard/chefs/page-4f4306091df3f4e1.js"
+    ],
     "/chef/dashboard/collaborations/page": [
       "static/chunks/webpack-4f991751f9ac3637.js",
       "static/chunks/4bd1b696-fe271156a4671027.js",
@@ -251,19 +264,6 @@
       "static/chunks/6874-3def4ebb17f2994e.js",
       "static/chunks/5845-e10c4faa5b9a987b.js",
       "static/chunks/app/chef/dashboard/collaborations/page-4b3e1e998cd6a78d.js"
-    ],
-    "/chef/dashboard/chefs/page": [
-      "static/chunks/webpack-4f991751f9ac3637.js",
-      "static/chunks/4bd1b696-fe271156a4671027.js",
-      "static/chunks/1684-83cdb082719a2d98.js",
-      "static/chunks/main-app-7ae61bd9d010cccc.js",
-      "static/chunks/9352-c5ce2d19c56f338c.js",
-      "static/chunks/5100-ee32378461bf9c84.js",
-      "static/chunks/1345-bf5f40a98d9e774c.js",
-      "static/chunks/5152-b1b71aa3be2729d8.js",
-      "static/chunks/8644-97dd56b29126c9de.js",
-      "static/chunks/8062-a527397596e325ac.js",
-      "static/chunks/app/chef/dashboard/chefs/page-4f4306091df3f4e1.js"
     ],
     "/chef/dashboard/menus/page": [
       "static/chunks/webpack-4f991751f9ac3637.js",
@@ -404,24 +404,6 @@
       "static/chunks/4602-57cfb33bd15e6e1b.js",
       "static/chunks/app/customer/dashboard/layout-40c1fc77da35cf9b.js"
     ],
-    "/customer/dashboard/messages/page": [
-      "static/chunks/webpack-4f991751f9ac3637.js",
-      "static/chunks/4bd1b696-fe271156a4671027.js",
-      "static/chunks/1684-83cdb082719a2d98.js",
-      "static/chunks/main-app-7ae61bd9d010cccc.js",
-      "static/chunks/bc9e92e6-9738442716b2b157.js",
-      "static/chunks/75187cb6-add73f3f34f77d65.js",
-      "static/chunks/9352-c5ce2d19c56f338c.js",
-      "static/chunks/5100-ee32378461bf9c84.js",
-      "static/chunks/4602-57cfb33bd15e6e1b.js",
-      "static/chunks/1345-bf5f40a98d9e774c.js",
-      "static/chunks/3067-3ae94fe5b488f8df.js",
-      "static/chunks/5388-43da08617b540b86.js",
-      "static/chunks/7649-d07e5656bf99e3a3.js",
-      "static/chunks/9331-faaa57f88c09f482.js",
-      "static/chunks/8226-194a349c73bd4228.js",
-      "static/chunks/app/customer/dashboard/messages/page-151c586e67e0771c.js"
-    ],
     "/customer/dashboard/events/page": [
       "static/chunks/webpack-4f991751f9ac3637.js",
       "static/chunks/4bd1b696-fe271156a4671027.js",
@@ -439,6 +421,24 @@
       "static/chunks/3049-66374ccbe1ae75a8.js",
       "static/chunks/8226-194a349c73bd4228.js",
       "static/chunks/app/customer/dashboard/events/page-5bd44b22e07fbff4.js"
+    ],
+    "/customer/dashboard/messages/page": [
+      "static/chunks/webpack-4f991751f9ac3637.js",
+      "static/chunks/4bd1b696-fe271156a4671027.js",
+      "static/chunks/1684-83cdb082719a2d98.js",
+      "static/chunks/main-app-7ae61bd9d010cccc.js",
+      "static/chunks/bc9e92e6-9738442716b2b157.js",
+      "static/chunks/75187cb6-add73f3f34f77d65.js",
+      "static/chunks/9352-c5ce2d19c56f338c.js",
+      "static/chunks/5100-ee32378461bf9c84.js",
+      "static/chunks/4602-57cfb33bd15e6e1b.js",
+      "static/chunks/1345-bf5f40a98d9e774c.js",
+      "static/chunks/3067-3ae94fe5b488f8df.js",
+      "static/chunks/5388-43da08617b540b86.js",
+      "static/chunks/7649-d07e5656bf99e3a3.js",
+      "static/chunks/9331-faaa57f88c09f482.js",
+      "static/chunks/8226-194a349c73bd4228.js",
+      "static/chunks/app/customer/dashboard/messages/page-151c586e67e0771c.js"
     ],
     "/customer/dashboard/page": [
       "static/chunks/webpack-4f991751f9ac3637.js",

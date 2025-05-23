@@ -25,7 +25,7 @@ const chefNavItems: NavItem[] = [
   { href: '/chef/dashboard/profile', label: 'My Profile', icon: <UserCircle /> },
   { href: '/chef/dashboard/requests', label: 'Requests', icon: <MessageSquare /> },
   { href: '/chef/dashboard/calendar', label: 'Calendar & Events', icon: <CalendarDays /> },
-  { href: '/wall', label: 'The Chef\'s Wall', icon: <LayoutGrid /> },
+  { href: '/src/app/wall/page', label: 'The Chef\'s Wall', icon: <LayoutGrid /> },
   { href: '/chef/dashboard/menus', label: 'Menus', icon: <NotebookText /> },
   { href: '/chef/dashboard/shopping-list', label: 'Shopping List', icon: <ShoppingBag /> },
   { href: '/chef/dashboard/chefs', label: 'Chef Directory', icon: <Users2 /> },

@@ -14,8 +14,8 @@
   "/wall/page": "/wall",
   "/admin/page": "/admin",
   "/chef/dashboard/calendar/page": "/chef/dashboard/calendar",
-  "/chef/dashboard/collaborations/page": "/chef/dashboard/collaborations",
   "/chef/dashboard/chefs/page": "/chef/dashboard/chefs",
+  "/chef/dashboard/collaborations/page": "/chef/dashboard/collaborations",
   "/chef/dashboard/menus/page": "/chef/dashboard/menus",
   "/chef/dashboard/page": "/chef/dashboard",
   "/chef/dashboard/profile/page": "/chef/dashboard/profile",
@@ -23,8 +23,8 @@
   "/chef/dashboard/requests/page": "/chef/dashboard/requests",
   "/chef/dashboard/shopping-list/page": "/chef/dashboard/shopping-list",
   "/chef/dashboard/wall/page": "/chef/dashboard/wall",
-  "/customer/dashboard/messages/page": "/customer/dashboard/messages",
   "/customer/dashboard/events/page": "/customer/dashboard/events",
+  "/customer/dashboard/messages/page": "/customer/dashboard/messages",
   "/customer/dashboard/page": "/customer/dashboard",
   "/customer/dashboard/profile/page": "/customer/dashboard/profile"
 }
