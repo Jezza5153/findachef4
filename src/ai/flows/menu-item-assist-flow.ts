@@ -1,19 +1,10 @@
-
 'use server';
-/**
- * @fileOverview Provides AI assistance for refining menu item descriptions.
- *
- * - assistMenuItem - A function that suggests enhancements for a menu item description.
- * - MenuItemAssistInput - The input type for the assistMenuItem function.
- * - MenuItemAssistOutput - The return type for the assistMenuItem function.
- */
-
-import {ai} from '@/ai/genkit';
-import {z} from 'genkit';
+import { ai } from '@/ai/genkit';
+import { z } from 'genkit';
 
 const MenuItemAssistInputSchema = z.object({
   menuTitle: z.string().describe('The title of the menu item.'),
-  currentDescription: z.string().max(80).optional().describe('The current description of the menu item (if any).'),
+  currentDescription: z.string().max(200).optional().describe('The current description of the menu item (if any).'), // Increased to 200
   cuisine: z.string().describe('The cuisine type of the menu item.'),
   keyIngredients: z.string().max(80).optional().describe('Optional: Comma-separated key ingredients to highlight or consider.'),
 });
@@ -25,13 +16,22 @@ const MenuItemAssistOutputSchema = z.object({
 export type MenuItemAssistOutput = z.infer<typeof MenuItemAssistOutputSchema>;
 
 export async function assistMenuItem(input: MenuItemAssistInput): Promise<MenuItemAssistOutput> {
-  return menuItemAssistFlow(input);
+  try {
+    return await menuItemAssistFlow(input);
+  } catch (err: any) {
+    // Error is logged for dev/debugging purposes
+    console.error('[assistMenuItem] AI error:', err);
+    return {
+      suggestedDescription:
+        "Sorry, we couldn't generate a suggestion at this time. Please try again, or rephrase your menu title or cuisine.",
+    };
+  }
 }
 
 const prompt = ai.definePrompt({
   name: 'menuItemAssistPrompt',
-  input: {schema: MenuItemAssistInputSchema},
-  output: {schema: MenuItemAssistOutputSchema},
+  input: { schema: MenuItemAssistInputSchema },
+  output: { schema: MenuItemAssistOutputSchema },
   prompt: `You are a creative culinary writer and menu consultant.
 A chef needs help refining the description for their menu item.
 
@@ -60,7 +60,7 @@ const menuItemAssistFlow = ai.defineFlow(
     outputSchema: MenuItemAssistOutputSchema,
   },
   async input => {
-    const {output} = await prompt(input);
+    const { output } = await prompt(input);
     return output!;
   }
 );

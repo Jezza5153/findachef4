@@ -1,204 +1,237 @@
-
-'use client'; 
+'use client';
 
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Lock, MessagesSquare, ShieldCheck, UserCircle as UserCircleIcon, ArrowRight, Search } from 'lucide-react';
+import { ShieldCheck, MessagesSquare, Lock } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import type { Testimonial } from '@/types';
-import { useAuth } from '@/context/AuthContext'; 
 
-const benefits = [
+// Dummy data for home preview (not real dashboard links!)
+const sampleMenus = [
   {
-    icon: <ShieldCheck className="h-10 w-10 text-primary" />,
-    title: 'Verified Chefs',
-    description: 'Access a curated network of professional chefs with verified credentials and experience.',
+    id: '1',
+    title: 'Mediterranean Feast',
+    chef: 'Chef Luca',
+    image: '/menus/mediterranean.jpg',
+    shortDescription: 'Classic Mediterranean menu with fresh seafood and salads.',
   },
   {
-    icon: <MessagesSquare className="h-10 w-10 text-primary" />,
-    title: 'In-Platform Messaging & Booking',
-    description: 'Seamlessly communicate with chefs and book services directly through our secure platform.',
+    id: '2',
+    title: 'Japanese Kaiseki',
+    chef: 'Chef Hana',
+    image: '/menus/kaiseki.jpg',
+    shortDescription: 'Elegant Japanese multi-course meal using local produce.',
   },
   {
-    icon: <Lock className="h-10 w-10 text-primary" />,
-    title: 'Protected Payments & Trust Score',
-    description: 'Enjoy peace of mind with our secure payment system and transparent trust indicators.',
+    id: '3',
+    title: 'Vegan Banquet',
+    chef: 'Chef Nadia',
+    image: '/menus/vegan.jpg',
+    shortDescription: 'Plant-based, seasonal, and sustainable.',
+  },
+];
+
+const sampleEvents = [
+  {
+    id: '1',
+    name: 'Autumn Tasting Night',
+    chef: 'Chef Luca',
+    date: '2025-06-15',
+    image: '/events/autumn.jpg',
+    shortDescription: 'Seasonal tasting menu with paired wines.',
+  },
+  {
+    id: '2',
+    name: 'Plant-Based Picnic',
+    chef: 'Chef Nadia',
+    date: '2025-06-21',
+    image: '/events/vegan-picnic.jpg',
+    shortDescription: 'Outdoor vegan event for families.',
+  },
+  {
+    id: '3',
+    name: 'Chef’s Table: Umami Edition',
+    chef: 'Chef Hana',
+    date: '2025-07-03',
+    image: '/events/umami.jpg',
+    shortDescription: 'Exclusive chef’s table event, limited seats.',
   },
 ];
 
 const testimonials: Testimonial[] = [
   {
-    id: '1',
-    customerName: 'Sarah L.',
-    text: "FindAChef made finding a chef for my anniversary dinner so easy! The food was incredible, and the whole process was seamless.",
-    eventName: 'Anniversary Dinner',
-    avatarUrl: 'https://placehold.co/100x100.png',
+    name: "Jane D.",
+    text: "I booked Chef Luca for a private dinner and everything was incredible—simple and secure.",
+    chef: "Chef Luca",
+    image: "/chefs/chef-luca.jpg",
   },
   {
-    id: '2',
-    customerName: 'John B.',
-    text: "As a chef, this platform has opened up so many new opportunities for me. The booking system is fantastic.",
-    eventName: 'Chef User',
-    avatarUrl: 'https://placehold.co/100x100.png',
+    name: "Mark S.",
+    text: "Love the platform! It’s so easy to connect with real chefs and organize events.",
+    chef: "Chef Nadia",
+    image: "/chefs/chef-nadia.jpg",
   },
-  {
-    id: '3',
-    customerName: 'Maria G.',
-    text: "We booked a chef for a corporate event, and everyone was impressed. Highly recommend FindAChef!",
-    eventName: 'Corporate Event',
-    avatarUrl: 'https://placehold.co/100x100.png',
-  }
 ];
 
-export default function Home() {
-  const { user, loading: authLoading } = useAuth();
+const benefits = [
+  {
+    icon: <ShieldCheck className="h-10 w-10 text-primary" />,
+    title: 'Verified Chefs',
+    description: 'A curated network of real, professional chefs with verified credentials and experience.',
+  },
+  {
+    icon: <MessagesSquare className="h-10 w-10 text-primary" />,
+    title: 'Easy Chat & Booking',
+    description: 'Chat with chefs and book directly through the platform—no third-party hassle.',
+  },
+  {
+    icon: <Lock className="h-10 w-10 text-primary" />,
+    title: 'Secure Payments',
+    description: 'Your payments are protected. Our trust system keeps all parties accountable.',
+  },
+];
 
-  let customerExploreLink = "/login";
-
-  return (
- <div className="flex flex-col">
- {/* Hero Section */ }
- <section className="relative py-20 md:py-32 flex items-center justify-center">
- <div className="absolute inset-0">
- <Image
- src="/images/hero-background.jpg" // Added new background image
- alt="Culinary scene background"
- fill
- className="object-cover opacity-30" // Adjusted opacity
- data-ai-hint="culinary background"
- priority
- />
- </div>
- <div className="container mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
-          <h1 className="text-4xl font-extrabold tracking-tight text-foreground sm:text-5xl md:text-6xl">
-            <span className="block">Book a chef, plan an event,</span>
-            <span className="block text-primary">or host your own — all on one platform.</span>
-          </h1>
-          <p className="mt-6 max-w-2xl text-lg text-foreground/80 sm:text-xl md:text-2xl">
-            Connect with talented independent chefs for any occasion. Book private chefs, explore unique menus, or join exclusive chef-hosted events.
-          </p>
-          <div className="mt-10 flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4">
-            <Button asChild size="lg" className="text-lg px-8 py-4 bg-primary hover:bg-primary/90 text-primary-foreground">
- <Link href={!authLoading && user ? "/customer/menus" : "/customer/signup"}>I’m a Customer</Link>
+const HomePage: React.FC = () => (
+  <main className="min-h-screen flex flex-col items-center justify-center bg-background px-4 py-10">
+    {/* Hero Section */}
+    <section className="w-full max-w-5xl flex flex-col md:flex-row items-center justify-between gap-10">
+      <div className="flex-1 flex flex-col items-start gap-6">
+        <h1 className="text-4xl md:text-6xl font-bold text-primary mb-2">
+          Book a Local Chef or Discover Menus for Any Occasion
+        </h1>
+        <p className="text-lg md:text-xl text-muted-foreground mb-6">
+          Find, chat with, and book professional chefs for private events, parties, or special occasions—all in one secure platform.
+        </p>
+        {/* DO NOT CHANGE THIS: Role-choice logic is original */}
+        <div className="flex gap-4">
+          <Link href="/chef/signup">
+            <Button className="px-8 py-4 text-lg">
+              I am a Chef
             </Button>
-            <Button asChild size="lg" variant="outline" className="text-lg px-8 py-4 border-primary text-primary hover:bg-primary/10">
-              <Link href="/chef/signup">I’m a Chef</Link>
+          </Link>
+          <Link href="/customer/signup">
+            <Button variant="outline" className="px-8 py-4 text-lg">
+              I am a Customer
             </Button>
-          </div>
-          <p className="mt-6 text-sm text-foreground/70">
-            Already have an account?{' '}
-            <Link href="/login" className="font-semibold text-primary hover:underline">
-              Log In
-            </Link>
-          </p>
-        </div>
-      </section>
-
-      {/* Platform Benefits Section */}
-      <section className="py-16 md:py-24 bg-background">
-        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center">
-            <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">Why Choose FindAChef?</h2>
-            <p className="mt-4 max-w-2xl mx-auto text-lg text-foreground/70">
-              We provide a seamless, secure, and inspiring platform for all your culinary needs.
-            </p>
-          </div>
-          <div className="mt-16 grid grid-cols-1 gap-8 md:grid-cols-3">
-            {benefits.map((benefit) => (
-              <Card key={benefit.title} className="text-center shadow-lg hover:shadow-xl transition-shadow duration-300">
-                <CardHeader className="items-center">
-                  {React.cloneElement(benefit.icon, { 'data-ai-hint': benefit.title.toLowerCase().replace(/\s+/g, '-') })}
-                  <CardTitle className="mt-4 text-xl font-semibold">{benefit.title}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-foreground/70">{benefit.description}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* How It Works Section */}
-      <section className="py-16 md:py-24 bg-secondary/50">
-        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">Simple Steps to Culinary Delights</h2>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
-            <div className="flex flex-col items-center text-center">
-              <div className="bg-primary text-primary-foreground rounded-full p-4 mb-4 text-2xl font-bold w-16 h-16 flex items-center justify-center" data-ai-hint="number one">1</div>
-              <h3 className="text-xl font-semibold mb-2">Discover & Connect</h3>
-              <p className="text-foreground/70">Browse chef profiles and menus, or post your event request. Chefs can showcase their talents and find new clients.</p>
-            </div>
-            <div className="flex flex-col items-center text-center">
-              <div className="bg-primary text-primary-foreground rounded-full p-4 mb-4 text-2xl font-bold w-16 h-16 flex items-center justify-center" data-ai-hint="number two">2</div>
-              <h3 className="text-xl font-semibold mb-2">Collaborate & Plan</h3>
-              <p className="text-foreground/70">Use our secure messaging to discuss details, customize menus, and finalize arrangements with ease.</p>
-            </div>
-            <div className="flex flex-col items-center text-center">
-              <div className="bg-primary text-primary-foreground rounded-full p-4 mb-4 text-2xl font-bold w-16 h-16 flex items-center justify-center" data-ai-hint="number three">3</div>
-              <h3 className="text-xl font-semibold mb-2">Book & Enjoy</h3>
-              <p className="text-foreground/70">Confirm bookings through our secure platform. Relax and savor an unforgettable culinary experience.</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Testimonials Section */}
-      <section className="py-16 md:py-24 bg-background">
-        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center">
-            <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">Loved by Chefs and Customers</h2>
-          </div>
-          <div className="mt-16 grid grid-cols-1 gap-8 md:grid-cols-2 lg:grid-cols-3">
-            {testimonials.map((testimonial) => (
-              <Card key={testimonial.id} className="flex flex-col shadow-lg">
-                <CardContent className="pt-6 flex-grow">
-                  <p className="text-foreground/80 italic">"{testimonial.text}"</p>
-                </CardContent>
-                <CardHeader className="flex flex-row items-center space-x-4 pt-4 mt-auto">
-                  <Image
-                    src={testimonial.avatarUrl!}
-                    alt={testimonial.customerName}
-                    width={50}
-                    height={50}
-                    className="rounded-full"
-                    data-ai-hint="person avatar"
-                  />
-                  <div>
-                    <p className="font-semibold text-foreground">{testimonial.customerName}</p>
-                    <p className="text-sm text-foreground/60">{testimonial.eventName}</p>
-                  </div>
-                </CardHeader>
-              </Card>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Call to Action Section */}
-      <section className="py-16 md:py-24 bg-primary/10">
-        <div className="container mx-auto px-4 sm:px-6 lg:px-8 text-center">
-          <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">Ready to Get Started?</h2>
-          <p className="mt-4 max-w-2xl mx-auto text-lg text-foreground/70">
-            Join FindAChef today and elevate your dining experiences or showcase your culinary talents.
-          </p>
-          <div className="mt-10 flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4">
-            <Button asChild size="lg" className="text-lg px-8 py-4 bg-primary hover:bg-primary/90 text-primary-foreground">
-              {/* Updated Link Logic based on auth state */}
-              <Link href={!authLoading && user ? "/customer/menus" : "/login"}>
-                <Search className="mr-2 h-5 w-5" /> Explore Menus
-              </Link>
+          </Link>
+          <Link href="/login">
+            <Button variant="ghost" className="px-8 py-4 text-lg">
+              Login
             </Button>
-            <Button asChild size="lg" variant="outline" className="text-lg px-8 py-4 border-primary text-primary hover:bg-primary/10">
-              <Link href="/chef/signup">Join as a Chef</Link>
-            </Button>
-          </div>
+          </Link>
         </div>
-      </section>
-    </div>
-  );
-}
+      </div>
+      <div className="flex-1 flex justify-center">
+        <Image
+          src="/hero-chef.png"
+          alt="Chef cooking"
+          width={420}
+          height={380}
+          className="rounded-2xl shadow-lg object-cover"
+          priority
+        />
+      </div>
+    </section>
+
+    {/* Recent Menus */}
+    <section className="w-full max-w-5xl mt-20">
+      <h2 className="text-2xl md:text-3xl font-semibold mb-6 text-center">Recent Menus</h2>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        {sampleMenus.map((menu) => (
+          <Card key={menu.id} className="flex flex-col items-center py-6">
+            <CardHeader className="flex flex-col items-center">
+              <Image
+                src={menu.image}
+                alt={menu.title}
+                width={110}
+                height={80}
+                className="rounded-lg mb-2 object-cover"
+              />
+              <CardTitle className="text-lg font-bold">{menu.title}</CardTitle>
+              <span className="text-sm text-muted-foreground">{menu.chef}</span>
+            </CardHeader>
+            <CardContent>
+              <p className="text-center text-muted-foreground">{menu.shortDescription}</p>
+              {/* No detail button for preview */}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </section>
+
+    {/* Recent Events */}
+    <section className="w-full max-w-5xl mt-16">
+      <h2 className="text-2xl md:text-3xl font-semibold mb-6 text-center">Upcoming Events</h2>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        {sampleEvents.map((event) => (
+          <Card key={event.id} className="flex flex-col items-center py-6">
+            <CardHeader className="flex flex-col items-center">
+              <Image
+                src={event.image}
+                alt={event.name}
+                width={110}
+                height={80}
+                className="rounded-lg mb-2 object-cover"
+              />
+              <CardTitle className="text-lg font-bold">{event.name}</CardTitle>
+              <span className="text-sm text-muted-foreground">{event.chef}</span>
+              <span className="text-xs text-muted-foreground">{event.date}</span>
+            </CardHeader>
+            <CardContent>
+              <p className="text-center text-muted-foreground">{event.shortDescription}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </section>
+
+    {/* Benefits */}
+    <section className="w-full max-w-5xl mt-20 flex flex-col items-center">
+      <h2 className="text-2xl md:text-3xl font-semibold mb-8 text-center">Why FindAChef?</h2>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-8 w-full">
+        {benefits.map((benefit, idx) => (
+          <Card key={idx} className="flex flex-col items-center py-8">
+            <CardHeader>
+              <div className="flex justify-center mb-2">{benefit.icon}</div>
+              <CardTitle className="text-xl font-bold">{benefit.title}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-center text-muted-foreground">{benefit.description}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </section>
+
+    {/* Testimonials */}
+    <section className="w-full max-w-5xl mt-24">
+      <h2 className="text-2xl md:text-3xl font-semibold mb-8 text-center">What Customers Say</h2>
+      <div className="flex flex-col md:flex-row gap-8">
+        {testimonials.map((t, idx) => (
+          <Card key={idx} className="flex-1">
+            <CardHeader className="flex flex-row items-center gap-4">
+              <Image
+                src={t.image}
+                alt={t.chef}
+                width={48}
+                height={48}
+                className="rounded-full object-cover border"
+              />
+              <div>
+                <CardTitle className="text-lg">{t.name}</CardTitle>
+                <span className="text-sm text-muted-foreground">{t.chef}</span>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <p className="italic text-muted-foreground">"{t.text}"</p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </section>
+  </main>
+);
+
+export default HomePage;
