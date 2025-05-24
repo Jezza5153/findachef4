@@ -1,4 +1,4 @@
 {
-  "/page": "app/page.js",
-  "/chef/signup/page": "app/chef/signup/page.js"
+  "/_not-found/page": "app/_not-found/page.js",
+  "/page": "app/page.js"
 }

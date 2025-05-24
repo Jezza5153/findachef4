@@ -88,7 +88,7 @@ export default function WallPage() {
   useEffect(() => {
     if (!user) return;
     setIsLoading(true);
-    const q = query(collection(db, "customerWallRequests"), orderBy("createdAt", "desc"));
+    const q = query(collection(db, "customerRequests"), orderBy("createdAt", "desc"));
     const unsub = onSnapshot(q, (snap) => {
       setCustomerRequests(snap.docs.map(doc => ({
         id: doc.id, ...doc.data(),
@@ -152,7 +152,7 @@ export default function WallPage() {
   async function fetchComments(postId: string) {
     setIsCommentLoading(true);
     try {
-      const q = query(collection(db, `wallPosts/${postId}/comments`), orderBy('createdAt', 'asc'));
+      const q = query(collection(db, `wall/${postId}/comments`), orderBy('createdAt', 'asc'));
       const snap = await getDocs(q);
       setComments(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     } catch {
@@ -165,7 +165,7 @@ export default function WallPage() {
     if (!user || !selectedPost || !newComment.trim()) return;
     setIsCommentLoading(true);
     try {
-      await addDoc(collection(db, `wallPosts/${selectedPost.id}/comments`), {
+      await addDoc(collection(db, `wall/${selectedPost.id}/comments`), {
         userId: user.uid,
         userName: user.displayName || user.email || 'User',
         userAvatar: user.photoURL || '',
