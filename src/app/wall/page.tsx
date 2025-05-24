@@ -3,33 +3,81 @@
 import React, { useState, useEffect, useMemo, ChangeEvent } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { db } from '@/lib/firebase';
-import { collection, query, where, orderBy, onSnapshot, doc, addDoc, serverTimestamp, getDocs, writeBatch, Timestamp } from 'firebase/firestore';
+import {
+  collection, query, where, orderBy, onSnapshot, getDocs, addDoc, serverTimestamp,
+  Timestamp
+} from 'firebase/firestore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { Loader2, CalendarSearch, ChefHat, Users, DollarSign, MapPin, ListFilter, LayoutGrid, Globe, Lock, MessageSquare } from 'lucide-react';
+import { Loader2, LayoutGrid, Globe, Lock, MessageSquare, CalendarSearch, MapPin, Users, DollarSign, Info } from 'lucide-react';
 import { format } from 'date-fns';
 import Image from 'next/image';
 import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 
-// --- Type imports ---
-import type { ChefWallEvent, CustomerWallRequest, Booking, CalendarEvent, AppUserProfileContext } from '@/types';
+// --- Types ---
+import type { ChefWallEvent, CustomerWallPost, Comment as WallComment } from '@/types/wall';
 
-// --- Wall Tabs ---
+// --- Constants ---
 const WALL_TAB_BOTH = 'Both';
 const WALL_TAB_CHEF = 'Chef Wall';
 const WALL_TAB_CUSTOMER = 'Customer Wall';
-
 const TABS_CHEF = [WALL_TAB_BOTH, WALL_TAB_CHEF, WALL_TAB_CUSTOMER];
 const TABS_CUSTOMER = [WALL_TAB_CUSTOMER];
 
-// --- Main Page ---
+// --- Custom Data Fetching Hooks ---
+function useChefWallEvents(isChef: boolean, userId?: string) {
+  const [events, setEvents] = useState<ChefWallEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let q = query(collection(db, "chefWallEvents"), orderBy("eventDateTime", "asc"));
+    if (!isChef) {
+      // Customers see only public events
+      q = query(collection(db, "chefWallEvents"), where("isPublic", "==", true), orderBy("eventDateTime", "asc"));
+    }
+    const unsub = onSnapshot(q, (snap) => {
+      setEvents(snap.docs.map(doc => ({
+        id: doc.id, ...doc.data(),
+        eventDateTime: doc.data().eventDateTime instanceof Timestamp
+          ? doc.data().eventDateTime.toDate().toISOString()
+          : doc.data().eventDateTime,
+        createdAt: doc.data().createdAt?.toDate?.() || null,
+        updatedAt: doc.data().updatedAt?.toDate?.() || null,
+      }) as ChefWallEvent));
+      setLoading(false);
+    });
+    return () => unsub();
+  }, [isChef, userId]);
+
+  return { events, loading };
+}
+
+function useCustomerWallPosts() {
+  const [posts, setPosts] = useState<CustomerWallPost[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const q = query(collection(db, "customerWallPosts"), where("isPublic", "==", true), orderBy("createdAt", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      setPosts(snap.docs.map(doc => ({
+        id: doc.id, ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate?.() || null,
+        updatedAt: doc.data().updatedAt?.toDate?.() || null,
+      }) as CustomerWallPost));
+      setLoading(false);
+    });
+    return () => unsub();
+  }, []);
+  return { posts, loading };
+}
+
+// --- Main Wall Page ---
 export default function WallPage() {
-  const { user, userProfile, isChef, isChefSubscribed, isCustomer, loading: authLoading } = useAuth();
+  const { user, userProfile, isChef, isCustomer, loading: authLoading } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
 
@@ -40,21 +88,19 @@ export default function WallPage() {
     if (isCustomer) setActiveTab(WALL_TAB_CUSTOMER);
   }, [isChef, isCustomer]);
 
+  // --- Data Fetching (custom hooks) ---
+  const { events: chefEvents, loading: loadingChef } = useChefWallEvents(isChef, user?.uid);
+  const { posts: customerWallPosts, loading: loadingCustomer } = useCustomerWallPosts();
+
   // --- State ---
-  const [chefEvents, setChefEvents] = useState<ChefWallEvent[]>([]);
-  const [customerRequests, setCustomerRequests] = useState<CustomerWallRequest[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedPost, setSelectedPost] = useState<ChefWallEvent | CustomerWallRequest | null>(null);
+  const [selectedPost, setSelectedPost] = useState<ChefWallEvent | CustomerWallPost | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
   // --- Comments logic ---
-  const [comments, setComments] = useState<any[]>([]);
+  const [comments, setComments] = useState<WallComment[]>([]);
   const [newComment, setNewComment] = useState('');
   const [isCommentLoading, setIsCommentLoading] = useState(false);
-
-  // --- Book event logic (tickets) ---
-  const [isBooking, setIsBooking] = useState(false);
 
   // --- Permissions: Only logged-in users ---
   useEffect(() => {
@@ -62,43 +108,6 @@ export default function WallPage() {
       router.replace('/login?redirect=/wall');
     }
   }, [authLoading, user, router]);
-
-  // --- Fetch chef events (public only for customer, all for chef) ---
-  useEffect(() => {
-    if (!user) return;
-    setIsLoading(true);
-    let q = query(collection(db, "chefWallEvents"), orderBy("eventDateTime", "asc"));
-    if (!isChef) {
-      // Only show public for customers
-      q = query(collection(db, "chefWallEvents"), where("isPublic", "==", true), orderBy("eventDateTime", "asc"));
-    }
-    const unsub = onSnapshot(q, (snap) => {
-      setChefEvents(snap.docs.map(doc => ({
-        id: doc.id, ...doc.data(),
-        eventDateTime: doc.data().eventDateTime instanceof Timestamp ? doc.data().eventDateTime.toDate().toISOString() : doc.data().eventDateTime,
-        createdAt: doc.data().createdAt?.toDate?.() || null,
-        updatedAt: doc.data().updatedAt?.toDate?.() || null,
-      }) as ChefWallEvent));
-      setIsLoading(false);
-    });
-    return () => unsub();
-  }, [user, isChef]);
-
-  // --- Fetch customer requests (public only, could also be restricted by chefId or customerId if needed) ---
-  useEffect(() => {
-    if (!user) return;
-    setIsLoading(true);
-    const q = query(collection(db, "customerRequests"), orderBy("createdAt", "desc"));
-    const unsub = onSnapshot(q, (snap) => {
-      setCustomerRequests(snap.docs.map(doc => ({
-        id: doc.id, ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate?.() || null,
-        updatedAt: doc.data().updatedAt?.toDate?.() || null,
-      }) as CustomerWallRequest));
-      setIsLoading(false);
-    });
-    return () => unsub();
-  }, [user]);
 
   // --- Filtered content based on search and tab ---
   const filteredChefEvents = useMemo(() => {
@@ -114,18 +123,18 @@ export default function WallPage() {
     });
   }, [chefEvents, searchTerm]);
 
-  const filteredCustomerRequests = useMemo(() => {
-    return customerRequests.filter(req => {
+  const filteredCustomerPosts = useMemo(() => {
+    return customerWallPosts.filter(post => {
       const s = searchTerm.toLowerCase();
       return (
-        req.title?.toLowerCase().includes(s) ||
-        req.description?.toLowerCase().includes(s) ||
-        req.location?.toLowerCase().includes(s) ||
-        (req.customerName && req.customerName.toLowerCase().includes(s)) ||
-        (req.tags && req.tags.some((tag: string) => tag.toLowerCase().includes(s)))
+        post.title?.toLowerCase().includes(s) ||
+        post.description?.toLowerCase().includes(s) ||
+        post.location?.toLowerCase().includes(s) ||
+        (post.customerName && post.customerName.toLowerCase().includes(s)) ||
+        (post.tags && post.tags.some((tag: string) => tag.toLowerCase().includes(s)))
       );
     });
-  }, [customerRequests, searchTerm]);
+  }, [customerWallPosts, searchTerm]);
 
   // --- Format date for display ---
   function formatEventDateTimeForDisplay(dateTimeString: string | undefined) {
@@ -140,21 +149,23 @@ export default function WallPage() {
   }
 
   // --- View details handler ---
-  function handleViewDetails(post: ChefWallEvent | CustomerWallRequest) {
+  function handleViewDetails(post: ChefWallEvent | CustomerWallPost) {
     setSelectedPost(post);
     setIsDetailsOpen(true);
-    if ('id' in post) {
-      fetchComments(post.id);
-    }
+    fetchComments(post);
   }
 
   // --- Comments fetch/post ---
-  async function fetchComments(postId: string) {
+  async function fetchComments(post: ChefWallEvent | CustomerWallPost) {
     setIsCommentLoading(true);
     try {
-      const q = query(collection(db, `wall/${postId}/comments`), orderBy('createdAt', 'asc'));
+      const collectionPath =
+        'pricePerPerson' in post
+          ? `chefWallEvents/${post.id}/comments`
+          : `customerWallPosts/${post.id}/comments`;
+      const q = query(collection(db, collectionPath), orderBy('createdAt', 'asc'));
       const snap = await getDocs(q);
-      setComments(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      setComments(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as WallComment)));
     } catch {
       setComments([]);
     } finally {
@@ -165,7 +176,11 @@ export default function WallPage() {
     if (!user || !selectedPost || !newComment.trim()) return;
     setIsCommentLoading(true);
     try {
-      await addDoc(collection(db, `wall/${selectedPost.id}/comments`), {
+      const collectionPath =
+        'pricePerPerson' in selectedPost
+          ? `chefWallEvents/${selectedPost.id}/comments`
+          : `customerWallPosts/${selectedPost.id}/comments`;
+      await addDoc(collection(db, collectionPath), {
         userId: user.uid,
         userName: user.displayName || user.email || 'User',
         userAvatar: user.photoURL || '',
@@ -173,73 +188,11 @@ export default function WallPage() {
         createdAt: serverTimestamp()
       });
       setNewComment('');
-      fetchComments(selectedPost.id!);
+      fetchComments(selectedPost);
     } catch (e) {
       toast({ title: "Error", description: "Failed to post comment.", variant: "destructive" });
     } finally {
       setIsCommentLoading(false);
-    }
-  }
-
-  // --- Book event (tickets, only for chef events) ---
-  async function handleBookEvent(event: ChefWallEvent) {
-    if (!user) {
-      toast({ title: "Login Required", description: "Please log in to book this event.", variant: "destructive" });
-      router.push('/login?redirect=/wall');
-      return;
-    }
-    setIsBooking(true);
-    try {
-      const bookingDate = event.eventDateTime instanceof Timestamp
-        ? event.eventDateTime
-        : Timestamp.fromDate(new Date(event.eventDateTime));
-
-      const newBooking: Omit<Booking, 'id'> = {
-        customerId: user.uid,
-        chefId: event.chefId,
-        chefName: event.chefName,
-        chefAvatarUrl: event.chefAvatarUrl,
-        eventTitle: event.title,
-        eventDate: bookingDate,
-        pax: 1, // one ticket per purchase (update if you want multi-ticket)
-        totalPrice: event.pricePerPerson,
-        pricePerHead: event.pricePerPerson,
-        status: 'confirmed',
-        menuTitle: `Event: ${event.title}`,
-        location: event.location,
-        chefWallEventId: event.id,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      };
-
-      const bookingRef = doc(collection(db, "bookings"));
-      const chefCalRef = doc(db, `users/${event.chefId}/calendarEvents`, bookingRef.id);
-
-      const batch = writeBatch(db);
-      batch.set(bookingRef, newBooking);
-      batch.set(chefCalRef, {
-        id: bookingRef.id,
-        chefId: event.chefId,
-        date: bookingDate,
-        title: `Booking: ${event.title}`,
-        customerName: user.displayName || "Customer",
-        pax: 1,
-        menuName: newBooking.menuTitle,
-        pricePerHead: newBooking.pricePerHead || 0,
-        location: newBooking.location,
-        notes: `Booked from Chef's Wall. Wall Event ID: ${event.id}`,
-        status: 'Confirmed',
-        isWallEvent: true,
-        bookingId: bookingRef.id,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
-      await batch.commit();
-      toast({ title: "Event Booked!", description: `You've successfully booked "${event.title}".` });
-    } catch (e) {
-      toast({ title: "Booking Failed", description: "Could not book the event. Please try again.", variant: "destructive" });
-    } finally {
-      setIsBooking(false);
     }
   }
 
@@ -262,7 +215,7 @@ export default function WallPage() {
   }
 
   // --- UI: Wall Card ---
-  function WallCard({ post }: { post: ChefWallEvent | CustomerWallRequest }) {
+  function WallCard({ post }: { post: ChefWallEvent | CustomerWallPost }) {
     const isChefEvent = 'pricePerPerson' in post;
     return (
       <Card className="shadow-lg flex flex-col overflow-hidden hover:shadow-xl transition-shadow duration-200">
@@ -295,14 +248,14 @@ export default function WallPage() {
           <div className="text-xs text-muted-foreground">
             {isChefEvent
               ? `Posted by: ${(post as ChefWallEvent).chefName}`
-              : `Customer: ${(post as CustomerWallRequest).customerName}`}
+              : `Customer: ${(post as CustomerWallPost).customerName}`}
           </div>
         </CardHeader>
         <CardContent className="space-y-2 text-sm flex-grow pt-2">
           <p className="line-clamp-3 text-foreground/80">{post.description}</p>
           <div className="flex items-center">
             <CalendarSearch className="mr-2 h-4 w-4 text-primary" />
-            {formatEventDateTimeForDisplay(isChefEvent ? (post as ChefWallEvent).eventDateTime : (post as CustomerWallRequest).eventDateTime)}
+            {formatEventDateTimeForDisplay(isChefEvent ? (post as ChefWallEvent).eventDateTime : (post as CustomerWallPost).eventDateTime)}
           </div>
           <div className="flex items-center"><MapPin className="mr-2 h-4 w-4 text-primary" /> {post.location}</div>
           {isChefEvent && (
@@ -321,19 +274,14 @@ export default function WallPage() {
           <Button variant="outline" size="sm" onClick={() => handleViewDetails(post)} className="flex-1">
             <Info className="mr-1 h-4 w-4" /> Details
           </Button>
-          {isChefEvent && (post as ChefWallEvent).isPublic && (
-            <Button variant="default" size="sm" onClick={() => handleBookEvent(post as ChefWallEvent)} disabled={isBooking} className="flex-1">
-              {isBooking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Book
-            </Button>
-          )}
+          {/* You can add "Book"/"Join" buttons here as needed */}
         </CardFooter>
       </Card>
     );
   }
 
   // --- Main render ---
-  if (authLoading || isLoading) {
+  if (authLoading || loadingChef || loadingCustomer) {
     return (
       <div className="flex justify-center items-center h-64">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -348,7 +296,7 @@ export default function WallPage() {
         <h1 className="text-4xl font-bold tracking-tight text-foreground flex items-center justify-center">
           <LayoutGrid className="mr-3 h-8 w-8 text-primary" /> FindAChef Wall
         </h1>
-        <p className="mt-2 text-foreground/70">Browse and join chef events or customer experiences.</p>
+        <p className="mt-2 text-foreground/70">Browse chef events & customer experiences. Connect, comment, and discover new opportunities.</p>
       </header>
 
       <Tabs />
@@ -382,13 +330,13 @@ export default function WallPage() {
       )}
       {(activeTab === WALL_TAB_BOTH || activeTab === WALL_TAB_CUSTOMER) && (
         <>
-          <h2 className="text-2xl font-semibold my-4">Customer Wall Requests</h2>
-          {filteredCustomerRequests.length > 0 ? (
+          <h2 className="text-2xl font-semibold my-4">Customer Wall</h2>
+          {filteredCustomerPosts.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredCustomerRequests.map(req => <WallCard key={req.id} post={req} />)}
+              {filteredCustomerPosts.map(post => <WallCard key={post.id} post={post} />)}
             </div>
           ) : (
-            <div className="text-center py-8 text-muted-foreground">No customer requests found.</div>
+            <div className="text-center py-8 text-muted-foreground">No customer wall posts found.</div>
           )}
         </>
       )}

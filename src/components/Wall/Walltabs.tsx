@@ -1,5 +1,3 @@
-// /components/Wall/WallTabs.tsx
-
 import React from "react";
 import { Button } from "@/components/ui/button";
 
@@ -12,15 +10,18 @@ interface WallTabsProps {
 }
 
 export default function WallTabs({ role, activeTab, setActiveTab }: WallTabsProps) {
-  const tabs = role === "chef"
-    ? (["Both", "Chef Wall", "Customer Wall"] as WallTab[])
-    : (["Customer Wall"] as WallTab[]);
+  const tabs: WallTab[] =
+    role === "chef"
+      ? ["Both", "Chef Wall", "Customer Wall"]
+      : ["Customer Wall"];
+
   return (
     <div className="flex gap-2 mb-6 justify-center">
       {tabs.map(tab => (
         <Button
           key={tab}
           variant={activeTab === tab ? "default" : "outline"}
+          aria-pressed={activeTab === tab}
           onClick={() => setActiveTab(tab)}
         >
           {tab}
